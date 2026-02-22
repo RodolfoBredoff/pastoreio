@@ -40,8 +40,12 @@ interface Member {
   member_type: 'participant' | 'visitor';
 }
 
-interface AbsentMemberItem extends Member {
+/** Resposta da API /api/members/absent; phone pode ser null. */
+interface AbsentMemberItem {
+  id: string;
+  full_name: string;
   phone: string | null;
+  member_type: 'participant' | 'visitor';
   consecutive_absences?: number;
 }
 
@@ -139,7 +143,7 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
 
     for (let i = 0; i < selectedMembers.length; i++) {
       const member = selectedMembers[i];
-      const url = getWhatsAppUrl(member.phone, member.full_name);
+      const url = getWhatsAppUrl(member.phone ?? '', member.full_name);
       const customUrl = url.replace(
         encodeURIComponent(`Olá ${member.full_name}! Tudo bem?`),
         encodeURIComponent(message.replace(/{nome}/g, member.full_name))
