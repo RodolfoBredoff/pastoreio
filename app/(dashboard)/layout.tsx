@@ -4,6 +4,7 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { queryOne } from '@/lib/db/postgres';
 import { OfflineIndicator } from '@/components/dashboard/offline-indicator';
 import { DashboardNav } from '@/components/dashboard/dashboard-nav';
+import { ForceChangePasswordRedirect } from '@/components/dashboard/force-change-password-redirect';
 
 export default async function DashboardLayout({
   children,
@@ -19,18 +20,19 @@ export default async function DashboardLayout({
   // Buscar informações do líder
   const leader = await getCurrentLeader();
 
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/(dashboard)/layout.tsx',message:'getCurrentLeader result',data:{leaderFound:!!leader,leaderId:leader?.id ?? null,role:leader?.role ?? null,group_id:leader?.group_id ?? null,userId:user.id},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-  // #endregion
-
   if (!leader) {
     redirect('/api/auth/clear-session?to=/login&reason=no-leader');
   }
 
-  // Coordinators have their own layout under /org
   if (leader.role === 'coordinator') {
     redirect('/org/dashboard');
   }
+
+  const userRow = await queryOne<{ must_change_password: boolean | null }>(
+    `SELECT must_change_password FROM users WHERE id = $1`,
+    [user.id]
+  );
+  const mustChangePassword = userRow?.must_change_password === true;
 
   let groupName = 'Meu Grupo';
   if (leader.group_id) {
@@ -43,6 +45,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-background" suppressHydrationWarning>
+      <ForceChangePasswordRedirect mustChangePassword={mustChangePassword} />
       {/* Mobile Header */}
       <header className="lg:hidden sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex h-14 items-center justify-between px-4">

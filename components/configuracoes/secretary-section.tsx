@@ -30,6 +30,8 @@ interface SecretarySectionProps {
   initialSecretaries: Secretary[];
 }
 
+const PASSWORD_HINT = 'Mais de 10 caracteres, uma maiúscula, uma minúscula e um número.';
+
 function AddSecretaryDialog({
   open,
   onOpenChange,
@@ -42,19 +44,33 @@ function AddSecretaryDialog({
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [generatePassword, setGeneratePassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [createdPassword, setCreatedPassword] = useState<string | null>(null);
+  const [createdSecretary, setCreatedSecretary] = useState<Secretary | null>(null);
+  const router = useRouter();
+  const [, startTransition] = useTransition();
 
   function reset() {
     setFullName('');
     setEmail('');
     setPhone('');
+    setPassword('');
+    setGeneratePassword(false);
     setError('');
+    setCreatedPassword(null);
+    setCreatedSecretary(null);
   }
 
   async function handleSubmit() {
     if (!fullName.trim() || !email.trim()) {
       setError('Nome e e-mail são obrigatórios.');
+      return;
+    }
+    if (!generatePassword && !password.trim()) {
+      setError('Defina uma senha para o primeiro acesso ou marque "Gerar senha aleatória".');
       return;
     }
     setError('');
@@ -63,10 +79,27 @@ function AddSecretaryDialog({
       const res = await fetch('/api/secretaries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ full_name: fullName, email, phone: phone || undefined }),
+        body: JSON.stringify({
+          full_name: fullName.trim(),
+          email: email.trim(),
+          phone: phone.trim() || undefined,
+          password: generatePassword ? undefined : password,
+          generate_password: generatePassword,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao criar secretário');
+      if (data.temporary_password) {
+        setCreatedPassword(data.temporary_password);
+        setCreatedSecretary({
+          id: data.id,
+          full_name: data.full_name,
+          email: data.email,
+          phone: data.phone ?? null,
+          created_at: data.created_at ?? '',
+        });
+        return;
+      }
       onCreated(data);
       onOpenChange(false);
       reset();
@@ -77,58 +110,122 @@ function AddSecretaryDialog({
     }
   }
 
+  function handleClose() {
+    if (createdSecretary) {
+      onCreated(createdSecretary);
+      startTransition(() => router.refresh());
+    }
+    onOpenChange(false);
+    reset();
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Adicionar Secretário(a)</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 py-2">
-          {error && (
-            <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">{error}</p>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor="sec-name">Nome completo *</Label>
-            <Input
-              id="sec-name"
-              placeholder="Ex: Maria Silva"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="sec-email">E-mail *</Label>
-            <Input
-              id="sec-email"
-              type="email"
-              placeholder="maria@exemplo.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              O secretário usará este e-mail para acessar o app via link mágico.
+        {createdPassword ? (
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-3">
+              Secretário(a) criado(a). Passe a senha abaixo para o primeiro acesso. Após o primeiro login, ele(a) deverá cadastrar uma nova senha.
             </p>
+            <div className="space-y-2">
+              <Label>Senha temporária (copie e envie ao secretário)</Label>
+              <div className="flex gap-2">
+                <Input readOnly value={createdPassword} className="font-mono" />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(createdPassword);
+                    alert('Senha copiada!');
+                  }}
+                >
+                  Copiar
+                </Button>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={handleClose}>
+                Fechar
+              </Button>
+            </DialogFooter>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="sec-phone">Telefone (opcional)</Label>
-            <Input
-              id="sec-phone"
-              type="tel"
-              placeholder="(11) 99999-9999"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="outline" disabled={isLoading}>Cancelar</Button>
-          </DialogClose>
-          <Button onClick={handleSubmit} isLoading={isLoading}>
-            {!isLoading && <UserPlus className="h-4 w-4" />}
-            Adicionar
-          </Button>
-        </DialogFooter>
+        ) : (
+          <>
+            <div className="space-y-4 py-2">
+              {error && (
+                <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">{error}</p>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="sec-name">Nome completo *</Label>
+                <Input
+                  id="sec-name"
+                  placeholder="Ex: Maria Silva"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sec-email">E-mail *</Label>
+                <Input
+                  id="sec-email"
+                  type="email"
+                  placeholder="maria@exemplo.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  O secretário usará este e-mail e a senha definida para o primeiro acesso.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sec-phone">Telefone (opcional)</Label>
+                <Input
+                  id="sec-phone"
+                  type="tel"
+                  placeholder="(11) 99999-9999"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="sec-generate"
+                    checked={generatePassword}
+                    onChange={(e) => setGeneratePassword(e.target.checked)}
+                  />
+                  <Label htmlFor="sec-generate" className="cursor-pointer">Gerar senha aleatória</Label>
+                </div>
+                {!generatePassword && (
+                  <>
+                    <Label htmlFor="sec-password">Senha para primeiro acesso *</Label>
+                    <Input
+                      id="sec-password"
+                      type="password"
+                      placeholder="Senha do secretário"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">{PASSWORD_HINT}</p>
+                  </>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="outline" disabled={isLoading}>Cancelar</Button>
+              </DialogClose>
+              <Button onClick={handleSubmit} disabled={isLoading}>
+                {isLoading ? 'Criando...' : 'Adicionar'}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

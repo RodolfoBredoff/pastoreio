@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireCoordinator } from '@/lib/auth/coordinator-session';
 import { query, queryMany } from '@/lib/db/postgres';
+import { validatePassword, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/auth/password-validation';
 import bcrypt from 'bcryptjs';
 
 /**
@@ -55,6 +56,16 @@ export async function POST(request: Request) {
 
     const leaderRole = role === 'secretary' ? 'secretary' : 'leader';
 
+    if (password) {
+      const validation = validatePassword(password);
+      if (!validation.valid) {
+        return NextResponse.json(
+          { error: validation.message ?? PASSWORD_REQUIREMENTS_TEXT },
+          { status: 400 }
+        );
+      }
+    }
+
     if (group_id) {
       const groupCheck = await query(
         `SELECT id FROM groups WHERE id = $1 AND organization_id = $2`,
@@ -68,11 +79,14 @@ export async function POST(request: Request) {
     const passwordHash = password ? await bcrypt.hash(password, 10) : null;
 
     const userResult = await query(
-      `INSERT INTO users (email, email_verified, password_hash)
-       VALUES ($1, TRUE, $2)
-       ON CONFLICT (email) DO UPDATE SET email_verified = TRUE
+      `INSERT INTO users (email, email_verified, password_hash, must_change_password)
+       VALUES ($1, TRUE, $2, $3)
+       ON CONFLICT (email) DO UPDATE SET
+         email_verified = TRUE,
+         password_hash = COALESCE(EXCLUDED.password_hash, users.password_hash),
+         must_change_password = CASE WHEN EXCLUDED.password_hash IS NOT NULL THEN TRUE ELSE users.must_change_password END
        RETURNING id`,
-      [email.toLowerCase().trim(), passwordHash]
+      [email.toLowerCase().trim(), passwordHash, !!passwordHash]
     );
 
     const userId = userResult.rows[0].id;

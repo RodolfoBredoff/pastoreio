@@ -13,7 +13,7 @@ import {
   DialogFooter,
   DialogClose,
 } from '@/components/ui/dialog';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, KeyRound } from 'lucide-react';
 
 interface GroupOption {
   id: string;
@@ -38,6 +38,10 @@ export function AdminLeaderActions({
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [resetPwOpen, setResetPwOpen] = useState(false);
+  const [resetPwLoading, setResetPwLoading] = useState(false);
+  const [resetPwError, setResetPwError] = useState('');
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
 
   // Formulário de edição
   const [fullName, setFullName] = useState(leader.full_name);
@@ -85,8 +89,38 @@ export function AdminLeaderActions({
     }
   };
 
+  const handleResetPassword = async () => {
+    setResetPwError('');
+    setResetPwLoading(true);
+    setTemporaryPassword(null);
+    try {
+      const res = await fetch(`/api/admin/leaders/${leader.id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao redefinir senha');
+      setTemporaryPassword(data.temporary_password ?? null);
+      router.refresh();
+    } catch (e) {
+      setResetPwError(e instanceof Error ? e.message : 'Erro ao redefinir senha');
+    } finally {
+      setResetPwLoading(false);
+    }
+  };
+
   return (
     <div className="flex items-center gap-1">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        onClick={() => { setResetPwOpen(true); setTemporaryPassword(null); setResetPwError(''); }}
+        title="Redefinir senha"
+      >
+        <KeyRound className="h-3.5 w-3.5" />
+      </Button>
       {/* Botão Editar */}
       <Button
         variant="ghost"
@@ -169,6 +203,49 @@ export function AdminLeaderActions({
               {loading ? 'Salvando...' : 'Salvar'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Redefinir senha */}
+      <Dialog open={resetPwOpen} onOpenChange={(v) => { setResetPwOpen(v); if (!v) setTemporaryPassword(null); setResetPwError(''); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Redefinir senha</DialogTitle>
+          </DialogHeader>
+          {temporaryPassword ? (
+            <div className="space-y-3">
+              <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-3">
+                Senha redefinida. O usuário deverá alterá-la no próximo login.
+              </p>
+              <div className="space-y-2">
+                <Label>Senha temporária (passe ao usuário)</Label>
+                <div className="flex gap-2">
+                  <Input readOnly value={temporaryPassword} className="font-mono" />
+                  <Button type="button" variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(temporaryPassword); alert('Copiado!'); }}>
+                    Copiar
+                  </Button>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button onClick={() => setResetPwOpen(false)}>Fechar</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Será gerada uma nova senha para <strong>{leader.full_name}</strong>. O usuário precisará alterá-la no próximo login.
+              </p>
+              {resetPwError && <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">{resetPwError}</p>}
+              <DialogFooter>
+                <DialogClose asChild>
+                  <Button variant="outline" disabled={resetPwLoading}>Cancelar</Button>
+                </DialogClose>
+                <Button onClick={handleResetPassword} disabled={resetPwLoading}>
+                  {resetPwLoading ? 'Redefinindo...' : 'Gerar nova senha'}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

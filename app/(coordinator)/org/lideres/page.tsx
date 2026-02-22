@@ -15,7 +15,7 @@ import {
   DialogClose,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Users, UserPlus, Pencil, Trash2 } from 'lucide-react';
+import { Users, UserPlus, Pencil, Trash2, KeyRound } from 'lucide-react';
 
 interface LeaderRow {
   id: string;
@@ -104,7 +104,9 @@ function AddLeaderDialog({ groups, onSave }: { groups: GroupOption[]; onSave: ()
           <div className="space-y-2">
             <Label>Senha de acesso (opcional)</Label>
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Para acesso via senha" />
-            <p className="text-xs text-muted-foreground">O líder pode fazer login via magic link sem senha.</p>
+            <p className="text-xs text-muted-foreground">
+              Se informada: mais de 10 caracteres, uma maiúscula, uma minúscula e um número. O usuário deverá trocá-la no primeiro login.
+            </p>
           </div>
           <DialogFooter>
             <DialogClose asChild><Button type="button" variant="outline" disabled={loading}>Cancelar</Button></DialogClose>
@@ -188,11 +190,90 @@ function EditLeaderDialog({
   );
 }
 
+function ResetPasswordDialog({
+  leader, open, onOpenChange, onDone,
+}: {
+  leader: LeaderRow | null; open: boolean; onOpenChange: (v: boolean) => void; onDone: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
+
+  const handleReset = async () => {
+    if (!leader) return;
+    setError('');
+    setLoading(true);
+    setTemporaryPassword(null);
+    try {
+      const res = await fetch(`/api/coordinator/leaders/${leader.id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao redefinir senha');
+      setTemporaryPassword(data.temporary_password ?? null);
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao redefinir senha');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClose = () => {
+    setTemporaryPassword(null);
+    setError('');
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else onOpenChange(v); }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Redefinir senha</DialogTitle></DialogHeader>
+        {temporaryPassword ? (
+          <div className="space-y-3">
+            <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-3">
+              Senha redefinida. O usuário deverá alterá-la no próximo login.
+            </p>
+            <div className="space-y-2">
+              <Label>Senha temporária (passe ao usuário)</Label>
+              <div className="flex gap-2">
+                <Input readOnly value={temporaryPassword} className="font-mono" />
+                <Button type="button" variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(temporaryPassword); alert('Copiado!'); }}>
+                  Copiar
+                </Button>
+              </div>
+            </div>
+            <Button onClick={handleClose}>Fechar</Button>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Será gerada uma nova senha para <strong>{leader?.full_name}</strong>. O usuário precisará alterá-la no próximo login.
+            </p>
+            {error && <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">{error}</p>}
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="outline" disabled={loading}>Cancelar</Button>
+              </DialogClose>
+              <Button onClick={handleReset} disabled={loading}>
+                {loading ? 'Redefinindo...' : 'Gerar nova senha'}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function CoordinatorLeadersPage() {
   const [leaders, setLeaders] = useState<LeaderRow[]>([]);
   const [groups, setGroups] = useState<GroupOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingLeader, setEditingLeader] = useState<LeaderRow | null>(null);
+  const [resetPwLeader, setResetPwLeader] = useState<LeaderRow | null>(null);
 
   const fetchData = async () => {
     const [leadersRes, groupsRes] = await Promise.all([
@@ -255,6 +336,9 @@ export default function CoordinatorLeadersPage() {
                       <Badge variant={leader.role === 'leader' ? 'default' : 'outline'} className="text-xs">
                         {leader.role === 'leader' ? 'Líder' : 'Secretário'}
                       </Badge>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" title="Redefinir senha" onClick={() => setResetPwLeader(leader)}>
+                        <KeyRound className="h-3.5 w-3.5" />
+                      </Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditingLeader(leader)}>
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
@@ -279,6 +363,13 @@ export default function CoordinatorLeadersPage() {
           onSave={fetchData}
         />
       )}
+
+      <ResetPasswordDialog
+        leader={resetPwLeader}
+        open={!!resetPwLeader}
+        onOpenChange={(v) => !v && setResetPwLeader(null)}
+        onDone={fetchData}
+      />
     </div>
   );
 }

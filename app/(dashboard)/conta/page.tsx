@@ -16,10 +16,11 @@ export default async function ContaPage() {
     return <div>Acesso negado.</div>;
   }
 
-  const user = await queryOne<{ password_hash: string | null }>(
-    `SELECT password_hash FROM users WHERE id = $1`,
+  const user = await queryOne<{ password_hash: string | null; must_change_password: boolean | null }>(
+    `SELECT password_hash, must_change_password FROM users WHERE id = $1`,
     [session.id]
   );
+  const mustChangePassword = user?.must_change_password === true;
 
   const roleLabel: Record<string, string> = {
     leader: 'Líder',
@@ -63,7 +64,10 @@ export default async function ContaPage() {
         </CardContent>
       </Card>
 
-      <ChangePasswordForm hasExistingPassword={!!user?.password_hash} />
+      <ChangePasswordForm
+        hasExistingPassword={!!user?.password_hash}
+        mustChangePassword={mustChangePassword}
+      />
     </div>
   );
 }

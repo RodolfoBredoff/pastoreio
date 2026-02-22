@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/admin-session';
 import { query, queryOne } from '@/lib/db/postgres';
+import { validatePassword, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/auth/password-validation';
 import bcrypt from 'bcryptjs';
 
 /**
@@ -35,11 +36,17 @@ export async function PUT(
       );
     }
 
-    // Atualizar senha se fornecida
     if (password) {
+      const validation = validatePassword(password);
+      if (!validation.valid) {
+        return NextResponse.json(
+          { error: validation.message ?? PASSWORD_REQUIREMENTS_TEXT },
+          { status: 400 }
+        );
+      }
       const hash = await bcrypt.hash(password, 10);
       await query(
-        `UPDATE users SET password_hash = $1 WHERE id = $2`,
+        `UPDATE users SET password_hash = $1, must_change_password = TRUE WHERE id = $2`,
         [hash, id]
       );
     }

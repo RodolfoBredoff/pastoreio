@@ -13,8 +13,8 @@ export default async function CoordContaPage() {
   ]);
 
   const [user, org] = await Promise.all([
-    queryOne<{ password_hash: string | null }>(
-      `SELECT password_hash FROM users WHERE id = $1`,
+    queryOne<{ password_hash: string | null; must_change_password: boolean | null }>(
+      `SELECT password_hash, must_change_password FROM users WHERE id = $1`,
       [session!.id]
     ),
     queryOne<{ name: string }>(
@@ -22,6 +22,7 @@ export default async function CoordContaPage() {
       [coordinator.organization_id]
     ),
   ]);
+  const mustChangePassword = user?.must_change_password === true;
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -59,7 +60,10 @@ export default async function CoordContaPage() {
         </CardContent>
       </Card>
 
-      <ChangePasswordForm hasExistingPassword={!!user?.password_hash} />
+      <ChangePasswordForm
+        hasExistingPassword={!!user?.password_hash}
+        mustChangePassword={mustChangePassword}
+      />
     </div>
   );
 }

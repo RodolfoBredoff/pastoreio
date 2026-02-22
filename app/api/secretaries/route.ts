@@ -3,6 +3,8 @@ import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryMany, queryOne } from '@/lib/db/postgres';
 import { canManageSecretaries, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
+import { validatePassword, generateRandomPassword } from '@/lib/auth/password-validation';
+import bcrypt from 'bcryptjs';
 
 /**
  * GET /api/secretaries
@@ -60,14 +62,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: SECRETARY_FORBIDDEN_MESSAGE }, { status: 403 });
     }
 
-    const { full_name, email, phone } = await request.json() as {
+    const body = await request.json() as {
       full_name: string;
       email: string;
       phone?: string;
+      password?: string;
+      generate_password?: boolean;
     };
+    const { full_name, email, phone, password: passwordInput, generate_password } = body;
 
     if (!full_name?.trim() || !email?.trim()) {
       return NextResponse.json({ error: 'Nome e e-mail são obrigatórios' }, { status: 400 });
+    }
+
+    const password = generate_password ? generateRandomPassword() : (passwordInput?.trim() || '');
+    if (!password) {
+      return NextResponse.json(
+        { error: 'Informe uma senha para o primeiro acesso ou marque "Gerar senha aleatória".' },
+        { status: 400 }
+      );
+    }
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      return NextResponse.json({ error: passwordValidation.message }, { status: 400 });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -93,8 +110,9 @@ export async function POST(request: Request) {
       [normalizedEmail]
     );
 
+    const passwordHash = await bcrypt.hash(password, 10);
+
     if (existingUser) {
-      // Verificar se esse usuário já é líder/secretário em outro grupo
       const alreadyLeader = await queryOne<{ id: string }>(
         `SELECT id FROM leaders WHERE id = $1`,
         [existingUser.id]
@@ -106,20 +124,20 @@ export async function POST(request: Request) {
         );
       }
       userId = existingUser.id;
+      await query(
+        `UPDATE users SET password_hash = $1, must_change_password = TRUE WHERE id = $2`,
+        [passwordHash, userId]
+      );
     } else {
       const newUser = await queryOne<{ id: string }>(
-        `INSERT INTO users (email, email_verified) VALUES ($1, TRUE) RETURNING id`,
-        [normalizedEmail]
+        `INSERT INTO users (email, email_verified, password_hash, must_change_password)
+         VALUES ($1, TRUE, $2, TRUE) RETURNING id`,
+        [normalizedEmail, passwordHash]
       );
       if (!newUser) throw new Error('Falha ao criar usuário');
       userId = newUser.id;
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/secretaries/route.ts:POST',message:'About to insert leaders record',data:{userId,normalizedEmail,group_id:leader.group_id,existingUserFound:!!existingUser},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
-
-    // Criar registro de secretário
     const secretary = await queryOne(
       `INSERT INTO leaders (id, organization_id, group_id, full_name, email, phone, role)
        VALUES ($1, $2, $3, $4, $5, $6, 'secretary')
@@ -127,11 +145,11 @@ export async function POST(request: Request) {
       [userId, leader.organization_id, leader.group_id, full_name.trim(), normalizedEmail, phone?.trim() || null]
     );
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/secretaries/route.ts:POST',message:'Leaders insert result',data:{secretaryId:(secretary as {id?:string}|null)?.id ?? null,secretaryEmail:(secretary as {email?:string}|null)?.email ?? null},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
-
-    return NextResponse.json(secretary, { status: 201 });
+    const response: Record<string, unknown> = { ...secretary };
+    if (generate_password) {
+      response.temporary_password = password;
+    }
+    return NextResponse.json(response, { status: 201 });
   } catch (error) {
     console.error('Erro ao criar secretário:', error);
     return NextResponse.json({ error: 'Erro ao criar secretário' }, { status: 500 });

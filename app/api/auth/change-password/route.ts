@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { queryOne, query } from '@/lib/db/postgres';
+import { validatePassword, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/auth/password-validation';
 import bcrypt from 'bcryptjs';
-
-const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9]).{8,}$/;
 
 /**
  * POST /api/auth/change-password
  * Altera a senha do usuário autenticado (líder, secretário ou coordenador).
- * Se o usuário já tem senha, exige a senha atual.
- * Nova senha deve ter maiúscula, minúscula e número (mínimo 8 caracteres).
+ * Se must_change_password = true, não exige senha atual. Caso contrário, exige.
+ * Nova senha: mais de 10 caracteres, uma maiúscula, uma minúscula e um número.
  */
 export async function POST(request: Request) {
   try {
@@ -24,15 +23,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Nova senha é obrigatória' }, { status: 400 });
     }
 
-    if (!PASSWORD_REGEX.test(new_password)) {
-      return NextResponse.json(
-        { error: 'A nova senha deve ter no mínimo 8 caracteres, incluindo letra maiúscula, letra minúscula e número.' },
-        { status: 400 }
-      );
+    const validation = validatePassword(new_password);
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.message ?? PASSWORD_REQUIREMENTS_TEXT }, { status: 400 });
     }
 
-    const user = await queryOne<{ id: string; password_hash: string | null }>(
-      `SELECT id, password_hash FROM users WHERE id = $1`,
+    const user = await queryOne<{ id: string; password_hash: string | null; must_change_password: boolean | null }>(
+      `SELECT id, password_hash, must_change_password FROM users WHERE id = $1`,
       [session.id]
     );
 
@@ -40,8 +37,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
     }
 
-    // Se já tem senha, exige verificação da senha atual
-    if (user.password_hash) {
+    const mustChange = user.must_change_password === true;
+
+    if (!mustChange && user.password_hash) {
       if (!current_password || typeof current_password !== 'string') {
         return NextResponse.json({ error: 'Senha atual é obrigatória' }, { status: 400 });
       }
@@ -52,7 +50,10 @@ export async function POST(request: Request) {
     }
 
     const newHash = await bcrypt.hash(new_password, 10);
-    await query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [newHash, user.id]);
+    await query(
+      `UPDATE users SET password_hash = $1, must_change_password = FALSE WHERE id = $2`,
+      [newHash, user.id]
+    );
 
     return NextResponse.json({ success: true, message: 'Senha alterada com sucesso' });
   } catch (error) {

@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { KeyRound, Eye, EyeOff, CheckCircle2, XCircle } from 'lucide-react';
+import { PASSWORD_MIN_LENGTH } from '@/lib/auth/password-validation';
 
 function PasswordRequirements({ password }: { password: string }) {
   const checks = [
-    { label: 'Mínimo 8 caracteres', ok: password.length >= 8 },
+    { label: `Mais de 10 caracteres (${password.length}/${PASSWORD_MIN_LENGTH})`, ok: password.length >= PASSWORD_MIN_LENGTH },
     { label: 'Letra maiúscula (A-Z)', ok: /[A-Z]/.test(password) },
     { label: 'Letra minúscula (a-z)', ok: /[a-z]/.test(password) },
     { label: 'Número (0-9)', ok: /[0-9]/.test(password) },
@@ -29,7 +30,13 @@ function PasswordRequirements({ password }: { password: string }) {
   );
 }
 
-export function ChangePasswordForm({ hasExistingPassword }: { hasExistingPassword: boolean }) {
+export function ChangePasswordForm({
+  hasExistingPassword,
+  mustChangePassword,
+}: {
+  hasExistingPassword: boolean;
+  mustChangePassword?: boolean;
+}) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [currentConfirm, setCurrentConfirm] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -40,19 +47,20 @@ export function ChangePasswordForm({ hasExistingPassword }: { hasExistingPasswor
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
 
+  const needCurrentPassword = hasExistingPassword && !mustChangePassword;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
 
-    if (hasExistingPassword && currentPassword !== currentConfirm) {
+    if (needCurrentPassword && currentPassword !== currentConfirm) {
       setError('A confirmação da senha atual não coincide.');
       return;
     }
 
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9]).{8,}$/;
-    if (!passwordRegex.test(newPassword)) {
-      setError('A nova senha não atende aos requisitos.');
+    if (newPassword.length < PASSWORD_MIN_LENGTH || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setError('A nova senha deve ter mais de 10 caracteres, incluindo uma letra maiúscula, uma minúscula e um número.');
       return;
     }
 
@@ -62,7 +70,7 @@ export function ChangePasswordForm({ hasExistingPassword }: { hasExistingPasswor
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          current_password: hasExistingPassword ? currentPassword : undefined,
+          current_password: needCurrentPassword ? currentPassword : undefined,
           new_password: newPassword,
         }),
       });
@@ -87,8 +95,13 @@ export function ChangePasswordForm({ hasExistingPassword }: { hasExistingPasswor
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <KeyRound className="h-4 w-4" />
-          Alterar Senha
+          {mustChangePassword ? 'Definir nova senha' : 'Alterar Senha'}
         </CardTitle>
+        {mustChangePassword && (
+          <p className="text-sm text-muted-foreground mt-1">
+            É obrigatório cadastrar uma nova senha para continuar. Use uma senha com mais de 10 caracteres, incluindo letra maiúscula, minúscula e número.
+          </p>
+        )}
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4 max-w-sm">
@@ -99,7 +112,7 @@ export function ChangePasswordForm({ hasExistingPassword }: { hasExistingPasswor
             <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-3">{success}</p>
           )}
 
-          {hasExistingPassword && (
+          {needCurrentPassword && (
             <>
               <div className="space-y-2">
                 <Label htmlFor="current-password">Senha atual</Label>
@@ -166,13 +179,13 @@ export function ChangePasswordForm({ hasExistingPassword }: { hasExistingPasswor
             {newPassword.length > 0 && <PasswordRequirements password={newPassword} />}
             {newPassword.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                Mínimo 8 caracteres com letra maiúscula, minúscula e número.
+                Mais de 10 caracteres, uma letra maiúscula, uma minúscula e um número.
               </p>
             )}
           </div>
 
           <Button type="submit" disabled={loading}>
-            {loading ? 'Salvando...' : 'Alterar Senha'}
+            {loading ? 'Salvando...' : mustChangePassword ? 'Definir senha e continuar' : 'Alterar Senha'}
           </Button>
         </form>
       </CardContent>
