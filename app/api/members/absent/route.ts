@@ -13,8 +13,8 @@ export interface AbsentMember {
 
 /**
  * GET /api/members/absent
- * Returns members with the most consecutive absences (minimum 2).
- * Used by the dashboard alerts panel.
+ * Returns all members with 1 or 2 consecutive absences (até duas faltas seguidas).
+ * Used by the dashboard alerts panel and by the group message "Faltantes" filter.
  */
 export async function GET() {
   try {
@@ -66,9 +66,8 @@ export async function GET() {
        )
        SELECT id, full_name, phone, member_type, consecutive_absences
        FROM member_absences
-       WHERE consecutive_absences >= 2
-       ORDER BY consecutive_absences DESC, full_name ASC
-       LIMIT 10`,
+       WHERE consecutive_absences >= 1 AND consecutive_absences <= 2
+       ORDER BY consecutive_absences DESC, full_name ASC`,
       [leader.group_id]
     );
 

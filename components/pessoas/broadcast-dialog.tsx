@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -19,11 +19,30 @@ import { getWhatsAppUrl } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 
+/** Mensagens convidativas para quem está com faltas seguidas (uma escolhida ao acaso ao selecionar Faltantes). */
+const MESSAGES_FOR_ABSENT = [
+  'Oi {nome}, sentimos sua falta nos encontros! Como você está? Estamos aqui quando quiser voltar. 💙',
+  'Olá {nome}! Faz um tempinho que não te vemos. Como vão as coisas? Seria ótimo te ver no próximo encontro!',
+  'Oi {nome}, tudo bem? Notamos que você não pôde estar conosco. Como está? Ficaríamos felizes em te receber de volta!',
+  'Hey {nome}! O grupo sente sua falta. Como você está? Quando puder, apareça para a gente. 🙏',
+  'Olá {nome}! Esperamos que esteja tudo bem. Como tem passado? Nosso próximo encontro está te esperando!',
+  'Oi {nome}, como vai? Sentimos sua falta nos últimos encontros. Que tal nos contar como você está? Estamos na torcida!',
+  'Olá {nome}! Só passando para lembrar que você faz falta. Como está? Seria um prazer te ver de novo.',
+  'Oi {nome}, tudo certo? O grupo perguntou de você. Como você está? Quando quiser, as portas estão abertas!',
+  'Hey {nome}! Notamos sua ausência e queremos saber: como você está? Estamos aqui com os braços abertos para quando puder voltar.',
+  'Olá {nome}! Como tem sido seus dias? Sentimos sua falta nos encontros. Seria ótimo te ver em breve! 💙',
+];
+
 interface Member {
   id: string;
   full_name: string;
   phone: string;
   member_type: 'participant' | 'visitor';
+}
+
+interface AbsentMemberItem extends Member {
+  phone: string | null;
+  consecutive_absences?: number;
 }
 
 interface BroadcastDialogProps {
@@ -33,23 +52,59 @@ interface BroadcastDialogProps {
 export function BroadcastDialog({ members }: BroadcastDialogProps) {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('Olá! Tudo bem?');
-  const [filter, setFilter] = useState<'all' | 'participant' | 'visitor'>('all');
+  const [filter, setFilter] = useState<'all' | 'participant' | 'visitor' | 'absent'>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [absentMembers, setAbsentMembers] = useState<AbsentMemberItem[]>([]);
+  const prevFilterRef = useRef<'all' | 'participant' | 'visitor' | 'absent'>('all');
 
-  // Quando abrir o dialog ou mudar o filtro, atualizar seleção
+  // Buscar faltantes ao abrir o dialog
   useEffect(() => {
     if (!open) return;
-    const filtered = members.filter((m) => {
-      if (filter === 'all') return true;
-      return m.member_type === filter;
-    });
-    setSelectedIds(new Set(filtered.filter((m) => m.phone).map((m) => m.id)));
-  }, [open, filter, members]);
+    fetch('/api/members/absent')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: AbsentMemberItem[]) => setAbsentMembers(data))
+      .catch(() => setAbsentMembers([]));
+  }, [open]);
 
-  const filteredBySearch = members.filter((m) =>
+  // Lista base conforme filtro: todos / participantes / visitantes / faltantes
+  const baseList: { id: string; full_name: string; phone: string | null; member_type: 'participant' | 'visitor' }[] =
+    filter === 'absent'
+      ? absentMembers
+      : members.filter((m) => {
+          if (filter === 'all') return true;
+          return m.member_type === filter;
+        });
+
+  // Atualizar seleção só ao abrir o dialog ou ao mudar o filtro (sem depender de absentMembers),
+  // para não sobrescrever quando o usuário marcar/desmarcar pessoas nos Faltantes.
+  useEffect(() => {
+    if (!open) return;
+    const withPhone =
+      filter === 'absent'
+        ? absentMembers.filter((m) => m.phone).map((m) => m.id)
+        : baseList.filter((m) => m.phone).map((m) => m.id);
+    setSelectedIds(new Set(withPhone));
+    if (filter === 'absent' && prevFilterRef.current !== 'absent') {
+      setMessage(MESSAGES_FOR_ABSENT[Math.floor(Math.random() * MESSAGES_FOR_ABSENT.length)] ?? MESSAGES_FOR_ABSENT[0]);
+    }
+    prevFilterRef.current = filter;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só reagir a open/filter; baseList/absentMembers usados no momento do clique
+  }, [open, filter]);
+
+  // Quando estiver em Faltantes e a lista de ausentes acabar de carregar, preencher seleção só se ainda estiver vazia.
+  useEffect(() => {
+    if (!open || filter !== 'absent' || absentMembers.length === 0) return;
+    setSelectedIds((prev) => {
+      if (prev.size > 0) return prev;
+      const withPhone = absentMembers.filter((m) => m.phone).map((m) => m.id);
+      return new Set(withPhone);
+    });
+  }, [open, filter, absentMembers]);
+
+  const filteredBySearch = baseList.filter((m) =>
     m.full_name.toLowerCase().includes(search.toLowerCase().trim())
   );
 
@@ -150,6 +205,14 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
               >
                 Visitantes ({members.filter(m => m.member_type === 'visitor').length})
               </Button>
+              <Button
+                type="button"
+                variant={filter === 'absent' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilter('absent')}
+              >
+                Faltantes ({absentMembers.length})
+              </Button>
             </div>
           </div>
 
@@ -167,8 +230,8 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
 
           {/* Seleção de pessoas */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Selecionar pessoas ({selectedMembers.length} com telefone):</Label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label className="basis-full sm:basis-auto">Selecionar pessoas ({selectedMembers.length} com telefone):</Label>
               <div className="flex gap-1">
                 <Button type="button" variant="ghost" size="sm" onClick={selectAllFiltered}>
                   Marcar todos
@@ -178,6 +241,11 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
                 </Button>
               </div>
             </div>
+            {filter === 'absent' && (
+              <p className="text-xs text-muted-foreground">
+                Você pode marcar ou desmarcar quem receberá a mensagem. A mensagem abaixo também pode ser editada.
+              </p>
+            )}
             <div className="max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
               {filteredBySearch.map((member) => {
                 const hasPhone = !!member.phone;
