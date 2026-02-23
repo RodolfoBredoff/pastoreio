@@ -60,10 +60,6 @@ export async function POST(request: Request) {
     const baseUrl = getAppBaseUrlForBrowser(request);
     const magicLink = `${baseUrl}/api/auth/verify?token=${token}`;
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/auth/magic-link/route.ts:POST',message:'Magic link generated',data:{emailReceived:email,baseUrl,magicLinkHost:baseUrl},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
-
     if (process.env.NODE_ENV === 'development') {
       console.log('🔗 Magic Link (DEV):', magicLink);
     }

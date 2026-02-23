@@ -21,10 +21,6 @@ export async function GET(request: Request) {
 
     const userData = await validateMagicLinkToken(token);
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/auth/verify/route.ts:GET',message:'validateMagicLinkToken result',data:{valid:!!userData,userId:userData?.userId ?? null,email:userData?.email ?? null},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
-
     if (!userData) {
       return NextResponse.json(
         { error: 'Token inválido ou expirado' },

@@ -21,17 +21,9 @@ function generateToken(): string {
  * Cria um token de magic link para o email
  */
 export async function createMagicLinkToken(email: string): Promise<string> {
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/auth/magic-link.ts:createMagicLinkToken',message:'Function called',data:{email},timestamp:Date.now(),hypothesisId:'M'})}).catch(()=>{});
-  // #endregion
-  
   const token = generateToken();
   const expiresAt = new Date();
   expiresAt.setHours(expiresAt.getHours() + MAGIC_LINK_EXPIRY_HOURS);
-
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/auth/magic-link.ts:createMagicLinkToken',message:'Before query user',data:{email},timestamp:Date.now(),hypothesisId:'N'})}).catch(()=>{});
-  // #endregion
 
   // Verificar se o usuário existe, se não, criar
   let user = await queryOne<{ id: string }>(
@@ -39,15 +31,7 @@ export async function createMagicLinkToken(email: string): Promise<string> {
     [email]
   );
 
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/auth/magic-link.ts:createMagicLinkToken',message:'User query result',data:{userFound:!!user,userId:user?.id},timestamp:Date.now(),hypothesisId:'O'})}).catch(()=>{});
-  // #endregion
-
   if (!user) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/auth/magic-link.ts:createMagicLinkToken',message:'Creating new user',data:{email},timestamp:Date.now(),hypothesisId:'P'})}).catch(()=>{});
-    // #endregion
-    
     // Criar novo usuário
     const result = await query<{ id: string }>(
       `INSERT INTO users (email, email_verified)
@@ -56,15 +40,7 @@ export async function createMagicLinkToken(email: string): Promise<string> {
       [email]
     );
     user = result.rows[0];
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/auth/magic-link.ts:createMagicLinkToken',message:'User created',data:{userId:user?.id},timestamp:Date.now(),hypothesisId:'Q'})}).catch(()=>{});
-    // #endregion
   }
-
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/auth/magic-link.ts:createMagicLinkToken',message:'Before insert token',data:{userId:user.id,email},timestamp:Date.now(),hypothesisId:'R'})}).catch(()=>{});
-  // #endregion
 
   // Criar token de magic link
   const tokenHash = hashToken(token);
@@ -73,10 +49,6 @@ export async function createMagicLinkToken(email: string): Promise<string> {
      VALUES ($1, $2, $3, $4)`,
     [user.id, email, tokenHash, expiresAt]
   );
-
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/auth/magic-link.ts:createMagicLinkToken',message:'Token inserted successfully',data:{},timestamp:Date.now(),hypothesisId:'S'})}).catch(()=>{});
-  // #endregion
 
   return token;
 }
