@@ -52,6 +52,16 @@ export async function GET(
       else countAbsent++;
     }
 
+    let guests: { id: string; first_name: string; last_name: string; registered_by_email: string }[] = [];
+    try {
+      guests = await queryMany(
+        `SELECT id, first_name, last_name, registered_by_email FROM attendance_list_guests WHERE meeting_id = $1 ORDER BY created_at ASC`,
+        [meeting.id]
+      );
+    } catch {
+      // Tabela pode não existir se a migration 012 não foi aplicada
+    }
+
     return NextResponse.json({
       meeting: {
         id: meeting.id,
@@ -65,8 +75,16 @@ export async function GET(
         full_name: m.full_name,
         response: responseMap[m.id] ?? null,
       })),
+      guests: guests.map((g) => ({
+        id: g.id,
+        first_name: g.first_name,
+        last_name: g.last_name,
+        full_name: `${g.first_name} ${g.last_name}`.trim(),
+        registered_by_email: g.registered_by_email,
+      })),
       count_present: countPresent,
       count_absent: countAbsent,
+      count_guests: guests.length,
     });
   } catch (error) {
     console.error('Erro ao buscar lista de presença:', error);

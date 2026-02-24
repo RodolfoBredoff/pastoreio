@@ -12,13 +12,21 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { CheckCircle2, XCircle, Loader2, Calendar, MapPin } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, Calendar, MapPin, UserPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface MemberItem {
   id: string;
   full_name: string;
   response: { status: 'present' | 'absent'; email: string } | null;
+}
+
+interface GuestItem {
+  id: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  registered_by_email: string;
 }
 
 interface ListData {
@@ -30,8 +38,10 @@ interface ListData {
     location: string | null;
   };
   members: MemberItem[];
+  guests: GuestItem[];
   count_present: number;
   count_absent: number;
+  count_guests: number;
 }
 
 function formatDate(d: string) {
@@ -57,6 +67,13 @@ export default function ListaPresencaPage() {
   const [email, setEmail] = useState('');
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState('');
+
+  const [guestModalOpen, setGuestModalOpen] = useState(false);
+  const [guestFirstName, setGuestFirstName] = useState('');
+  const [guestLastName, setGuestLastName] = useState('');
+  const [guestEmail, setGuestEmail] = useState('');
+  const [guestLoading, setGuestLoading] = useState(false);
+  const [guestError, setGuestError] = useState('');
 
   const fetchData = useCallback(async () => {
     if (!token) return;
@@ -121,6 +138,36 @@ export default function ListaPresencaPage() {
     }
   };
 
+  const handleAddGuest = async () => {
+    const fn = guestFirstName.trim();
+    const ln = guestLastName.trim();
+    const em = guestEmail.trim();
+    if (!fn) { setGuestError('Informe o nome do visitante.'); return; }
+    if (!ln) { setGuestError('Informe o sobrenome do visitante.'); return; }
+    if (!em) { setGuestError('Informe seu e-mail (quem está cadastrando).'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setGuestError('E-mail inválido.'); return; }
+    setGuestError('');
+    setGuestLoading(true);
+    try {
+      const res = await fetch(`/api/lista-presenca/${token}/guest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ first_name: fn, last_name: ln, email: em }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao cadastrar');
+      setGuestModalOpen(false);
+      setGuestFirstName('');
+      setGuestLastName('');
+      setGuestEmail('');
+      fetchData();
+    } catch (e) {
+      setGuestError(e instanceof Error ? e.message : 'Erro ao cadastrar');
+    } finally {
+      setGuestLoading(false);
+    }
+  };
+
   if (!token) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-muted/30">
@@ -145,7 +192,7 @@ export default function ListaPresencaPage() {
     );
   }
 
-  const { meeting, members, count_present, count_absent } = data;
+  const { meeting, members, guests = [], count_present, count_absent, count_guests = 0 } = data;
 
   return (
     <div className="min-h-screen bg-muted/30 p-4 pb-8">
@@ -169,12 +216,19 @@ export default function ListaPresencaPage() {
           </div>
         </header>
 
-        <div className="flex gap-4 justify-center rounded-lg border bg-card p-4">
+        <div className="flex flex-wrap gap-4 justify-center rounded-lg border bg-card p-4">
           <div className="flex items-center gap-2 text-green-700">
             <CheckCircle2 className="h-5 w-5" />
             <span className="font-medium">{count_present}</span>
             <span className="text-sm text-muted-foreground">presentes</span>
           </div>
+          {count_guests > 0 && (
+            <div className="flex items-center gap-2 text-blue-700">
+              <UserPlus className="h-5 w-5" />
+              <span className="font-medium">{count_guests}</span>
+              <span className="text-sm text-muted-foreground">{count_guests === 1 ? 'visitante' : 'visitantes'}</span>
+            </div>
+          )}
           <div className="flex items-center gap-2 text-amber-700">
             <XCircle className="h-5 w-5" />
             <span className="font-medium">{count_absent}</span>
@@ -243,7 +297,82 @@ export default function ListaPresencaPage() {
             ))}
           </ul>
         </div>
+
+        <div className="rounded-lg border bg-card overflow-hidden">
+          <div className="px-4 py-3 border-b bg-muted/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <p className="text-sm text-muted-foreground">
+              Vai levar alguém que ainda não está na lista? Cadastre o visitante abaixo.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => { setGuestModalOpen(true); setGuestError(''); }}>
+              <UserPlus className="h-4 w-4 mr-2" />
+              Vou levar um visitante
+            </Button>
+          </div>
+          {guests.length > 0 ? (
+            <ul className="divide-y">
+              {guests.map((g) => (
+                <li key={g.id} className="px-4 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-sm">
+                  <span className="font-medium">{g.full_name}</span>
+                  <span className="text-muted-foreground text-xs">Cadastrado por: {g.registered_by_email}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="px-4 py-3 text-sm text-muted-foreground">Nenhum visitante cadastrado ainda.</p>
+          )}
+        </div>
       </div>
+
+      <Dialog open={guestModalOpen} onOpenChange={(open) => { setGuestModalOpen(open); if (!open) setGuestError(''); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Vou levar um visitante</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Informe o nome e sobrenome do visitante e seu e-mail (de quem está cadastrando).
+          </p>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="guest-first">Nome do visitante</Label>
+              <Input
+                id="guest-first"
+                placeholder="Nome"
+                value={guestFirstName}
+                onChange={(e) => setGuestFirstName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="guest-last">Sobrenome do visitante</Label>
+              <Input
+                id="guest-last"
+                placeholder="Sobrenome"
+                value={guestLastName}
+                onChange={(e) => setGuestLastName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="guest-email">Seu e-mail (quem está cadastrando)</Label>
+              <Input
+                id="guest-email"
+                type="email"
+                placeholder="seu@email.com"
+                value={guestEmail}
+                onChange={(e) => setGuestEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddGuest()}
+              />
+            </div>
+          </div>
+          {guestError && <p className="text-sm text-destructive">{guestError}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGuestModalOpen(false)} disabled={guestLoading}>
+              Cancelar
+            </Button>
+            <Button onClick={handleAddGuest} disabled={guestLoading}>
+              {guestLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cadastrar visitante'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!emailModal} onOpenChange={(open) => !open && setEmailModal(null)}>
         <DialogContent>
