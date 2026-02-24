@@ -27,10 +27,11 @@ export default async function AgendaPage() {
       notes: string | null;
       meeting_type: 'regular' | 'special_event';
       created_at: string;
+      attendance_list_token: string | null;
     }>(
-      `SELECT id, group_id, meeting_date, meeting_time, is_cancelled, title, notes, meeting_type, created_at
-       FROM meetings 
-       WHERE group_id = $1 
+      `SELECT id, group_id, meeting_date, meeting_time, is_cancelled, title, notes, meeting_type, created_at, attendance_list_token
+       FROM meetings
+       WHERE group_id = $1
        AND meeting_date >= CURRENT_DATE
        AND is_cancelled = FALSE
        ORDER BY meeting_date ASC
@@ -49,10 +50,12 @@ export default async function AgendaPage() {
       meeting_type: 'regular' | 'special_event';
       created_at: string;
       attendance_count: number;
+      attendance_list_token: string | null;
     }>(
-      `SELECT 
-         m.id, m.group_id, m.meeting_date, m.meeting_time, m.is_cancelled, 
+      `SELECT
+         m.id, m.group_id, m.meeting_date, m.meeting_time, m.is_cancelled,
          m.title, m.notes, m.meeting_type, m.created_at,
+         m.attendance_list_token,
          (COUNT(a.id)::int + COALESCE(MAX(ag.guest_count), 0)) as attendance_count
        FROM meetings m
        LEFT JOIN attendance a ON a.meeting_id = m.id
@@ -63,7 +66,7 @@ export default async function AgendaPage() {
        ) ag ON ag.meeting_id = m.id
        WHERE m.group_id = $1 AND m.meeting_date < CURRENT_DATE
        GROUP BY m.id, m.group_id, m.meeting_date, m.meeting_time, m.is_cancelled,
-                m.title, m.notes, m.meeting_type, m.created_at
+                m.title, m.notes, m.meeting_type, m.created_at, m.attendance_list_token
        ORDER BY m.meeting_date DESC
        LIMIT 10`,
       [leader.group_id]

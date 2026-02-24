@@ -16,7 +16,7 @@ import {
   DialogFooter,
   DialogClose,
 } from '@/components/ui/dialog';
-import { Calendar as CalendarIcon, Clock, Pencil, Settings, Ban, RotateCcw, PlusCircle, Star, CalendarPlus, Trash2, Users } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Pencil, Settings, Ban, RotateCcw, PlusCircle, Star, CalendarPlus, Trash2, Users, Link2 } from 'lucide-react';
 import { formatDate, getDayOfWeekName } from '@/lib/utils';
 
 // ============================================================
@@ -33,6 +33,7 @@ interface Meeting {
   notes: string | null;
   meeting_type: 'regular' | 'special_event';
   created_at: string;
+  attendance_list_token?: string | null;
 }
 
 interface MeetingWithCount extends Meeting {
@@ -269,7 +270,10 @@ function AddMeetingDialog({
   const [time, setTime] = useState(group.default_meeting_time.substring(0, 5));
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
+  const [location, setLocation] = useState('');
   const [meetingType, setMeetingType] = useState<'regular' | 'special_event'>('regular');
+  const [generateAttendanceList, setGenerateAttendanceList] = useState(false);
+  const [createdListLink, setCreatedListLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -277,6 +281,7 @@ function AddMeetingDialog({
     if (!date) { setError('A data é obrigatória'); return; }
     setError('');
     setLoading(true);
+    setCreatedListLink(null);
     try {
       const res = await fetch('/api/meetings', {
         method: 'POST',
@@ -287,13 +292,22 @@ function AddMeetingDialog({
           title: title || null,
           notes: notes || null,
           meeting_type: meetingType,
+          location: location.trim() || null,
+          generate_attendance_list: meetingType === 'special_event' && generateAttendanceList,
         }),
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Erro ao criar encontro'); }
-      setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
-      setTitle(''); setNotes(''); setMeetingType('regular');
-      onSave();
-      onOpenChange(false);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao criar encontro');
+
+      if (data.attendance_list_token) {
+        const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${data.attendance_list_token}`;
+        setCreatedListLink(link);
+      } else {
+        setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
+        setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false);
+        onSave();
+        onOpenChange(false);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao criar encontro');
     } finally {
@@ -301,43 +315,81 @@ function AddMeetingDialog({
     }
   };
 
+  const handleCloseAfterList = () => {
+    setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
+    setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false);
+    setCreatedListLink(null);
+    onSave();
+    onOpenChange(false);
+  };
+
+  const copyListLink = () => {
+    if (!createdListLink) return;
+    navigator.clipboard.writeText(createdListLink);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { setCreatedListLink(null); setError(''); } onOpenChange(v); }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Novo Encontro</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 py-2">
-          {error && <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">{error}</p>}
-          <div className="space-y-2">
-            <Label htmlFor="add-type">Tipo de Encontro</Label>
-            <select id="add-type" value={meetingType} onChange={(e) => setMeetingType(e.target.value as 'regular' | 'special_event')}
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-              <option value="regular">Encontro Regular</option>
-              <option value="special_event">Agenda Especial / Evento</option>
-            </select>
+        {createdListLink ? (
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">Encontro criado. Link da lista de presença (envie aos participantes):</p>
+            <div className="flex gap-2">
+              <Input readOnly value={createdListLink} className="font-mono text-xs" />
+              <Button variant="outline" size="sm" onClick={copyListLink}>Copiar</Button>
+            </div>
+            <DialogFooter>
+              <Button onClick={handleCloseAfterList}>Fechar</Button>
+            </DialogFooter>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="add-title">Nome do Encontro</Label>
-            <Input id="add-title" placeholder="Ex: Encontro de Comunhão, Culto Especial..." value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="add-date">Data *</Label>
-            <Input id="add-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="add-time">Horário</Label>
-            <Input id="add-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="add-notes">Observações (opcional)</Label>
-            <Input id="add-notes" placeholder="Detalhes do encontro..." value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-        </div>
-        <DialogFooter>
-          <DialogClose asChild><Button variant="outline" disabled={loading}>Cancelar</Button></DialogClose>
-          <Button onClick={handleCreate} disabled={loading}>{loading ? 'Criando...' : 'Criar Encontro'}</Button>
-        </DialogFooter>
+        ) : (
+          <>
+            <div className="space-y-4 py-2">
+              {error && <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">{error}</p>}
+              <div className="space-y-2">
+                <Label htmlFor="add-type">Tipo de Encontro</Label>
+                <select id="add-type" value={meetingType} onChange={(e) => setMeetingType(e.target.value as 'regular' | 'special_event')}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                  <option value="regular">Encontro Regular</option>
+                  <option value="special_event">Agenda Especial / Evento</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-title">Nome do Encontro</Label>
+                <Input id="add-title" placeholder="Ex: Encontro de Comunhão, Culto Especial..." value={title} onChange={(e) => setTitle(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-date">Data *</Label>
+                <Input id="add-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-time">Horário</Label>
+                <Input id="add-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-location">Local</Label>
+                <Input id="add-location" placeholder="Ex: Salão da igreja, Casa do João..." value={location} onChange={(e) => setLocation(e.target.value)} />
+              </div>
+              {meetingType === 'special_event' && (
+                <div className="flex items-center space-x-2">
+                  <Checkbox id="add-generate-list" checked={generateAttendanceList} onCheckedChange={(c) => setGenerateAttendanceList(c === true)} />
+                  <Label htmlFor="add-generate-list" className="text-sm font-normal cursor-pointer">Gerar lista de presença (link para enviar aos participantes)</Label>
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="add-notes">Observações (opcional)</Label>
+                <Input id="add-notes" placeholder="Detalhes do encontro..." value={notes} onChange={(e) => setNotes(e.target.value)} />
+              </div>
+            </div>
+            <DialogFooter>
+              <DialogClose asChild><Button variant="outline" disabled={loading}>Cancelar</Button></DialogClose>
+              <Button onClick={handleCreate} disabled={loading}>{loading ? 'Criando...' : 'Criar Encontro'}</Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -690,6 +742,16 @@ export function AgendaClient({
                       )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      {meeting.attendance_list_token && (
+                        <Button variant="outline" size="sm" className="h-8 text-xs" title="Copiar link da lista de presença"
+                          onClick={() => {
+                            const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${meeting.attendance_list_token}`;
+                            navigator.clipboard.writeText(link);
+                          }}>
+                          <Link2 className="h-3.5 w-3.5 mr-1" />
+                          Link lista
+                        </Button>
+                      )}
                       {meeting.is_cancelled ? (
                         <Badge variant="destructive">Cancelada</Badge>
                       ) : (
@@ -774,6 +836,16 @@ export function AgendaClient({
                       )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      {meeting.attendance_list_token && (
+                        <Button variant="outline" size="sm" className="h-8 text-xs" title="Copiar link da lista de presença"
+                          onClick={() => {
+                            const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${meeting.attendance_list_token}`;
+                            navigator.clipboard.writeText(link);
+                          }}>
+                          <Link2 className="h-3.5 w-3.5 mr-1" />
+                          Link lista
+                        </Button>
+                      )}
                       {meeting.is_cancelled && <Badge variant="outline">Folga</Badge>}
                       {canEditMeetings && (
                         <>

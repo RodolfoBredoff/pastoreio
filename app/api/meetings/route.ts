@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
@@ -7,6 +8,7 @@ import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permi
 /**
  * POST /api/meetings
  * Creates a single meeting for the leader's group.
+ * For special_event, optional: location, generate_attendance_list (gera link da lista de presença).
  */
 export async function POST(request: Request) {
   try {
@@ -25,12 +27,14 @@ export async function POST(request: Request) {
     }
 
     const data = await request.json();
-    const { meeting_date, meeting_time, title, notes, meeting_type } = data as {
+    const { meeting_date, meeting_time, title, notes, meeting_type, location, generate_attendance_list } = data as {
       meeting_date: string;
       meeting_time?: string | null;
       title?: string | null;
       notes?: string | null;
       meeting_type?: 'regular' | 'special_event';
+      location?: string | null;
+      generate_attendance_list?: boolean;
     };
 
     if (!meeting_date) {
@@ -43,13 +47,16 @@ export async function POST(request: Request) {
     }
 
     const type = meeting_type === 'special_event' ? 'special_event' : 'regular';
+    const withList = type === 'special_event' && Boolean(generate_attendance_list);
+    const attendanceListToken = withList ? randomUUID() : null;
+    const locationVal = location != null && String(location).trim() !== '' ? String(location).trim() : null;
 
     const result = await query(
-      `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled)
-       VALUES ($1, $2, $3, $4, $5, $6, FALSE)
+      `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token)
+       VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8)
        ON CONFLICT (group_id, meeting_date) DO NOTHING
        RETURNING *`,
-      [leader.group_id, meeting_date, meeting_time || null, title || null, notes || null, type]
+      [leader.group_id, meeting_date, meeting_time || null, title || null, notes || null, type, locationVal, attendanceListToken]
     );
 
     if (result.rows.length === 0) {
@@ -59,7 +66,8 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(result.rows[0], { status: 201 });
+    const row = result.rows[0] as Record<string, unknown>;
+    return NextResponse.json(row, { status: 201 });
   } catch (error) {
     console.error('Erro ao criar encontro:', error);
     return NextResponse.json({ error: 'Erro ao criar encontro' }, { status: 500 });
