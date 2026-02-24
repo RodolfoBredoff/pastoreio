@@ -12,13 +12,14 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { CheckCircle2, XCircle, Loader2, Calendar, MapPin, UserPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface MemberItem {
   id: string;
   full_name: string;
-  response: { status: 'present' | 'absent'; email: string } | null;
+  response: { status: 'present' | 'absent'; email?: string } | null;
 }
 
 interface GuestItem {
@@ -26,7 +27,6 @@ interface GuestItem {
   first_name: string;
   last_name: string;
   full_name: string;
-  registered_by_email: string;
 }
 
 interface ListData {
@@ -65,6 +65,8 @@ export default function ListaPresencaPage() {
 
   const [emailModal, setEmailModal] = useState<{ memberId: string; memberName: string; status: 'present' | 'absent' } | null>(null);
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [noEmail, setNoEmail] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -72,6 +74,8 @@ export default function ListaPresencaPage() {
   const [guestFirstName, setGuestFirstName] = useState('');
   const [guestLastName, setGuestLastName] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [guestNoEmail, setGuestNoEmail] = useState(false);
   const [guestLoading, setGuestLoading] = useState(false);
   const [guestError, setGuestError] = useState('');
 
@@ -101,18 +105,19 @@ export default function ListaPresencaPage() {
   const handleChoose = (memberId: string, memberName: string, status: 'present' | 'absent') => {
     setEmailModal({ memberId, memberName, status });
     setEmail('');
+    setPhone('');
+    setNoEmail(false);
     setSubmitError('');
   };
 
   const handleSubmitResponse = async () => {
     if (!emailModal || !token) return;
     const emailTrim = email.trim();
-    if (!emailTrim) {
-      setSubmitError('Informe seu e-mail.');
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
-      setSubmitError('E-mail inválido.');
+    const phoneDigits = phone.replace(/\D/g, '');
+    const hasEmail = !noEmail && emailTrim && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim);
+    const hasPhone = noEmail && phoneDigits.length >= 10;
+    if (!hasEmail && !hasPhone) {
+      setSubmitError(noEmail ? 'Informe um telefone com DDD (mín. 10 dígitos).' : 'Informe um e-mail válido.');
       return;
     }
     setSubmitLoading(true);
@@ -124,7 +129,8 @@ export default function ListaPresencaPage() {
         body: JSON.stringify({
           member_id: emailModal.memberId,
           status: emailModal.status,
-          email: emailTrim,
+          ...(hasEmail ? { email: emailTrim } : {}),
+          ...(hasPhone ? { phone: phoneDigits } : {}),
         }),
       });
       const json = await res.json();
@@ -142,17 +148,27 @@ export default function ListaPresencaPage() {
     const fn = guestFirstName.trim();
     const ln = guestLastName.trim();
     const em = guestEmail.trim();
+    const ph = guestPhone.replace(/\D/g, '');
+    const hasEmail = !guestNoEmail && em && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);
+    const hasPhone = guestNoEmail && ph.length >= 10;
     if (!fn) { setGuestError('Informe o nome do visitante.'); return; }
     if (!ln) { setGuestError('Informe o sobrenome do visitante.'); return; }
-    if (!em) { setGuestError('Informe seu e-mail (quem está cadastrando).'); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setGuestError('E-mail inválido.'); return; }
+    if (!hasEmail && !hasPhone) {
+      setGuestError(guestNoEmail ? 'Informe um telefone com DDD (mín. 10 dígitos).' : 'Informe seu e-mail ou marque "Não tenho e-mail".');
+      return;
+    }
     setGuestError('');
     setGuestLoading(true);
     try {
       const res = await fetch(`/api/lista-presenca/${token}/guest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ first_name: fn, last_name: ln, email: em }),
+        body: JSON.stringify({
+          first_name: fn,
+          last_name: ln,
+          ...(hasEmail ? { email: em } : {}),
+          ...(hasPhone ? { phone: ph } : {}),
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Erro ao cadastrar');
@@ -160,6 +176,8 @@ export default function ListaPresencaPage() {
       setGuestFirstName('');
       setGuestLastName('');
       setGuestEmail('');
+      setGuestPhone('');
+      setGuestNoEmail(false);
       fetchData();
     } catch (e) {
       setGuestError(e instanceof Error ? e.message : 'Erro ao cadastrar');
@@ -239,7 +257,7 @@ export default function ListaPresencaPage() {
         <div className="rounded-lg border bg-card overflow-hidden">
           <div className="px-4 py-3 border-b bg-muted/50">
             <p className="text-sm text-muted-foreground">
-              Selecione sua opção e informe seu e-mail para registrar.
+              Selecione sua opção e informe e-mail ou telefone para registrar.
             </p>
           </div>
           <ul className="divide-y">
@@ -311,9 +329,8 @@ export default function ListaPresencaPage() {
           {guests.length > 0 ? (
             <ul className="divide-y">
               {guests.map((g) => (
-                <li key={g.id} className="px-4 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-sm">
+                <li key={g.id} className="px-4 py-2 text-sm">
                   <span className="font-medium">{g.full_name}</span>
-                  <span className="text-muted-foreground text-xs">Cadastrado por: {g.registered_by_email}</span>
                 </li>
               ))}
             </ul>
@@ -329,7 +346,7 @@ export default function ListaPresencaPage() {
             <DialogTitle>Vou levar um visitante</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Informe o nome e sobrenome do visitante e seu e-mail (de quem está cadastrando).
+            Informe o nome e sobrenome do visitante. Depois, seu e-mail ou telefone (quem está cadastrando).
           </p>
           <div className="space-y-3">
             <div className="space-y-2">
@@ -350,17 +367,35 @@ export default function ListaPresencaPage() {
                 onChange={(e) => setGuestLastName(e.target.value)}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="guest-email">Seu e-mail (quem está cadastrando)</Label>
-              <Input
-                id="guest-email"
-                type="email"
-                placeholder="seu@email.com"
-                value={guestEmail}
-                onChange={(e) => setGuestEmail(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddGuest()}
-              />
+            <div className="flex items-center space-x-2">
+              <Checkbox id="guest-no-email" checked={guestNoEmail} onCheckedChange={(c) => setGuestNoEmail(c === true)} />
+              <Label htmlFor="guest-no-email" className="text-sm font-normal cursor-pointer">Não tenho e-mail</Label>
             </div>
+            {guestNoEmail ? (
+              <div className="space-y-2">
+                <Label htmlFor="guest-phone">Seu telefone (quem está cadastrando)</Label>
+                <Input
+                  id="guest-phone"
+                  type="tel"
+                  placeholder="(11) 99999-9999"
+                  value={guestPhone}
+                  onChange={(e) => setGuestPhone(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddGuest()}
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="guest-email">Seu e-mail (quem está cadastrando)</Label>
+                <Input
+                  id="guest-email"
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={guestEmail}
+                  onChange={(e) => setGuestEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddGuest()}
+                />
+              </div>
+            )}
           </div>
           {guestError && <p className="text-sm text-destructive">{guestError}</p>}
           <DialogFooter>
@@ -382,18 +417,38 @@ export default function ListaPresencaPage() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Confirme seu e-mail para registrar a resposta de <strong>{emailModal?.memberName}</strong>.
+            Confirme seu e-mail ou telefone para registrar a resposta de <strong>{emailModal?.memberName}</strong>.
           </p>
-          <div className="space-y-2">
-            <Label htmlFor="email-list">Seu e-mail</Label>
-            <Input
-              id="email-list"
-              type="email"
-              placeholder="seu@email.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSubmitResponse()}
-            />
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <Checkbox id="no-email" checked={noEmail} onCheckedChange={(c) => setNoEmail(c === true)} />
+              <Label htmlFor="no-email" className="text-sm font-normal cursor-pointer">Não tenho e-mail</Label>
+            </div>
+            {noEmail ? (
+              <div className="space-y-2">
+                <Label htmlFor="phone-list">Seu telefone</Label>
+                <Input
+                  id="phone-list"
+                  type="tel"
+                  placeholder="(11) 99999-9999"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSubmitResponse()}
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="email-list">Seu e-mail</Label>
+                <Input
+                  id="email-list"
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSubmitResponse()}
+                />
+              </div>
+            )}
           </div>
           {submitError && <p className="text-sm text-destructive">{submitError}</p>}
           <DialogFooter>

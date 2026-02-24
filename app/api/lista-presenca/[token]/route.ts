@@ -80,7 +80,6 @@ export async function GET(
         first_name: g.first_name,
         last_name: g.last_name,
         full_name: `${g.first_name} ${g.last_name}`.trim(),
-        registered_by_email: g.registered_by_email,
       })),
       count_present: countPresent,
       count_absent: countAbsent,
@@ -107,11 +106,11 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { member_id, status, email } = body as { member_id?: string; status?: string; email?: string };
+    const { member_id, status, email, phone } = body as { member_id?: string; status?: string; email?: string; phone?: string };
 
-    if (!member_id || !status || !email || typeof email !== 'string') {
+    if (!member_id || !status) {
       return NextResponse.json(
-        { error: 'É obrigatório informar member_id, status e email' },
+        { error: 'É obrigatório informar member_id e status' },
         { status: 400 }
       );
     }
@@ -121,9 +120,16 @@ export async function POST(
       return NextResponse.json({ error: 'status deve ser "present" ou "absent"' }, { status: 400 });
     }
 
-    const emailTrim = email.trim().toLowerCase();
-    if (!emailTrim || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
-      return NextResponse.json({ error: 'Informe um e-mail válido' }, { status: 400 });
+    const emailVal = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    const phoneVal = typeof phone === 'string' ? phone.replace(/\D/g, '').trim() : '';
+    const hasEmail = emailVal && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal);
+    const hasPhone = phoneVal.length >= 10;
+
+    if (!hasEmail && !hasPhone) {
+      return NextResponse.json(
+        { error: 'Informe um e-mail válido ou um telefone (com DDD)' },
+        { status: 400 }
+      );
     }
 
     const meeting = await queryOne<{ id: string; group_id: string }>(
@@ -146,10 +152,10 @@ export async function POST(
     }
 
     await query(
-      `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = $3, email = $4`,
-      [meeting.id, member_id, statusNorm, emailTrim]
+      `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email, phone)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = $3, email = $4, phone = $5`,
+      [meeting.id, member_id, statusNorm, hasEmail ? emailVal : null, hasPhone ? phoneVal : null]
     );
 
     const counts = await queryOne<{ count_present: string; count_absent: string }>(

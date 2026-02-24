@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,7 +17,7 @@ import {
   DialogFooter,
   DialogClose,
 } from '@/components/ui/dialog';
-import { Calendar as CalendarIcon, Clock, Pencil, Settings, Ban, RotateCcw, PlusCircle, Star, CalendarPlus, Trash2, Users, Link2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Pencil, Settings, Ban, RotateCcw, PlusCircle, Star, CalendarPlus, Trash2, Users, Link2, ListChecks } from 'lucide-react';
 import { formatDate, getDayOfWeekName } from '@/lib/utils';
 
 // ============================================================
@@ -743,14 +744,23 @@ export function AgendaClient({
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {meeting.attendance_list_token && (
-                        <Button variant="outline" size="sm" className="h-8 text-xs" title="Copiar link da lista de presença"
-                          onClick={() => {
-                            const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${meeting.attendance_list_token}`;
-                            navigator.clipboard.writeText(link);
-                          }}>
-                          <Link2 className="h-3.5 w-3.5 mr-1" />
-                          Link lista
-                        </Button>
+                        <>
+                          <Button variant="outline" size="sm" className="h-8 text-xs" title="Copiar link da lista de presença"
+                            onClick={() => {
+                              const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${meeting.attendance_list_token}`;
+                              navigator.clipboard.writeText(link);
+                            }}>
+                            <Link2 className="h-3.5 w-3.5 mr-1" />
+                            Link lista
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-8 text-xs" title="Ver lista de confirmação (e-mails/telefones)"
+                            asChild>
+                            <Link href={`/agenda/lista/${meeting.id}`}>
+                              <ListChecks className="h-3.5 w-3.5 mr-1" />
+                              Ver confirmação
+                            </Link>
+                          </Button>
+                        </>
                       )}
                       {meeting.is_cancelled ? (
                         <Badge variant="destructive">Cancelada</Badge>
@@ -837,14 +847,23 @@ export function AgendaClient({
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {meeting.attendance_list_token && (
-                        <Button variant="outline" size="sm" className="h-8 text-xs" title="Copiar link da lista de presença"
-                          onClick={() => {
-                            const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${meeting.attendance_list_token}`;
-                            navigator.clipboard.writeText(link);
-                          }}>
-                          <Link2 className="h-3.5 w-3.5 mr-1" />
-                          Link lista
-                        </Button>
+                        <>
+                          <Button variant="outline" size="sm" className="h-8 text-xs" title="Copiar link da lista de presença"
+                            onClick={() => {
+                              const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${meeting.attendance_list_token}`;
+                              navigator.clipboard.writeText(link);
+                            }}>
+                            <Link2 className="h-3.5 w-3.5 mr-1" />
+                            Link lista
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-8 text-xs" title="Ver lista de confirmação (e-mails/telefones)"
+                            asChild>
+                            <Link href={`/agenda/lista/${meeting.id}`}>
+                              <ListChecks className="h-3.5 w-3.5 mr-1" />
+                              Ver confirmação
+                            </Link>
+                          </Button>
+                        </>
                       )}
                       {meeting.is_cancelled && <Badge variant="outline">Folga</Badge>}
                       {canEditMeetings && (
