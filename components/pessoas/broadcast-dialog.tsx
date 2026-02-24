@@ -21,16 +21,30 @@ import { Input } from '@/components/ui/input';
 
 /** Mensagens convidativas para quem está com faltas seguidas (uma escolhida ao acaso ao selecionar Faltantes). */
 const MESSAGES_FOR_ABSENT = [
-  'Oi {nome}, sentimos sua falta nos encontros! Como você está? Estamos aqui quando quiser voltar. 💙',
-  'Olá {nome}! Faz um tempinho que não te vemos. Como vão as coisas? Seria ótimo te ver no próximo encontro!',
-  'Oi {nome}, tudo bem? Notamos que você não pôde estar conosco. Como está? Ficaríamos felizes em te receber de volta!',
-  'Hey {nome}! O grupo sente sua falta. Como você está? Quando puder, apareça para a gente. 🙏',
-  'Olá {nome}! Esperamos que esteja tudo bem. Como tem passado? Nosso próximo encontro está te esperando!',
-  'Oi {nome}, como vai? Sentimos sua falta nos últimos encontros. Que tal nos contar como você está? Estamos na torcida!',
-  'Olá {nome}! Só passando para lembrar que você faz falta. Como está? Seria um prazer te ver de novo.',
-  'Oi {nome}, tudo certo? O grupo perguntou de você. Como você está? Quando quiser, as portas estão abertas!',
-  'Hey {nome}! Notamos sua ausência e queremos saber: como você está? Estamos aqui com os braços abertos para quando puder voltar.',
-  'Olá {nome}! Como tem sido seus dias? Sentimos sua falta nos encontros. Seria ótimo te ver em breve! 💙',
+  'Olá, {nome}! Passando para dizer que sentimos sua falta no nosso último encontro. O grupo não é o mesmo sem a sua participação e alegria. Espero que você esteja bem e, se possível, compareça no próximo!',
+  '{nome}, estamos sentindo sua falta nos nossos encontros. Saiba que você é importante para nós e está em nossas orações. Se precisar de algo, conte comigo!',
+  'Olá, {nome}! Como foi sua semana? Sentimos um vazio no grupo sem você. Lembre-se que você faz parte da nossa família espiritual e sua presença nos edifica muito.',
+  'Oi, {nome}! Passando para dizer que você faz falta! O pequeno grupo é um lugar de cuidado mútuo e sua presença é essencial para completar nossa mesa. Um abraço!',
+  '{nome}! Sentimos saudade de você no nosso último encontro. Queremos muito caminhar perto de você. Nos dê notícias e tente aparecer no próximo encontro!',
+  'Olá, {nome}! Tudo bem por aí? Sentimos sua ausência e passamos para lembrar o quanto você é especial para este grupo. Estamos à disposição para o que precisar!',
+  'Oi, {nome}! Sentimos um vazio na nossa mesa sem você. A comunhão cristã é o solo onde nossa fé floresce, e queremos muito continuar crescendo ao seu lado. Nos dê notícias!',
+  '{nome}, estamos com saudades e na expectativa de te ver! Nada substitui a comunhão presencial para o nosso fortalecimento mútuo. Que sua semana seja de paz e te esperamos no grupo!',
+  'Olá, {nome}! Sentimos falta da sua presença. A Bíblia ensina que crescemos juntos, e sua participação é uma peça essencial para o amadurecimento do nosso grupo. Esperamos você no próximo!',
+  'Oi, {nome}! Como você está? Nossa comunhão fica incompleta sem você. O Senhor nos vocacionou para crescermos uns com os outros, e sua vida edifica a nossa. Nos vemos em breve?',
+];
+
+/** Mensagens convidativas para visitantes (uma escolhida ao acaso ao selecionar Visitantes). */
+const MESSAGES_FOR_VISITOR = [
+  'Olá, {nome}! Tudo bem? Gostaria de dizer que, embora ainda não tenhamos nos encontrado pessoalmente, você já é parte da nossa intercessão. O grupo de WhatsApp é apenas a porta; a verdadeira vida acontece quando estamos juntos. Queremos muito te conhecer!',
+  'Oi, {nome}! Passo para lembrar que sua vida é um presente que queremos celebrar de perto. O grupo aqui é bom, mas o café e a partilha presencial são onde realmente crescemos. As portas estão abertas para você!',
+  'Paz, {nome}! Como tem passado? Sei que a rotina é corrida, mas senti de te dizer que você faz falta em nossa mesa. A comunhão cristã floresce no olhar e no abraço, e sua presença enriqueceria muito nosso grupo. Apareça quando puder!',
+  'Olá, {nome}! Passando para deixar um abraço pastoral. Fomos criados para caminhar em família, e o nosso pequeno grupo só é completo com cada membro presente. Gostaríamos muito de ter você conosco no próximo encontro!',
+  '{nome}, o WhatsApp nos aproxima, mas a presença nos une. Queria te convidar para experimentar o que Deus tem feito em nosso meio presencialmente. Sua história e sua vida são importantes para nós!',
+  'Oi, {nome}! Tudo bem por aí? Temos sentido falta de te ver nos nossos encontros. Mais do que mensagens, desejamos comunhão real e crescimento mútuo. Saiba que há um lugar reservado para você em nossa próxima reunião.',
+  'Olá, {nome}! Espero que sua semana esteja sendo abençoada. O grupo digital é um suporte, mas é no encontro face a face que o cuidado mútuo acontece de verdade. Seria uma alegria imensa ter você conosco!',
+  'Paz do Senhor, {nome}! Como pastor/líder, quero que saiba que você é lembrado e valorizado. O pequeno grupo é um lugar de descanso e fortalecimento, e sua presença física faz toda a diferença para o corpo. Estamos te esperando!',
+  '{nome}, cada pessoa traz uma cor única para o grupo, e sentimos que falta a sua. A vida cristã é mais leve quando caminhamos juntos. Que tal nos dar a alegria da sua companhia no próximo encontro?',
+  'Oi, {nome}! Passando para dizer que nossa porta está sempre destrancada para você. Acreditamos que o crescimento real acontece na proximidade. Que tal ter um tempo de comunhão conosco esta semana? Sua presença é essencial!',
 ];
 
 interface Member {
@@ -93,6 +107,9 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
     setSelectedIds(new Set(withPhone));
     if (filter === 'absent' && prevFilterRef.current !== 'absent') {
       setMessage(MESSAGES_FOR_ABSENT[Math.floor(Math.random() * MESSAGES_FOR_ABSENT.length)] ?? MESSAGES_FOR_ABSENT[0]);
+    }
+    if (filter === 'visitor' && prevFilterRef.current !== 'visitor') {
+      setMessage(MESSAGES_FOR_VISITOR[Math.floor(Math.random() * MESSAGES_FOR_VISITOR.length)] ?? MESSAGES_FOR_VISITOR[0]);
     }
     prevFilterRef.current = filter;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- só reagir a open/filter; baseList/absentMembers usados no momento do clique
