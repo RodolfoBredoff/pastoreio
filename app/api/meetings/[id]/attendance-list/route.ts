@@ -1,8 +1,30 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
-import { queryOne, queryMany } from '@/lib/db/postgres';
+import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
+
+async function getMeetingAndAuth(meetingId: string) {
+  await requireAuth();
+  const leader = await getCurrentLeader();
+  if (!leader?.group_id) {
+    return { error: { message: 'Líder não está vinculado a um grupo', status: 400 } as const };
+  }
+  if (!canManageMeetings(leader.role)) {
+    return { error: { message: SECRETARY_FORBIDDEN_MESSAGE, status: 403 } as const };
+  }
+  const meeting = await queryOne<{ id: string; group_id: string; attendance_list_token: string | null }>(
+    `SELECT id, group_id, attendance_list_token FROM meetings WHERE id = $1`,
+    [meetingId]
+  );
+  if (!meeting || meeting.group_id !== leader.group_id) {
+    return { error: { message: 'Reunião não encontrada', status: 404 } as const };
+  }
+  if (!meeting.attendance_list_token) {
+    return { error: { message: 'Este encontro não possui lista de presença', status: 400 } as const };
+  }
+  return { meeting, leader };
+}
 
 /**
  * GET /api/meetings/[id]/attendance-list
@@ -115,5 +137,100 @@ export async function GET(
       { error: 'Erro ao carregar lista de confirmação' },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * PATCH /api/meetings/[id]/attendance-list
+ * Líder/secretário: altera a resposta de um membro (presente <-> ausente).
+ */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: meetingId } = await params;
+    const auth = await getMeetingAndAuth(meetingId);
+    if ('error' in auth) {
+      return NextResponse.json({ error: auth.error.message }, { status: auth.error.status });
+    }
+    const { meeting } = auth;
+
+    const body = await request.json();
+    const { member_id, status: newStatus } = body as { member_id?: string; status?: string };
+
+    if (!member_id || !newStatus) {
+      return NextResponse.json(
+        { error: 'Informe member_id e status (present ou absent)' },
+        { status: 400 }
+      );
+    }
+    if (newStatus !== 'present' && newStatus !== 'absent') {
+      return NextResponse.json({ error: 'status deve ser "present" ou "absent"' }, { status: 400 });
+    }
+
+    const member = await queryOne<{ id: string }>(
+      `SELECT id FROM members WHERE id = $1 AND group_id = $2 AND is_active = TRUE`,
+      [member_id, meeting.group_id]
+    );
+    if (!member) {
+      return NextResponse.json({ error: 'Membro não encontrado' }, { status: 404 });
+    }
+
+    await query(
+      `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email, phone)
+       VALUES ($1, $2, $3, NULL, NULL)
+       ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = $3`,
+      [meetingId, member_id, newStatus]
+    );
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao atualizar confirmação:', error);
+    return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE /api/meetings/[id]/attendance-list
+ * Líder/secretário: reseta a confirmação de um membro (remove o registro).
+ * Body: { member_id: string }
+ */
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: meetingId } = await params;
+    const auth = await getMeetingAndAuth(meetingId);
+    if ('error' in auth) {
+      return NextResponse.json({ error: auth.error.message }, { status: auth.error.status });
+    }
+    const { meeting } = auth;
+
+    const body = await request.json().catch(() => ({}));
+    const { member_id } = body as { member_id?: string };
+
+    if (!member_id) {
+      return NextResponse.json({ error: 'Informe member_id' }, { status: 400 });
+    }
+
+    const member = await queryOne<{ id: string }>(
+      `SELECT id FROM members WHERE id = $1 AND group_id = $2 AND is_active = TRUE`,
+      [member_id, meeting.group_id]
+    );
+    if (!member) {
+      return NextResponse.json({ error: 'Membro não encontrado' }, { status: 404 });
+    }
+
+    await query(
+      `DELETE FROM attendance_list_responses WHERE meeting_id = $1 AND member_id = $2`,
+      [meetingId, member_id]
+    );
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao resetar confirmação:', error);
+    return NextResponse.json({ error: 'Erro ao resetar' }, { status: 500 });
   }
 }

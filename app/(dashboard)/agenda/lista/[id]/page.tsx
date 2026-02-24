@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus, RotateCcw } from 'lucide-react';
 
 interface MemberResponse {
   status: string;
@@ -80,6 +80,18 @@ export default function ListaConfirmacaoPage() {
   const [data, setData] = useState<ListData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  const fetchList = () => {
+    if (!meetingId) return;
+    fetch(`/api/meetings/${meetingId}/attendance-list`)
+      .then((res) => {
+        if (!res.ok) return res.json().then((d) => Promise.reject(new Error(d.error || 'Erro ao carregar')));
+        return res.json();
+      })
+      .then(setData)
+      .catch((e) => setError(e instanceof Error ? e.message : 'Erro ao carregar'));
+  };
 
   useEffect(() => {
     if (!meetingId) {
@@ -98,6 +110,43 @@ export default function ListaConfirmacaoPage() {
       .catch((e) => setError(e instanceof Error ? e.message : 'Erro ao carregar'))
       .finally(() => setLoading(false));
   }, [meetingId]);
+
+  const handleChangeStatus = async (memberId: string, status: 'present' | 'absent') => {
+    setActionLoading(memberId);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/attendance-list`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ member_id: memberId, status }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao alterar');
+      fetchList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao alterar');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReset = async (memberId: string) => {
+    if (!confirm('Resetar a confirmação deste membro? Ele poderá responder novamente pelo link.')) return;
+    setActionLoading(memberId);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/attendance-list`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ member_id: memberId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao resetar');
+      fetchList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao resetar');
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   if (!meetingId) {
     return (
@@ -149,7 +198,7 @@ export default function ListaConfirmacaoPage() {
       <div className="rounded-lg border bg-card overflow-hidden">
         <div className="px-4 py-3 border-b bg-muted/50">
           <h2 className="font-medium">Membros</h2>
-          <p className="text-xs text-muted-foreground">Resposta e contato (e-mail ou telefone) de quem confirmou.</p>
+          <p className="text-xs text-muted-foreground">Resposta e contato de quem confirmou. Use Presente/Ausente para alterar ou Resetar para limpar a confirmação.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -158,32 +207,75 @@ export default function ListaConfirmacaoPage() {
                 <th className="text-left p-3 font-medium">Nome</th>
                 <th className="text-left p-3 font-medium">Resposta</th>
                 <th className="text-left p-3 font-medium">E-mail / Telefone</th>
+                <th className="text-left p-3 font-medium">Ações</th>
               </tr>
             </thead>
             <tbody>
-              {members.map((m) => (
-                <tr key={m.id} className="border-b last:border-0">
-                  <td className="p-3">{m.full_name}</td>
-                  <td className="p-3">
-                    {m.response ? (
-                      m.response.status === 'present' ? (
-                        <span className="inline-flex items-center gap-1 text-green-700">
-                          <CheckCircle2 className="h-4 w-4" />
-                          Presente
-                        </span>
+              {members.map((m) => {
+                const isPresent = m.response?.status === 'present';
+                const isAbsent = m.response?.status === 'absent';
+                const hasResponse = !!m.response;
+                const busy = actionLoading === m.id;
+                return (
+                  <tr key={m.id} className="border-b last:border-0">
+                    <td className="p-3">{m.full_name}</td>
+                    <td className="p-3">
+                      {m.response ? (
+                        m.response.status === 'present' ? (
+                          <span className="inline-flex items-center gap-1 text-green-700">
+                            <CheckCircle2 className="h-4 w-4" />
+                            Presente
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-amber-700">
+                            <XCircle className="h-4 w-4" />
+                            Ausente
+                          </span>
+                        )
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-amber-700">
-                          <XCircle className="h-4 w-4" />
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="p-3 font-mono text-xs">{contactDisplay(m.response)}</td>
+                    <td className="p-3">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Button
+                          variant={isPresent ? 'secondary' : 'outline'}
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={busy}
+                          onClick={() => handleChangeStatus(m.id, 'present')}
+                          title="Definir como presente"
+                        >
+                          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <><CheckCircle2 className="h-3 w-3 mr-1" /> Presente</>}
+                        </Button>
+                        <Button
+                          variant={isAbsent ? 'secondary' : 'outline'}
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={busy}
+                          onClick={() => handleChangeStatus(m.id, 'absent')}
+                          title="Definir como ausente"
+                        >
+                          <XCircle className="h-3 w-3 mr-1" />
                           Ausente
-                        </span>
-                      )
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="p-3 font-mono text-xs">{contactDisplay(m.response)}</td>
-                </tr>
-              ))}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                          disabled={!hasResponse || busy}
+                          onClick={() => handleReset(m.id)}
+                          title="Resetar confirmação"
+                        >
+                          <RotateCcw className="h-3 w-3 mr-1" />
+                          Resetar
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

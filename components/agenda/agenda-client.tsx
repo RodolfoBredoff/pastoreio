@@ -716,7 +716,7 @@ export function AgendaClient({
             {meetings && meetings.length > 0 ? (
               <div className="space-y-3">
                 {meetings.map((meeting) => (
-                  <div key={meeting.id} className="flex items-center justify-between p-3 border rounded-lg gap-2">
+                  <div key={meeting.id} className="p-3 border rounded-lg space-y-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         {meeting.meeting_type === 'special_event' && (
@@ -726,7 +726,7 @@ export function AgendaClient({
                           </Badge>
                         )}
                         {meeting.title ? (
-                          <p className="font-semibold text-sm truncate">{meeting.title}</p>
+                          <p className="font-semibold text-sm">{meeting.title}</p>
                         ) : null}
                       </div>
                       <p className={meeting.title ? 'text-sm text-muted-foreground' : 'font-medium'}>
@@ -739,10 +739,10 @@ export function AgendaClient({
                         )}
                       </p>
                       {meeting.notes && (
-                        <p className="text-xs text-muted-foreground mt-0.5 truncate">{meeting.notes}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 break-words">{meeting.notes}</p>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5 border-t">
                       {meeting.attendance_list_token && (
                         <>
                           <Button variant="outline" size="sm" className="h-8 text-xs" title="Copiar link da lista de presença"
@@ -820,8 +820,8 @@ export function AgendaClient({
             {localPastMeetings && localPastMeetings.length > 0 ? (
               <div className="space-y-3">
                 {localPastMeetings.map((meeting) => (
-                  <div key={meeting.id} className="flex items-center justify-between p-3 border rounded-lg gap-2">
-                    <div className="min-w-0 flex-1">
+                  <div key={meeting.id} className="p-3 border rounded-lg space-y-3">
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         {meeting.meeting_type === 'special_event' && (
                           <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-700 border-amber-200 shrink-0">
@@ -830,7 +830,7 @@ export function AgendaClient({
                           </Badge>
                         )}
                         {meeting.title && (
-                          <p className="font-semibold text-sm truncate">{meeting.title}</p>
+                          <p className="font-semibold text-sm">{meeting.title}</p>
                         )}
                       </div>
                       <p className={meeting.title ? 'text-sm text-muted-foreground' : 'font-medium'}>
@@ -845,7 +845,7 @@ export function AgendaClient({
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5 border-t">
                       {meeting.attendance_list_token && (
                         <>
                           <Button variant="outline" size="sm" className="h-8 text-xs" title="Copiar link da lista de presença"
