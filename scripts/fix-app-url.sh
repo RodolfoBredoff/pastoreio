@@ -256,7 +256,7 @@ if [ "$STATUS" = "Success" ]; then
   HEALTH_ID=$(aws ssm send-command \
     --instance-ids "$INSTANCE_ID" \
     --document-name "AWS-RunShellScript" \
-    --parameters 'commands=["curl -sf http://localhost:3000/api/health && echo OK || echo FALHOU"]' \
+    --parameters 'commands=["curl -sf http://localhost:80/api/health && echo OK || echo FALHOU"]' \
     --timeout-seconds 30 \
     --region "$AWS_REGION" \
     --output text \

@@ -11,7 +11,7 @@ services:
     mem_limit: 384m
     cpus: 0.5
     ports:
-      - "3000:3000"
+      - "80:3000"   # host:container — expõe na porta 80 no host (padrão HTTP); app segue em 3000 no container
     environment:
       - NODE_ENV=production
       # Host "postgres" = nome do serviço no Docker (não use localhost)
