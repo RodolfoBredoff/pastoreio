@@ -4,24 +4,29 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 
-async function getMeetingAndAuth(meetingId: string) {
+type AuthError = { message: string; status: number };
+type MeetingAuth =
+  | { error: AuthError }
+  | { meeting: { id: string; group_id: string; attendance_list_token: string | null }; leader: Awaited<ReturnType<typeof getCurrentLeader>> };
+
+async function getMeetingAndAuth(meetingId: string): Promise<MeetingAuth> {
   await requireAuth();
   const leader = await getCurrentLeader();
   if (!leader?.group_id) {
-    return { error: { message: 'Líder não está vinculado a um grupo', status: 400 } as const };
+    return { error: { message: 'Líder não está vinculado a um grupo', status: 400 } };
   }
   if (!canManageMeetings(leader.role)) {
-    return { error: { message: SECRETARY_FORBIDDEN_MESSAGE, status: 403 } as const };
+    return { error: { message: SECRETARY_FORBIDDEN_MESSAGE, status: 403 } };
   }
   const meeting = await queryOne<{ id: string; group_id: string; attendance_list_token: string | null }>(
     `SELECT id, group_id, attendance_list_token FROM meetings WHERE id = $1`,
     [meetingId]
   );
   if (!meeting || meeting.group_id !== leader.group_id) {
-    return { error: { message: 'Reunião não encontrada', status: 404 } as const };
+    return { error: { message: 'Reunião não encontrada', status: 404 } };
   }
   if (!meeting.attendance_list_token) {
-    return { error: { message: 'Este encontro não possui lista de presença', status: 400 } as const };
+    return { error: { message: 'Este encontro não possui lista de presença', status: 400 } };
   }
   return { meeting, leader };
 }
@@ -152,7 +157,8 @@ export async function PATCH(
     const { id: meetingId } = await params;
     const auth = await getMeetingAndAuth(meetingId);
     if ('error' in auth) {
-      return NextResponse.json({ error: auth.error.message }, { status: auth.error.status });
+      const err = auth.error;
+      return NextResponse.json({ error: err.message }, { status: err.status });
     }
     const { meeting } = auth;
 
@@ -204,7 +210,8 @@ export async function DELETE(
     const { id: meetingId } = await params;
     const auth = await getMeetingAndAuth(meetingId);
     if ('error' in auth) {
-      return NextResponse.json({ error: auth.error.message }, { status: auth.error.status });
+      const err = auth.error;
+      return NextResponse.json({ error: err.message }, { status: err.status });
     }
     const { meeting } = auth;
 
