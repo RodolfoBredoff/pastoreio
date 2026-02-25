@@ -31,6 +31,11 @@ export async function updateSession(request: NextRequest) {
   // ─── Rotas normais (líderes) ─────────────────────────────────────────────
   const user = await getSessionFromCookie();
 
+  // Lista de presença por token: rota pública (quem não tem app acessa o link e confirma por email/telefone)
+  if (pathname.startsWith('/lista-presenca')) {
+    return NextResponse.next({ request });
+  }
+
   // Redirect to login if not authenticated and trying to access protected routes
   if (
     !user &&

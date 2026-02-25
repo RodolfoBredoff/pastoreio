@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 interface MemberItem {
   id: string;
   full_name: string;
-  response: { status: 'present' | 'absent'; email?: string } | null;
+  response: { status: 'present' | 'absent' } | null;
 }
 
 interface GuestItem {

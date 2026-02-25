@@ -43,11 +43,12 @@ export async function GET(
       [meeting.id]
     );
 
-    const responseMap: Record<string, { status: 'present' | 'absent'; email: string }> = {};
+    // Dados de confirmação (email/telefone) ficam só no app para líder/secretários; aqui só status para exibição pública
+    const responseMap: Record<string, { status: 'present' | 'absent' }> = {};
     let countPresent = 0;
     let countAbsent = 0;
     for (const r of responses) {
-      responseMap[r.member_id] = { status: r.status as 'present' | 'absent', email: r.email };
+      responseMap[r.member_id] = { status: r.status as 'present' | 'absent' };
       if (r.status === 'present') countPresent++;
       else countAbsent++;
     }
