@@ -148,6 +148,23 @@ export default function ListaConfirmacaoPage() {
     }
   };
 
+  const handleResetGuest = async (guestId: string) => {
+    if (!confirm('Remover este visitante da lista? O cadastro será apagado.')) return;
+    setActionLoading(`guest-${guestId}`);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/attendance-list/guests/${guestId}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao remover');
+      fetchList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao remover visitante');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   if (!meetingId) {
     return (
       <div className="space-y-4">
@@ -288,7 +305,7 @@ export default function ListaConfirmacaoPage() {
               <UserPlus className="h-4 w-4" />
               Visitantes cadastrados
             </h2>
-            <p className="text-xs text-muted-foreground">Cadastrado por (e-mail ou telefone).</p>
+            <p className="text-xs text-muted-foreground">Cadastrado por (e-mail ou telefone). Use Resetar para remover o visitante da lista.</p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -296,15 +313,31 @@ export default function ListaConfirmacaoPage() {
                 <tr className="border-b bg-muted/30">
                   <th className="text-left p-3 font-medium">Visitante</th>
                   <th className="text-left p-3 font-medium">Cadastrado por</th>
+                  <th className="text-left p-3 font-medium">Ações</th>
                 </tr>
               </thead>
               <tbody>
-                {guests.map((g) => (
-                  <tr key={g.id} className="border-b last:border-0">
-                    <td className="p-3">{g.full_name}</td>
-                    <td className="p-3 font-mono text-xs">{guestRegisteredBy(g)}</td>
-                  </tr>
-                ))}
+                {guests.map((g) => {
+                  const guestBusy = actionLoading === `guest-${g.id}`;
+                  return (
+                    <tr key={g.id} className="border-b last:border-0">
+                      <td className="p-3">{g.full_name}</td>
+                      <td className="p-3 font-mono text-xs">{guestRegisteredBy(g)}</td>
+                      <td className="p-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                          disabled={guestBusy}
+                          onClick={() => handleResetGuest(g.id)}
+                          title="Remover visitante da lista"
+                        >
+                          {guestBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <><RotateCcw className="h-3 w-3 mr-1" /> Resetar</>}
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
