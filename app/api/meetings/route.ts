@@ -27,7 +27,16 @@ export async function POST(request: Request) {
     }
 
     const data = await request.json();
-    const { meeting_date, meeting_time, title, notes, meeting_type, location, generate_attendance_list } = data as {
+    const {
+      meeting_date,
+      meeting_time,
+      title,
+      notes,
+      meeting_type,
+      location,
+      generate_attendance_list,
+      attendance_list_deadline,
+    } = data as {
       meeting_date: string;
       meeting_time?: string | null;
       title?: string | null;
@@ -35,6 +44,7 @@ export async function POST(request: Request) {
       meeting_type?: 'regular' | 'special_event';
       location?: string | null;
       generate_attendance_list?: boolean;
+      attendance_list_deadline?: string | null;
     };
 
     if (!meeting_date) {
@@ -50,13 +60,35 @@ export async function POST(request: Request) {
     const withList = type === 'special_event' && Boolean(generate_attendance_list);
     const attendanceListToken = withList ? randomUUID() : null;
     const locationVal = location != null && String(location).trim() !== '' ? String(location).trim() : null;
+    let attendanceListDeadlineVal: string | null = null;
+
+    if (attendance_list_deadline) {
+      if (!dateRegex.test(attendance_list_deadline)) {
+        return NextResponse.json(
+          { error: 'Formato de data inválido para o prazo de confirmação (esperado: YYYY-MM-DD)' },
+          { status: 400 }
+        );
+      }
+      // Armazena o prazo como final do dia no fuso padrão do servidor
+      attendanceListDeadlineVal = `${attendance_list_deadline}T23:59:59.999Z`;
+    }
 
     const result = await query(
-      `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token)
-       VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8)
+      `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token, attendance_list_deadline)
+       VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9)
        ON CONFLICT (group_id, meeting_date) DO NOTHING
        RETURNING *`,
-      [leader.group_id, meeting_date, meeting_time || null, title || null, notes || null, type, locationVal, attendanceListToken]
+      [
+        leader.group_id,
+        meeting_date,
+        meeting_time || null,
+        title || null,
+        notes || null,
+        type,
+        locationVal,
+        attendanceListToken,
+        attendanceListDeadlineVal,
+      ]
     );
 
     if (result.rows.length === 0) {

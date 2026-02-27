@@ -22,8 +22,9 @@ export async function GET(
       meeting_time: string | null;
       location: string | null;
       group_id: string;
+      attendance_list_deadline: string | null;
     }>(
-      `SELECT id, title, meeting_date, meeting_time, location, group_id
+      `SELECT id, title, meeting_date, meeting_time, location, group_id, attendance_list_deadline
        FROM meetings
        WHERE attendance_list_token = $1 AND is_cancelled = FALSE`,
       [token]
@@ -133,13 +134,24 @@ export async function POST(
       );
     }
 
-    const meeting = await queryOne<{ id: string; group_id: string }>(
-      `SELECT id, group_id FROM meetings WHERE attendance_list_token = $1 AND is_cancelled = FALSE`,
+    const meeting = await queryOne<{ id: string; group_id: string; attendance_list_deadline: string | null }>(
+      `SELECT id, group_id, attendance_list_deadline FROM meetings WHERE attendance_list_token = $1 AND is_cancelled = FALSE`,
       [token]
     );
 
     if (!meeting) {
       return NextResponse.json({ error: 'Lista não encontrada ou indisponível' }, { status: 404 });
+    }
+
+    if (meeting.attendance_list_deadline) {
+      const now = new Date();
+      const deadline = new Date(meeting.attendance_list_deadline);
+      if (now > deadline) {
+        return NextResponse.json(
+          { error: 'O prazo para confirmação deste encontro já foi encerrado.' },
+          { status: 400 }
+        );
+      }
     }
 
     // Garantir que o membro pertence ao grupo do encontro

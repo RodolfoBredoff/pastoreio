@@ -42,7 +42,15 @@ export async function PUT(
     }
 
     const data = await request.json();
-    const { meeting_date, meeting_time, is_cancelled, title, notes, meeting_type } = data;
+    const { meeting_date, meeting_time, is_cancelled, title, notes, meeting_type, attendance_list_deadline } = data as {
+      meeting_date?: string;
+      meeting_time?: string | null;
+      is_cancelled?: boolean;
+      title?: string | null;
+      notes?: string | null;
+      meeting_type?: 'regular' | 'special_event';
+      attendance_list_deadline?: string | null;
+    };
 
     const updates: string[] = [];
     const values: unknown[] = [];
@@ -71,6 +79,22 @@ export async function PUT(
     if (meeting_type !== undefined && (meeting_type === 'regular' || meeting_type === 'special_event')) {
       updates.push(`meeting_type = $${paramIndex++}`);
       values.push(meeting_type);
+    }
+    if (attendance_list_deadline !== undefined) {
+      if (attendance_list_deadline) {
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(attendance_list_deadline)) {
+          return NextResponse.json(
+            { error: 'Formato de data inválido para o prazo de confirmação (esperado: YYYY-MM-DD)' },
+            { status: 400 }
+          );
+        }
+        updates.push(`attendance_list_deadline = $${paramIndex++}`);
+        values.push(`${attendance_list_deadline}T23:59:59.999Z`);
+      } else {
+        updates.push(`attendance_list_deadline = $${paramIndex++}`);
+        values.push(null);
+      }
     }
 
     if (updates.length === 0) {

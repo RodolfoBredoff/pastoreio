@@ -35,6 +35,7 @@ interface Meeting {
   meeting_type: 'regular' | 'special_event';
   created_at: string;
   attendance_list_token?: string | null;
+  attendance_list_deadline?: string | null;
 }
 
 interface MeetingWithCount extends Meeting {
@@ -91,6 +92,9 @@ function EditMeetingDialog({
   const [title, setTitle] = useState(meeting.title ?? '');
   const [notes, setNotes] = useState(meeting.notes ?? '');
   const [meetingType, setMeetingType] = useState<'regular' | 'special_event'>(meeting.meeting_type ?? 'regular');
+  const [attendanceDeadline, setAttendanceDeadline] = useState(
+    meeting.attendance_list_deadline ? toInputDate(meeting.attendance_list_deadline) : ''
+  );
   const [presenceMap, setPresenceMap] = useState<Record<string, boolean>>({});
   const [loadingAttendance, setLoadingAttendance] = useState(false);
 
@@ -101,6 +105,7 @@ function EditMeetingDialog({
     setTitle(meeting.title ?? '');
     setNotes(meeting.notes ?? '');
     setMeetingType(meeting.meeting_type ?? 'regular');
+    setAttendanceDeadline(meeting.attendance_list_deadline ? toInputDate(meeting.attendance_list_deadline) : '');
 
     if (members.length > 0) {
       setLoadingAttendance(true);
@@ -144,6 +149,7 @@ function EditMeetingDialog({
           title: title || null,
           notes: notes || null,
           meeting_type: meetingType,
+          attendance_list_deadline: attendanceDeadline || null,
         }),
       });
       if (!meetingRes.ok) { const d = await meetingRes.json(); throw new Error(d.error || 'Erro ao salvar'); }
@@ -203,6 +209,21 @@ function EditMeetingDialog({
             <Label htmlFor="meeting-notes">Observações (opcional)</Label>
             <Input id="meeting-notes" placeholder="Outras anotações..." value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
+
+          {meeting.meeting_type === 'special_event' && meeting.attendance_list_token && (
+            <div className="space-y-2">
+              <Label htmlFor="meeting-deadline">Prazo para confirmações pelo link (opcional)</Label>
+              <Input
+                id="meeting-deadline"
+                type="date"
+                value={attendanceDeadline}
+                onChange={(e) => setAttendanceDeadline(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Após esta data, o link público não aceitará novas confirmações. Você pode alterar ou estender este prazo a qualquer momento.
+              </p>
+            </div>
+          )}
 
           {members.length > 0 && (
             <div className="space-y-3 pt-2 border-t">
@@ -274,6 +295,7 @@ function AddMeetingDialog({
   const [location, setLocation] = useState('');
   const [meetingType, setMeetingType] = useState<'regular' | 'special_event'>('regular');
   const [generateAttendanceList, setGenerateAttendanceList] = useState(false);
+  const [attendanceDeadline, setAttendanceDeadline] = useState('');
   const [createdListLink, setCreatedListLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -295,6 +317,9 @@ function AddMeetingDialog({
           meeting_type: meetingType,
           location: location.trim() || null,
           generate_attendance_list: meetingType === 'special_event' && generateAttendanceList,
+          attendance_list_deadline: meetingType === 'special_event' && generateAttendanceList && attendanceDeadline
+            ? attendanceDeadline
+            : null,
         }),
       });
       const data = await res.json();
@@ -305,7 +330,7 @@ function AddMeetingDialog({
         setCreatedListLink(link);
       } else {
         setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
-        setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false);
+        setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceDeadline('');
         onSave();
         onOpenChange(false);
       }
@@ -318,7 +343,7 @@ function AddMeetingDialog({
 
   const handleCloseAfterList = () => {
     setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
-    setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false);
+    setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceDeadline('');
     setCreatedListLink(null);
     onSave();
     onOpenChange(false);
@@ -375,10 +400,28 @@ function AddMeetingDialog({
                 <Input id="add-location" placeholder="Ex: Salão da igreja, Casa do João..." value={location} onChange={(e) => setLocation(e.target.value)} />
               </div>
               {meetingType === 'special_event' && (
-                <div className="flex items-center space-x-2">
-                  <Checkbox id="add-generate-list" checked={generateAttendanceList} onCheckedChange={(c) => setGenerateAttendanceList(c === true)} />
-                  <Label htmlFor="add-generate-list" className="text-sm font-normal cursor-pointer">Gerar lista de presença (link para enviar aos participantes)</Label>
-                </div>
+                <>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox id="add-generate-list" checked={generateAttendanceList} onCheckedChange={(c) => setGenerateAttendanceList(c === true)} />
+                    <Label htmlFor="add-generate-list" className="text-sm font-normal cursor-pointer">
+                      Gerar lista de presença (link para enviar aos participantes)
+                    </Label>
+                  </div>
+                  {generateAttendanceList && (
+                    <div className="space-y-2">
+                      <Label htmlFor="add-deadline">Prazo para confirmações pelo link (opcional)</Label>
+                      <Input
+                        id="add-deadline"
+                        type="date"
+                        value={attendanceDeadline}
+                        onChange={(e) => setAttendanceDeadline(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Após esta data, o link público não aceitará novas confirmações. Você pode alterar ou estender este prazo depois, na agenda.
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
               <div className="space-y-2">
                 <Label htmlFor="add-notes">Observações (opcional)</Label>

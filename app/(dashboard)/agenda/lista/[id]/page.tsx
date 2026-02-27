@@ -32,6 +32,7 @@ interface ListData {
     meeting_date: string;
     meeting_time: string | null;
     location: string | null;
+    attendance_list_deadline?: string | null;
   };
   members: MemberRow[];
   guests: GuestRow[];
