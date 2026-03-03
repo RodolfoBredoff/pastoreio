@@ -172,7 +172,7 @@ export async function createMember(data: {
 export async function updateMember(memberId: string, data: {
   full_name?: string;
   phone?: string;
-  birth_date?: string;
+  birth_date?: string | null;
   member_type?: 'participant' | 'visitor';
   is_active?: boolean;
 }): Promise<Member | null> {

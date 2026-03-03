@@ -115,7 +115,10 @@ export function PessoaForm({ groupId, initialData }: PessoaFormProps) {
       phone: formData.phone,
       member_type: formData.member_type,
     };
-    if (birth_date !== null) {
+    // Incluir birth_date sempre na edição para permitir limpar (null); na criação só envia se preenchido
+    if (initialData) {
+      payload.birth_date = birth_date;
+    } else if (birth_date !== null) {
       payload.birth_date = birth_date;
     }
 
@@ -182,7 +185,7 @@ export function PessoaForm({ groupId, initialData }: PessoaFormProps) {
       <div className="space-y-2">
         <Label>Data de Aniversário <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
         <p className="text-xs text-muted-foreground">
-          Preencha ao menos dia e mês — o ano é opcional. O líder será notificado no dia do aniversário.
+          Preencha ao menos dia e mês — o ano é opcional. O líder será notificado no dia do aniversário. Para remover a data, deixe os campos em branco e salve.
         </p>
         <div className="grid grid-cols-3 gap-2">
           <div>

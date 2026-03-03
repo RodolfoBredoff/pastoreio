@@ -21,7 +21,7 @@ export async function PUT(
     const updateData: Record<string, unknown> = {};
     if (full_name !== undefined) updateData.full_name = full_name;
     if (phone !== undefined) updateData.phone = phone;
-    if (birth_date !== undefined && birth_date) updateData.birth_date = birth_date;
+    if (birth_date !== undefined) updateData.birth_date = birth_date || null;
     if (member_type !== undefined) updateData.member_type = member_type;
     if (is_active !== undefined) updateData.is_active = is_active;
 
