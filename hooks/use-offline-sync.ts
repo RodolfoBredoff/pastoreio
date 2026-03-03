@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { db, PendingSync, OfflineMember, OfflineMeeting, OfflineAttendance } from '@/lib/offline-db';
 
 export function useOfflineSync(groupId?: string) {
@@ -9,8 +8,6 @@ export function useOfflineSync(groupId?: string) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
-
-  const supabase = createClient();
 
   // Monitorar status de conexão
   useEffect(() => {
@@ -41,121 +38,184 @@ export function useOfflineSync(groupId?: string) {
     updatePendingCount();
   }, [updatePendingCount]);
 
-  // Sincronizar dados
+  // Baixar dados do servidor (Next.js API) para cache local
+  const downloadServerData = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sync');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data.members && Array.isArray(data.members)) {
+        const items: OfflineMember[] = data.members.map((m: Record<string, unknown>) => ({
+          id: m.id as string,
+          group_id: m.group_id as string,
+          full_name: m.full_name as string,
+          phone: m.phone as string,
+          birth_date: (m.birth_date ?? '') as string,
+          member_type: (m.member_type ?? 'participant') as 'participant' | 'visitor',
+          is_active: (m.is_active ?? true) as boolean,
+          synced: true,
+          updated_at: (m.updated_at ?? new Date().toISOString()) as string,
+        }));
+        await db.members.bulkPut(items);
+      }
+
+      if (data.meetings && Array.isArray(data.meetings)) {
+        const items: OfflineMeeting[] = data.meetings.map((m: Record<string, unknown>) => ({
+          id: m.id as string,
+          group_id: m.group_id as string,
+          meeting_date: m.meeting_date as string,
+          is_cancelled: (m.is_cancelled ?? false) as boolean,
+          synced: true,
+        }));
+        await db.meetings.bulkPut(items);
+      }
+
+      if (data.attendance && Array.isArray(data.attendance)) {
+        const items: OfflineAttendance[] = data.attendance.map((a: Record<string, unknown>) => ({
+          id: a.id as string,
+          meeting_id: a.meeting_id as string,
+          member_id: a.member_id as string,
+          is_present: (a.is_present ?? false) as boolean,
+          synced: true,
+          created_at: (a.created_at ?? new Date().toISOString()) as string,
+        }));
+        await db.attendance.bulkPut(items);
+      }
+    } catch (error) {
+      console.error('Error downloading server data:', error);
+    }
+  }, []);
+
+  // Sincronizar dados pendentes com a API Next.js
   const syncData = useCallback(async () => {
     if (!isOnline || isSyncing) return;
 
     setIsSyncing(true);
 
     try {
-      // 1. Buscar itens pendentes
       const pending = await db.pendingSync.toArray();
 
       if (pending.length === 0) {
+        if (groupId) await downloadServerData();
         setLastSyncTime(new Date());
         return;
       }
 
-      // 2. Processar cada item pendente
+      // Agrupar itens de attendance por meeting_id para um POST por reunião
+      const attendanceByMeeting = new Map<string, { member_id: string; is_present: boolean }[]>();
+      const attendanceIdsByMeeting = new Map<string, number[]>();
+
       for (const item of pending) {
+        if (item.type !== 'attendance' || (item.action !== 'create' && item.action !== 'update')) continue;
+        const d = item.data as { meeting_id?: string; member_id?: string; is_present?: boolean };
+        if (!d?.meeting_id || d.member_id === undefined) continue;
+        const arr = attendanceByMeeting.get(d.meeting_id) ?? [];
+        arr.push({ member_id: d.member_id, is_present: d.is_present ?? false });
+        attendanceByMeeting.set(d.meeting_id, arr);
+        const ids = attendanceIdsByMeeting.get(d.meeting_id) ?? [];
+        if (item.id != null) ids.push(item.id);
+        attendanceIdsByMeeting.set(d.meeting_id, ids);
+      }
+
+      for (const [meetingId, attendance] of attendanceByMeeting) {
         try {
-          switch (item.type) {
-            case 'attendance':
-              if (item.action === 'create' || item.action === 'update') {
-                await supabase
-                  .from('attendance')
-                  .upsert(item.data, { onConflict: 'meeting_id,member_id' });
-              }
-              break;
-
-            case 'member':
-              if (item.action === 'create') {
-                await supabase.from('members').insert(item.data);
-              } else if (item.action === 'update') {
-                await supabase.from('members').update(item.data).eq('id', item.data.id);
-              }
-              break;
-
-            case 'meeting':
-              if (item.action === 'create' || item.action === 'update') {
-                await supabase.from('meetings').upsert(item.data);
-              }
-              break;
+          const res = await fetch('/api/attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ meeting_id: meetingId, attendance }),
+          });
+          if (res.ok) {
+            const idsToDelete = attendanceIdsByMeeting.get(meetingId) ?? [];
+            for (const id of idsToDelete) {
+              await db.pendingSync.delete(id);
+            }
           }
-
-          // Remover item sincronizado
-          if (item.id) {
-            await db.pendingSync.delete(item.id);
-          }
-        } catch (error) {
-          console.error(`Error syncing ${item.type}:`, error);
-          // Continuar com próximo item mesmo se este falhar
+        } catch (err) {
+          console.error('Error syncing attendance:', err);
         }
       }
 
-      // 3. Atualizar contadores
+      // Processar member e meeting (create/update) um a um
+      for (const item of pending) {
+        if (item.type === 'attendance') continue;
+        try {
+          if (item.type === 'member') {
+            const d = item.data as Record<string, unknown>;
+            if (item.action === 'create') {
+              const res = await fetch('/api/members', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  full_name: d.full_name,
+                  phone: d.phone,
+                  birth_date: d.birth_date ?? null,
+                  member_type: d.member_type ?? 'participant',
+                }),
+              });
+              if (res.ok && item.id != null) await db.pendingSync.delete(item.id);
+            } else if (item.action === 'update' && d.id) {
+              const res = await fetch(`/api/members/${d.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  full_name: d.full_name,
+                  phone: d.phone,
+                  birth_date: d.birth_date,
+                  member_type: d.member_type,
+                  is_active: d.is_active,
+                }),
+              });
+              if (res.ok && item.id != null) await db.pendingSync.delete(item.id);
+            }
+          } else if (item.type === 'meeting') {
+            const d = item.data as Record<string, unknown>;
+            if (item.action === 'create') {
+              const res = await fetch('/api/meetings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  meeting_date: d.meeting_date,
+                  meeting_time: d.meeting_time,
+                  title: d.title,
+                  notes: d.notes,
+                  meeting_type: d.meeting_type ?? 'regular',
+                }),
+              });
+              if (res.ok && item.id != null) await db.pendingSync.delete(item.id);
+            } else if (item.action === 'update' && d.id) {
+              const res = await fetch(`/api/meetings/${d.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  meeting_date: d.meeting_date,
+                  meeting_time: d.meeting_time,
+                  title: d.title,
+                  notes: d.notes,
+                  meeting_type: d.meeting_type,
+                  is_cancelled: d.is_cancelled,
+                }),
+              });
+              if (res.ok && item.id != null) await db.pendingSync.delete(item.id);
+            }
+          }
+        } catch (err) {
+          console.error(`Error syncing ${item.type}:`, err);
+        }
+      }
+
       await updatePendingCount();
       setLastSyncTime(new Date());
 
-      // 4. Baixar dados atualizados do servidor
       if (groupId) {
-        await downloadServerData(groupId);
+        await downloadServerData();
       }
     } catch (error) {
       console.error('Sync error:', error);
     } finally {
       setIsSyncing(false);
     }
-  }, [isOnline, isSyncing, groupId, updatePendingCount]);
-
-  // Baixar dados do servidor para cache local
-  const downloadServerData = async (gId: string) => {
-    try {
-      // Baixar membros
-      const { data: members } = await supabase
-        .from('members')
-        .select('*')
-        .eq('group_id', gId)
-        .eq('is_active', true);
-
-      if (members && Array.isArray(members)) {
-        const items = (members as Record<string, unknown>[]).map((m) => ({ ...m, synced: true } as OfflineMember));
-        await db.members.bulkPut(items);
-      }
-
-      // Baixar reuniões recentes (último mês)
-      const lastMonth = new Date();
-      lastMonth.setMonth(lastMonth.getMonth() - 1);
-
-      const { data: meetings } = await supabase
-        .from('meetings')
-        .select('*')
-        .eq('group_id', gId)
-        .gte('meeting_date', lastMonth.toISOString().split('T')[0]);
-
-      if (meetings && Array.isArray(meetings)) {
-        const items = (meetings as Record<string, unknown>[]).map((m) => ({ ...m, synced: true } as OfflineMeeting));
-        await db.meetings.bulkPut(items);
-      }
-
-      // Baixar presenças das reuniões
-      if (meetings && meetings.length > 0) {
-        const meetingIds = (meetings as { id: string }[]).map((m) => m.id);
-        
-        const { data: attendance } = await supabase
-          .from('attendance')
-          .select('*')
-          .in('meeting_id', meetingIds);
-
-        if (attendance && Array.isArray(attendance)) {
-          const items = (attendance as Record<string, unknown>[]).map((a) => ({ ...a, synced: true } as OfflineAttendance));
-          await db.attendance.bulkPut(items);
-        }
-      }
-    } catch (error) {
-      console.error('Error downloading server data:', error);
-    }
-  };
+  }, [isOnline, isSyncing, groupId, updatePendingCount, downloadServerData]);
 
   // Sincronizar automaticamente quando voltar online
   useEffect(() => {
@@ -168,7 +228,7 @@ export function useOfflineSync(groupId?: string) {
   const addToPendingSync = async (
     type: PendingSync['type'],
     action: PendingSync['action'],
-    data: any
+    data: Record<string, unknown>
   ) => {
     try {
       await db.pendingSync.add({

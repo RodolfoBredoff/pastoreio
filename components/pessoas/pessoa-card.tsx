@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { calculateAge, formatPhone, isTodayBirthday } from '@/lib/utils';
 import { MEMBER_TYPE_LABELS } from '@/lib/constants';
 import { Pencil, Cake, AlertTriangle, CalendarCheck } from 'lucide-react';
+import { DeleteMemberButton } from './delete-member-button';
 import { cn } from '@/lib/utils';
 import { MemberAttendanceStats } from './member-attendance-stats';
 
@@ -31,6 +32,7 @@ interface Member {
 interface PessoaCardProps {
   member: Member;
   attendanceStatus?: AttendanceStatus;
+  canDelete?: boolean;
 }
 
 const attendanceConfig: Record<
@@ -55,7 +57,7 @@ const attendanceConfig: Record<
   },
 };
 
-export function PessoaCard({ member, attendanceStatus }: PessoaCardProps) {
+export function PessoaCard({ member, attendanceStatus, canDelete }: PessoaCardProps) {
   const [showPresenca, setShowPresenca] = useState(false);
 
   let age: number | null = null;
@@ -122,10 +124,19 @@ export function PessoaCard({ member, attendanceStatus }: PessoaCardProps) {
           <CalendarCheck className="h-4 w-4 shrink-0" />
           Ver presença
         </Button>
-        <LinkButton href={`/pessoas/${member.id}`} variant="outline" size="sm" className="flex-1 min-w-0 w-full">
+        <LinkButton href={`/pessoas/${member.id}`} variant="outline" size="sm" className="flex-1 min-w-0">
           <Pencil className="h-4 w-4" />
           Editar
         </LinkButton>
+        {canDelete && (
+          <DeleteMemberButton
+            memberId={member.id}
+            memberName={member.full_name}
+            canDelete
+            variant="icon"
+            className="shrink-0"
+          />
+        )}
       </CardFooter>
     </Card>
 

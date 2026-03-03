@@ -17,8 +17,9 @@ import {
   DialogFooter,
   DialogClose,
 } from '@/components/ui/dialog';
-import { Calendar as CalendarIcon, Clock, Pencil, Settings, Ban, RotateCcw, PlusCircle, Star, CalendarPlus, Trash2, Users, Link2, ListChecks } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Pencil, Settings, Ban, RotateCcw, PlusCircle, Star, CalendarPlus, Trash2, Users, Link2, ListChecks, List, CalendarDays } from 'lucide-react';
 import { formatDate, getDayOfWeekName } from '@/lib/utils';
+import { AgendaCalendar } from './agenda-calendar';
 
 // ============================================================
 // Tipos
@@ -279,18 +280,30 @@ function AddMeetingDialog({
   open,
   onOpenChange,
   onSave,
+  initialDate,
+  initialTime,
 }: {
   group: GroupSettings;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onSave: () => void;
+  initialDate?: string | null;
+  initialTime?: string | null;
 }) {
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const defaultTimeStr = group.default_meeting_time.substring(0, 5);
 
-  const [date, setDate] = useState(todayStr);
-  const [time, setTime] = useState(group.default_meeting_time.substring(0, 5));
+  const [date, setDate] = useState(initialDate || todayStr);
+  const [time, setTime] = useState(initialTime || defaultTimeStr);
   const [title, setTitle] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      if (initialDate) setDate(initialDate);
+      if (initialTime) setTime(initialTime.substring(0, 5));
+    }
+  }, [open, initialDate, initialTime]);
   const [notes, setNotes] = useState('');
   const [location, setLocation] = useState('');
   const [meetingType, setMeetingType] = useState<'regular' | 'special_event'>('regular');
@@ -670,6 +683,8 @@ export function AgendaClient({
   const [showGroupSettings, setShowGroupSettings] = useState(false);
   const [showBulkCreate, setShowBulkCreate] = useState(false);
   const [showAddMeeting, setShowAddMeeting] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [addMeetingInitialDate, setAddMeetingInitialDate] = useState<{ date: string; time: string } | null>(null);
 
   // canEdit: leader and secretary can edit meetings; canSettings: only leader
   const canEditMeetings = canEdit !== undefined ? canEdit : !readOnly;
@@ -746,6 +761,53 @@ export function AgendaClient({
         )}
       </div>
 
+      {/* Abas: Lista | Calendário */}
+      <div className="flex gap-2 border-b pb-2">
+        <Button
+          variant={viewMode === 'list' ? 'default' : 'ghost'}
+          size="sm"
+          onClick={() => setViewMode('list')}
+          className="gap-2"
+        >
+          <List className="h-4 w-4" />
+          Lista
+        </Button>
+        <Button
+          variant={viewMode === 'calendar' ? 'default' : 'ghost'}
+          size="sm"
+          onClick={() => setViewMode('calendar')}
+          className="gap-2"
+        >
+          <CalendarDays className="h-4 w-4" />
+          Calendário
+        </Button>
+      </div>
+
+      {viewMode === 'calendar' && (
+        <AgendaCalendar
+          meetings={meetings}
+          pastMeetings={localPastMeetings}
+          defaultTime={group.default_meeting_time}
+          onSelectEvent={(meeting) => {
+            const full = meetings.find((m) => m.id === meeting.id) ?? localPastMeetings.find((m) => m.id === meeting.id);
+            if (full) setEditingMeeting(full);
+          }}
+          onSelectSlot={
+            canEditMeetings
+              ? (date) => {
+                  const y = date.getFullYear();
+                  const m = String(date.getMonth() + 1).padStart(2, '0');
+                  const d = String(date.getDate()).padStart(2, '0');
+                  const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+                  setAddMeetingInitialDate({ date: `${y}-${m}-${d}`, time });
+                  setShowAddMeeting(true);
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {viewMode === 'list' && (
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Próximas Reuniões */}
         <Card>
@@ -931,6 +993,7 @@ export function AgendaClient({
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Dialog: Editar Reunião */}
       {editingMeeting && (
@@ -954,8 +1017,17 @@ export function AgendaClient({
       <AddMeetingDialog
         group={group}
         open={showAddMeeting}
-        onOpenChange={setShowAddMeeting}
-        onSave={() => { refresh(); setShowAddMeeting(false); }}
+        onOpenChange={(v) => {
+          if (!v) setAddMeetingInitialDate(null);
+          setShowAddMeeting(v);
+        }}
+        onSave={() => {
+          refresh();
+          setShowAddMeeting(false);
+          setAddMeetingInitialDate(null);
+        }}
+        initialDate={addMeetingInitialDate?.date}
+        initialTime={addMeetingInitialDate?.time}
       />
 
       {/* Dialog: Gerar Encontros em Lote */}

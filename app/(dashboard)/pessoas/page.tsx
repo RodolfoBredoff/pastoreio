@@ -1,11 +1,16 @@
-import { getMembersByLeaderGroup } from '@/lib/db/queries';
+import { getCurrentLeader, getMembersByLeaderGroup } from '@/lib/db/queries';
+import { canDeleteMembers } from '@/lib/auth/permissions';
 import { PessoaCard } from '@/components/pessoas/pessoa-card';
 import { BroadcastDialogClient } from '@/components/pessoas/broadcast-dialog-client';
 import { LinkButton } from '@/components/ui/link-button';
 import { UserPlus, Users } from 'lucide-react';
 
 export default async function PessoasPage() {
-  const members = await getMembersByLeaderGroup();
+  const [leader, members] = await Promise.all([
+    getCurrentLeader(),
+    getMembersByLeaderGroup(),
+  ]);
+  const canDelete = leader ? canDeleteMembers(leader.role) : false;
 
   return (
     <div className="space-y-6 w-full min-w-0">
@@ -30,7 +35,7 @@ export default async function PessoasPage() {
       {members && members.length > 0 ? (
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           {members.map((member) => (
-            <PessoaCard key={member.id} member={member} />
+            <PessoaCard key={member.id} member={member} canDelete={canDelete} />
           ))}
         </div>
       ) : (

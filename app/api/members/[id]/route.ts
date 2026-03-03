@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
-import { updateMember } from '@/lib/db/queries';
+import { getCurrentLeader, updateMember } from '@/lib/db/queries';
+import { canDeleteMembers, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 
 /**
  * PUT /api/members/[id]
@@ -45,7 +46,7 @@ export async function PUT(
 
 /**
  * DELETE /api/members/[id]
- * Remove um membro (soft delete)
+ * Remove um membro (soft delete). Apenas líder e coordenador podem excluir.
  */
 export async function DELETE(
   request: Request,
@@ -53,8 +54,23 @@ export async function DELETE(
 ) {
   try {
     await requireAuth();
-    const { id } = await params;
+    const leader = await getCurrentLeader();
 
+    if (!leader?.group_id) {
+      return NextResponse.json(
+        { error: 'Líder não está vinculado a um grupo' },
+        { status: 400 }
+      );
+    }
+
+    if (!canDeleteMembers(leader.role)) {
+      return NextResponse.json(
+        { error: SECRETARY_FORBIDDEN_MESSAGE },
+        { status: 403 }
+      );
+    }
+
+    const { id } = await params;
     const success = await updateMember(id, { is_active: false });
 
     if (!success) {

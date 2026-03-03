@@ -13,11 +13,18 @@ interface OfflineIndicatorProps {
 
 export function OfflineIndicator({ groupId }: OfflineIndicatorProps) {
   const [mounted, setMounted] = useState(false);
-  const { isOnline, isSyncing, pendingCount, lastSyncTime, syncData } = useOfflineSync(groupId);
+  const { isOnline, isSyncing, pendingCount, lastSyncTime, syncData, downloadServerData } = useOfflineSync(groupId);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Quando online e com grupo, manter cache local atualizado (para uso offline posterior)
+  useEffect(() => {
+    if (mounted && isOnline && groupId) {
+      downloadServerData();
+    }
+  }, [mounted, isOnline, groupId, downloadServerData]);
 
   if (isOnline && pendingCount === 0) {
     return null; // Não mostrar nada se está online e tudo sincronizado

@@ -1,6 +1,8 @@
 import { getCurrentLeader, getMemberById } from '@/lib/db/queries';
+import { canDeleteMembers } from '@/lib/auth/permissions';
 import { PessoaForm } from '@/components/pessoas/pessoa-form';
 import { MemberAttendanceStats } from '@/components/pessoas/member-attendance-stats';
+import { DeleteMemberButton } from '@/components/pessoas/delete-member-button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { notFound } from 'next/navigation';
 
@@ -22,11 +24,20 @@ export default async function EditarPessoaPage({
     notFound();
   }
 
+  const canDelete = canDeleteMembers(leader.role);
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold mb-2">Editar Pessoa</h1>
-        <p className="text-muted-foreground">{member.full_name}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold mb-2">Editar Pessoa</h1>
+          <p className="text-muted-foreground">{member.full_name}</p>
+        </div>
+        <DeleteMemberButton
+          memberId={id}
+          memberName={member.full_name}
+          canDelete={canDelete}
+        />
       </div>
 
       <MemberAttendanceStats memberId={id} />
