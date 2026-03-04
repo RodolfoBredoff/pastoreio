@@ -78,10 +78,20 @@ export function ChangePasswordForm({
       if (!res.ok) {
         setError(data.error || 'Erro ao alterar senha');
       } else {
-        setSuccess('Senha alterada com sucesso!');
         setCurrentPassword('');
         setCurrentConfirm('');
         setNewPassword('');
+        // Full page load para o dashboard garante que o layout rode de novo no servidor e leia must_change_password = false (evita loop de redirect)
+        if (mustChangePassword) {
+          setSuccess('Senha alterada com sucesso! Redirecionando...');
+          const isOrg = typeof window !== 'undefined' && window.location.pathname.startsWith('/org');
+          window.location.href = isOrg ? '/org/dashboard' : '/dashboard';
+          return;
+        }
+        setSuccess('Senha alterada com sucesso!');
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'change-password-form.tsx',message:'Form success: after change password',data:{mustChangePassword,fullRedirectScheduled:!!mustChangePassword},timestamp:Date.now(),hypothesisId:'H5',runId:'post-fix-v2'})}).catch(()=>{});
+        // #endregion
       }
     } catch {
       setError('Erro ao processar solicitação.');

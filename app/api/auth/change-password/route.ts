@@ -54,7 +54,9 @@ export async function POST(request: Request) {
       `UPDATE users SET password_hash = $1, must_change_password = FALSE WHERE id = $2`,
       [newHash, user.id]
     );
-
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/auth/change-password/route.ts',message:'Change password API: UPDATE executed',data:{userId:user.id,mustChangeWas:mustChange},timestamp:Date.now(),hypothesisId:'H3-H4'})}).catch(()=>{});
+    // #endregion
     return NextResponse.json({ success: true, message: 'Senha alterada com sucesso' });
   } catch (error) {
     console.error('Erro ao alterar senha:', error);
