@@ -14,7 +14,8 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { MessageCircle, Send, Loader2 } from 'lucide-react';
+import { MessageCircle, Send, Loader2, Calendar } from 'lucide-react';
+import { formatDate } from '@/lib/utils';
 import { getWhatsAppUrl } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -76,16 +77,43 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState(0);
   const [absentMembers, setAbsentMembers] = useState<AbsentMemberItem[]>([]);
+  const [absentSubMode, setAbsentSubMode] = useState<'consecutive' | 'most_absent' | 'by_meetings'>('consecutive');
+  const [meetingsList, setMeetingsList] = useState<{ id: string; meeting_date: string; title: string | null }[]>([]);
+  const [selectedMeetingIds, setSelectedMeetingIds] = useState<Set<string>>(new Set());
+  const [loadingAbsent, setLoadingAbsent] = useState(false);
   const prevFilterRef = useRef<'all' | 'participant' | 'visitor' | 'absent'>('all');
 
-  // Buscar faltantes ao abrir o dialog
+  // Lista de encontros para filtro "por encontro(s)"
   useEffect(() => {
-    if (!open) return;
-    fetch('/api/members/absent')
+    if (!open || filter !== 'absent') return;
+    fetch('/api/meetings?past=1')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: { id: string; meeting_date: string; title: string | null }[]) => setMeetingsList(data))
+      .catch(() => setMeetingsList([]));
+  }, [open, filter]);
+
+  // Buscar faltantes conforme submodo e encontros selecionados
+  useEffect(() => {
+    if (!open || filter !== 'absent') return;
+    if (absentSubMode === 'by_meetings' && selectedMeetingIds.size === 0) {
+      setAbsentMembers([]);
+      return;
+    }
+    setLoadingAbsent(true);
+    const params = new URLSearchParams();
+    if (absentSubMode === 'most_absent') {
+      params.set('mode', 'most_absent');
+      params.set('limit', '50');
+    } else if (absentSubMode === 'by_meetings' && selectedMeetingIds.size > 0) {
+      params.set('meeting_ids', Array.from(selectedMeetingIds).join(','));
+    }
+    const url = `/api/members/absent${params.toString() ? `?${params.toString()}` : ''}`;
+    fetch(url)
       .then((r) => (r.ok ? r.json() : []))
       .then((data: AbsentMemberItem[]) => setAbsentMembers(data))
-      .catch(() => setAbsentMembers([]));
-  }, [open]);
+      .catch(() => setAbsentMembers([]))
+      .finally(() => setLoadingAbsent(false));
+  }, [open, filter, absentSubMode, selectedMeetingIds]);
 
   // Lista base conforme filtro: todos / participantes / visitantes / faltantes
   const baseList: { id: string; full_name: string; phone: string | null; member_type: 'participant' | 'visitor' }[] =
@@ -237,6 +265,84 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
             </div>
           </div>
 
+          {/* Sub-opções quando Faltantes está ativo */}
+          {filter === 'absent' && (
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">Critério dos faltantes:</Label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant={absentSubMode === 'consecutive' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentSubMode('consecutive')}
+                >
+                  Faltas seguidas (1–2)
+                </Button>
+                <Button
+                  type="button"
+                  variant={absentSubMode === 'most_absent' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentSubMode('most_absent')}
+                >
+                  Mais faltantes
+                </Button>
+                <Button
+                  type="button"
+                  variant={absentSubMode === 'by_meetings' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentSubMode('by_meetings')}
+                >
+                  Por encontro(s)
+                </Button>
+              </div>
+              {absentSubMode === 'by_meetings' && (
+                <div className="space-y-2 pt-2 border-t">
+                  <Label className="text-xs flex items-center gap-1">
+                    <Calendar className="h-3.5 w-3.5" />
+                    Selecione em qual(is) encontro(s) a pessoa faltou:
+                  </Label>
+                  <div className="max-h-32 overflow-y-auto border rounded-md p-2 space-y-1">
+                    {meetingsList.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Carregando encontros...</p>
+                    ) : (
+                      meetingsList.map((meeting) => (
+                        <label
+                          key={meeting.id}
+                          className="flex items-center gap-3 py-1.5 px-2 rounded-md cursor-pointer hover:bg-muted/50"
+                        >
+                          <Checkbox
+                            checked={selectedMeetingIds.has(meeting.id)}
+                            onCheckedChange={(checked) => {
+                              setSelectedMeetingIds((prev) => {
+                                const next = new Set(prev);
+                                if (checked) next.add(meeting.id);
+                                else next.delete(meeting.id);
+                                return next;
+                              });
+                            }}
+                          />
+                          <span className="text-sm">
+                            {formatDate(meeting.meeting_date)}
+                            {meeting.title ? ` — ${meeting.title}` : ''}
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  {selectedMeetingIds.size === 0 && meetingsList.length > 0 && (
+                    <p className="text-xs text-amber-600">Selecione ao menos um encontro para ver quem faltou.</p>
+                  )}
+                </div>
+              )}
+              {loadingAbsent && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Carregando lista...
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Busca */}
           <div className="space-y-1">
             <Label htmlFor="search-members">Buscar por nome</Label>
@@ -281,6 +387,11 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
                       disabled={!hasPhone}
                     />
                     <span className="text-sm flex-1 truncate">{member.full_name}</span>
+                    {filter === 'absent' && 'consecutive_absences' in member && typeof (member as AbsentMemberItem).consecutive_absences === 'number' && (
+                      <Badge variant="outline" className="text-xs shrink-0">
+                        {(member as AbsentMemberItem).consecutive_absences} falta(s)
+                      </Badge>
+                    )}
                     <Badge variant="secondary" className="text-xs shrink-0">
                       {member.member_type === 'participant' ? 'Part.' : 'Visit.'}
                     </Badge>

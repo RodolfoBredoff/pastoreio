@@ -33,9 +33,6 @@ export default async function DashboardLayout({
     [user.id]
   );
   const mustChangePassword = userRow?.must_change_password === true;
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/(dashboard)/layout.tsx',message:'Dashboard layout read must_change_password',data:{userId:user.id,dbValue:userRow?.must_change_password,mustChangePassword},timestamp:Date.now(),hypothesisId:'H1-H3'})}).catch(()=>{});
-  // #endregion
 
   let groupName = 'Meu Grupo';
   if (leader.group_id) {

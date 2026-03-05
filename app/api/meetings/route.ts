@@ -2,8 +2,40 @@ import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
-import { query } from '@/lib/db/postgres';
+import { query, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
+
+/**
+ * GET /api/meetings
+ * Lista reuniões do grupo (passadas por padrão) para filtros, ex.: mensagem em grupo por encontro.
+ */
+export async function GET(request: Request) {
+  try {
+    await requireAuth();
+    const leader = await getCurrentLeader();
+    if (!leader?.group_id) {
+      return NextResponse.json([], { status: 200 });
+    }
+    const { searchParams } = new URL(request.url);
+    const past = searchParams.get('past');
+    const limit = Math.min(Number(searchParams.get('limit')) || 30, 100);
+    const onlyPast = past !== '0' && past !== 'false';
+    const rows = await queryMany<{ id: string; meeting_date: string; title: string | null }>(
+      onlyPast
+        ? `SELECT id, meeting_date, title FROM meetings
+           WHERE group_id = $1 AND is_cancelled = FALSE AND meeting_date <= CURRENT_DATE
+           ORDER BY meeting_date DESC LIMIT $2`
+        : `SELECT id, meeting_date, title FROM meetings
+           WHERE group_id = $1 AND is_cancelled = FALSE
+           ORDER BY meeting_date DESC LIMIT $2`,
+      [leader.group_id, limit]
+    );
+    return NextResponse.json(rows);
+  } catch (error) {
+    console.error('Erro ao listar reuniões:', error);
+    return NextResponse.json([], { status: 200 });
+  }
+}
 
 /**
  * POST /api/meetings

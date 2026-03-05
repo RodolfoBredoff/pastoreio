@@ -89,9 +89,6 @@ export function ChangePasswordForm({
           return;
         }
         setSuccess('Senha alterada com sucesso!');
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/68b58dbd-8e78-48cd-8fa2-18d1de18a7f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'change-password-form.tsx',message:'Form success: after change password',data:{mustChangePassword,fullRedirectScheduled:!!mustChangePassword},timestamp:Date.now(),hypothesisId:'H5',runId:'post-fix-v2'})}).catch(()=>{});
-        // #endregion
       }
     } catch {
       setError('Erro ao processar solicitação.');
