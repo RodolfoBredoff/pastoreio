@@ -36,12 +36,14 @@ interface ListData {
     meeting_date: string;
     meeting_time: string | null;
     location: string | null;
+    attendance_list_deadline?: string | null;
   };
   members: MemberItem[];
   guests: GuestItem[];
   count_present: number;
   count_absent: number;
   count_guests: number;
+  is_expired?: boolean;
 }
 
 function formatDate(d: string) {
@@ -210,7 +212,14 @@ export default function ListaPresencaPage() {
     );
   }
 
-  const { meeting, members, guests = [], count_present, count_absent, count_guests = 0 } = data;
+  const { meeting, members, guests = [], count_present, count_absent, count_guests = 0, is_expired } = data;
+
+  const isExpired = Boolean(is_expired);
+
+  const mapsUrl =
+    meeting.location && meeting.location.trim().length > 0
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(meeting.location.trim())}`
+      : null;
 
   return (
     <div className="min-h-screen bg-muted/30 p-4 pb-8">
@@ -228,7 +237,18 @@ export default function ListaPresencaPage() {
             {meeting.location && (
               <span className="flex items-center gap-1">
                 <MapPin className="h-4 w-4" />
-                {meeting.location}
+                {mapsUrl ? (
+                  <a
+                    href={mapsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline decoration-dotted underline-offset-2"
+                  >
+                    {meeting.location}
+                  </a>
+                ) : (
+                  meeting.location
+                )}
               </span>
             )}
           </div>
@@ -255,10 +275,16 @@ export default function ListaPresencaPage() {
         </div>
 
         <div className="rounded-lg border bg-card overflow-hidden">
-          <div className="px-4 py-3 border-b bg-muted/50">
+          <div className="px-4 py-3 border-b bg-muted/50 space-y-1">
             <p className="text-sm text-muted-foreground">
               Selecione sua opção e informe e-mail ou telefone para registrar.
             </p>
+            {isExpired && (
+              <p className="text-xs text-amber-700">
+                O prazo de confirmação para este encontro foi encerrado. Você ainda pode visualizar a lista,
+                mas não é mais possível registrar novas respostas.
+              </p>
+            )}
           </div>
           <ul className="divide-y">
             {members.map((member) => (
@@ -285,6 +311,10 @@ export default function ListaPresencaPage() {
                           Vou me ausentar
                         </>
                       )}
+                    </span>
+                  ) : isExpired ? (
+                    <span className="text-xs text-muted-foreground">
+                      Prazo encerrado para registrar presença.
                     </span>
                   ) : (
                     <>
@@ -321,10 +351,12 @@ export default function ListaPresencaPage() {
             <p className="text-sm text-muted-foreground">
               Vai levar alguém que ainda não está na lista? Cadastre o visitante abaixo.
             </p>
-            <Button variant="outline" size="sm" onClick={() => { setGuestModalOpen(true); setGuestError(''); }}>
-              <UserPlus className="h-4 w-4 mr-2" />
-              Vou levar um visitante
-            </Button>
+            {!isExpired && (
+              <Button variant="outline" size="sm" onClick={() => { setGuestModalOpen(true); setGuestError(''); }}>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Vou levar um visitante
+              </Button>
+            )}
           </div>
           {guests.length > 0 ? (
             <ul className="divide-y">

@@ -64,6 +64,11 @@ export async function GET(
       // Tabela pode não existir se a migration 012 não foi aplicada
     }
 
+    const isExpired =
+      meeting.attendance_list_deadline !== null &&
+      !Number.isNaN(new Date(meeting.attendance_list_deadline).getTime()) &&
+      new Date() > new Date(meeting.attendance_list_deadline);
+
     return NextResponse.json({
       meeting: {
         id: meeting.id,
@@ -71,6 +76,7 @@ export async function GET(
         meeting_date: meeting.meeting_date,
         meeting_time: meeting.meeting_time,
         location: meeting.location,
+        attendance_list_deadline: meeting.attendance_list_deadline,
       },
       members: members.map((m) => ({
         id: m.id,
@@ -86,6 +92,7 @@ export async function GET(
       count_present: countPresent,
       count_absent: countAbsent,
       count_guests: guests.length,
+      is_expired: isExpired,
     });
   } catch (error) {
     console.error('Erro ao buscar lista de presença:', error);
