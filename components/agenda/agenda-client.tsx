@@ -35,6 +35,7 @@ interface Meeting {
   notes: string | null;
   meeting_type: 'regular' | 'special_event';
   created_at: string;
+  location: string | null;
   attendance_list_token?: string | null;
   attendance_list_deadline?: string | null;
 }
@@ -93,6 +94,7 @@ function EditMeetingDialog({
   const [title, setTitle] = useState(meeting.title ?? '');
   const [notes, setNotes] = useState(meeting.notes ?? '');
   const [meetingType, setMeetingType] = useState<'regular' | 'special_event'>(meeting.meeting_type ?? 'regular');
+  const [location, setLocation] = useState(meeting.location ?? '');
   const [attendanceDeadline, setAttendanceDeadline] = useState(
     meeting.attendance_list_deadline ? toInputDate(meeting.attendance_list_deadline) : ''
   );
@@ -106,6 +108,7 @@ function EditMeetingDialog({
     setTitle(meeting.title ?? '');
     setNotes(meeting.notes ?? '');
     setMeetingType(meeting.meeting_type ?? 'regular');
+    setLocation(meeting.location ?? '');
     setAttendanceDeadline(meeting.attendance_list_deadline ? toInputDate(meeting.attendance_list_deadline) : '');
 
     if (members.length > 0) {
@@ -150,6 +153,7 @@ function EditMeetingDialog({
           title: title || null,
           notes: notes || null,
           meeting_type: meetingType,
+          location: location || null,
           attendance_list_deadline: attendanceDeadline || null,
         }),
       });
@@ -168,7 +172,14 @@ function EditMeetingDialog({
         if (!attRes.ok) { const d = await attRes.json(); throw new Error(d.error || 'Erro ao salvar presenças'); }
       }
 
-      onSave({ meeting_date: date, meeting_time: time || null, title: title || null, notes: notes || null, meeting_type: meetingType });
+      onSave({
+        meeting_date: date,
+        meeting_time: time || null,
+        title: title || null,
+        notes: notes || null,
+        meeting_type: meetingType,
+        location: location || null,
+      });
       onOpenChange(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao salvar');
@@ -205,6 +216,15 @@ function EditMeetingDialog({
             <Label htmlFor="meeting-time">Horário</Label>
             <Input id="meeting-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
             <p className="text-xs text-muted-foreground">Horário padrão do grupo: {defaultTime}</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="meeting-location">Local (opcional)</Label>
+            <Input
+              id="meeting-location"
+              placeholder="Ex: Salão da igreja, Casa do João..."
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="meeting-notes">Observações (opcional)</Label>

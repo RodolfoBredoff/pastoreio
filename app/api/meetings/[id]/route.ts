@@ -42,13 +42,14 @@ export async function PUT(
     }
 
     const data = await request.json();
-    const { meeting_date, meeting_time, is_cancelled, title, notes, meeting_type, attendance_list_deadline } = data as {
+    const { meeting_date, meeting_time, is_cancelled, title, notes, meeting_type, location, attendance_list_deadline } = data as {
       meeting_date?: string;
       meeting_time?: string | null;
       is_cancelled?: boolean;
       title?: string | null;
       notes?: string | null;
       meeting_type?: 'regular' | 'special_event';
+      location?: string | null;
       attendance_list_deadline?: string | null;
     };
 
@@ -75,6 +76,11 @@ export async function PUT(
     if (notes !== undefined) {
       updates.push(`notes = $${paramIndex++}`);
       values.push(notes || null);
+    }
+    if (location !== undefined) {
+      updates.push(`location = $${paramIndex++}`);
+      const trimmed = typeof location === 'string' ? location.trim() : '';
+      values.push(trimmed || null);
     }
     if (meeting_type !== undefined && (meeting_type === 'regular' || meeting_type === 'special_event')) {
       updates.push(`meeting_type = $${paramIndex++}`);

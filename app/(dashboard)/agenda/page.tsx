@@ -12,6 +12,7 @@ type MeetingRow = {
   notes: string | null;
   meeting_type: 'regular' | 'special_event';
   created_at: string;
+  location: string | null;
   attendance_list_token?: string | null;
   attendance_list_deadline?: string | null;
 };
@@ -50,7 +51,7 @@ export default async function AgendaPage() {
 
   const meetingsPromise = hasAttendanceListColumn
     ? queryMany<MeetingRow>(
-        `SELECT id, group_id, meeting_date, meeting_time, is_cancelled, title, notes, meeting_type, created_at, attendance_list_token${
+        `SELECT id, group_id, meeting_date, meeting_time, is_cancelled, title, notes, meeting_type, created_at, location, attendance_list_token${
           hasAttendanceDeadlineColumn ? ', attendance_list_deadline' : ''
         }
          FROM meetings
@@ -59,7 +60,7 @@ export default async function AgendaPage() {
         [leader.group_id]
       )
     : queryMany<MeetingRow>(
-        `SELECT id, group_id, meeting_date, meeting_time, is_cancelled, title, notes, meeting_type, created_at
+        `SELECT id, group_id, meeting_date, meeting_time, is_cancelled, title, notes, meeting_type, created_at, location
          FROM meetings
          WHERE group_id = $1 AND meeting_date >= CURRENT_DATE AND is_cancelled = FALSE
          ORDER BY meeting_date ASC LIMIT 30`,
@@ -75,7 +76,7 @@ export default async function AgendaPage() {
   const pastMeetingsPromise = hasAttendanceListColumn
     ? queryMany<PastMeetingRow>(
         `SELECT m.id, m.group_id, m.meeting_date, m.meeting_time, m.is_cancelled,
-                m.title, m.notes, m.meeting_type, m.created_at, m.attendance_list_token${
+                m.title, m.notes, m.meeting_type, m.created_at, m.location, m.attendance_list_token${
                   hasAttendanceDeadlineColumn ? ', m.attendance_list_deadline' : ''
                 },
                 (COUNT(a.id)::int + COALESCE(MAX(ag.guest_count), 0)) as attendance_count
@@ -92,14 +93,14 @@ export default async function AgendaPage() {
       )
     : queryMany<{ attendance_count: number } & Omit<PastMeetingRow, 'attendance_list_token'>>(
         `SELECT m.id, m.group_id, m.meeting_date, m.meeting_time, m.is_cancelled,
-                m.title, m.notes, m.meeting_type, m.created_at,
+                m.title, m.notes, m.meeting_type, m.created_at, m.location,
                 (COUNT(a.id)::int + COALESCE(MAX(ag.guest_count), 0)) as attendance_count
          FROM meetings m
          LEFT JOIN attendance a ON a.meeting_id = m.id
          LEFT JOIN (SELECT meeting_id, COUNT(*)::int as guest_count FROM attendance_guests GROUP BY meeting_id) ag ON ag.meeting_id = m.id
          WHERE m.group_id = $1 AND m.meeting_date < CURRENT_DATE
          GROUP BY m.id, m.group_id, m.meeting_date, m.meeting_time, m.is_cancelled,
-                  m.title, m.notes, m.meeting_type, m.created_at
+                  m.title, m.notes, m.meeting_type, m.created_at, m.location
          ORDER BY m.meeting_date DESC LIMIT 10`,
         [leader.group_id]
       ).then((rows) =>
