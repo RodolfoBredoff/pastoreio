@@ -36,6 +36,11 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
+  // Página de engajamento pública: acesso por link com token (sem login)
+  if (pathname.startsWith('/engajamento/public/')) {
+    return NextResponse.next({ request });
+  }
+
   // Redirect to login if not authenticated and trying to access protected routes
   if (
     !user &&
