@@ -27,6 +27,8 @@ interface Member {
   phone: string;
   birth_date: string | null;
   member_type: 'participant' | 'visitor';
+  /** Nomes dos membros que este discipula (label "Discipulador de X, Y"). */
+  discipulador_de?: string[] | null;
 }
 
 interface PessoaCardProps {
@@ -87,6 +89,11 @@ export function PessoaCard({ member, attendanceStatus, canDelete }: PessoaCardPr
               >
                 {MEMBER_TYPE_LABELS[member.member_type as keyof typeof MEMBER_TYPE_LABELS] ?? member.member_type ?? 'Membro'}
               </Badge>
+              {(member.discipulador_de?.length ?? 0) > 0 && (
+                <Badge variant="outline" className="font-normal">
+                  Discipulador de {member.discipulador_de!.join(', ')}
+                </Badge>
+              )}
               {attendance && (
                 <span
                   className={cn(

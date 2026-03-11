@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { saveAttendance, getAttendanceByMeeting, getAttendanceGuestsByMeeting } from '@/lib/db/queries';
 import { queryOne } from '@/lib/db/postgres';
+import { syncEngagementToSheet } from '@/lib/integrations/google-sheets';
 
 /**
  * GET /api/attendance?meeting_id=uuid
@@ -82,6 +83,12 @@ export async function POST(request: Request) {
       groupId: meeting.group_id,
       guests: guestList,
     });
+
+    try {
+      await syncEngagementToSheet(meeting.group_id, meeting_id);
+    } catch {
+      // Erro já logado em syncEngagementToSheet; não falha a resposta
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

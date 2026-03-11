@@ -26,6 +26,12 @@ export interface Member {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  /** ID do membro que discipula este (mesmo grupo). */
+  discipulador_id?: string | null;
+  /** Nome do discipulador (preenchido por JOIN nas queries). */
+  discipulador_full_name?: string | null;
+  /** Nomes dos membros que este discipula (preenchido por subquery). */
+  discipulador_de?: string[] | null;
 }
 
 export interface Meeting {
@@ -117,10 +123,24 @@ export async function getMembersByLeaderGroup(): Promise<Member[]> {
   }
 
   return queryMany<Member>(
-    `SELECT * FROM members 
-     WHERE group_id = $1 AND is_active = TRUE
-     ORDER BY full_name ASC`,
+    `SELECT m.id, m.group_id, m.full_name, m.phone, m.birth_date, m.member_type, m.is_active, m.created_at, m.updated_at, m.discipulador_id,
+            d.full_name AS discipulador_full_name,
+            (SELECT COALESCE(array_agg(m2.full_name ORDER BY m2.full_name), ARRAY[]::text[]) FROM members m2 WHERE m2.discipulador_id = m.id AND m2.is_active = TRUE) AS discipulador_de
+     FROM members m
+     LEFT JOIN members d ON d.id = m.discipulador_id
+     WHERE m.group_id = $1 AND m.is_active = TRUE
+     ORDER BY m.full_name ASC`,
     [leader.group_id]
+  );
+}
+
+/**
+ * Busca membro por ID e grupo (para validação em API; não usa sessão).
+ */
+export async function getMemberByIdAndGroup(memberId: string, groupId: string): Promise<Member | null> {
+  return queryOne<Member>(
+    `SELECT * FROM members WHERE id = $1 AND group_id = $2`,
+    [memberId, groupId]
   );
 }
 
@@ -135,8 +155,12 @@ export async function getMemberById(memberId: string): Promise<Member | null> {
   }
 
   return queryOne<Member>(
-    `SELECT * FROM members 
-     WHERE id = $1 AND group_id = $2`,
+    `SELECT m.id, m.group_id, m.full_name, m.phone, m.birth_date, m.member_type, m.is_active, m.created_at, m.updated_at, m.discipulador_id,
+            d.full_name AS discipulador_full_name,
+            (SELECT COALESCE(array_agg(m2.full_name ORDER BY m2.full_name), ARRAY[]::text[]) FROM members m2 WHERE m2.discipulador_id = m.id AND m2.is_active = TRUE) AS discipulador_de
+     FROM members m
+     LEFT JOIN members d ON d.id = m.discipulador_id
+     WHERE m.id = $1 AND m.group_id = $2`,
     [memberId, leader.group_id]
   );
 }
@@ -175,6 +199,7 @@ export async function updateMember(memberId: string, data: {
   birth_date?: string | null;
   member_type?: 'participant' | 'visitor';
   is_active?: boolean;
+  discipulador_id?: string | null;
 }): Promise<Member | null> {
   const leader = await getCurrentLeader();
   
@@ -211,6 +236,10 @@ export async function updateMember(memberId: string, data: {
   if (data.is_active !== undefined) {
     updates.push(`is_active = $${paramIndex++}`);
     values.push(data.is_active);
+  }
+  if (data.discipulador_id !== undefined) {
+    updates.push(`discipulador_id = $${paramIndex++}`);
+    values.push(data.discipulador_id);
   }
 
   if (updates.length === 0) {
@@ -347,6 +376,31 @@ export async function upsertMeeting(data: {
 // ============================================
 // QUERIES DE PRESENÇA
 // ============================================
+
+/**
+ * Busca reunião por ID (uso interno; não verifica líder).
+ */
+export async function getMeetingById(meetingId: string): Promise<Meeting | null> {
+  return queryOne<Meeting>(`SELECT * FROM meetings WHERE id = $1`, [meetingId]);
+}
+
+/**
+ * Busca nome do grupo por ID (uso interno).
+ */
+export async function getGroupName(groupId: string): Promise<string | null> {
+  const row = await queryOne<{ name: string }>(`SELECT name FROM groups WHERE id = $1`, [groupId]);
+  return row?.name ?? null;
+}
+
+/**
+ * Busca membros ativos do grupo por group_id (uso interno; ex.: integração Google Sheets).
+ */
+export async function getMembersByGroupId(groupId: string): Promise<{ id: string; full_name: string }[]> {
+  return queryMany<{ id: string; full_name: string }>(
+    `SELECT id, full_name FROM members WHERE group_id = $1 AND is_active = TRUE ORDER BY full_name ASC`,
+    [groupId]
+  );
+}
 
 /**
  * Busca presenças de uma reunião

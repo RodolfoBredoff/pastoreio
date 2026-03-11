@@ -12,6 +12,11 @@ export function canManageMeetings(role: LeaderRole | string): boolean {
   return role === 'leader' || role === 'secretary' || role === 'coordinator';
 }
 
+/** Líder e secretário podem atrelar participante a discipulador (apenas no grupo). */
+export function canManageDiscipleship(role: LeaderRole | string): boolean {
+  return role === 'leader' || role === 'secretary';
+}
+
 export function canManageSettings(role: LeaderRole | string): boolean {
   return role === 'leader' || role === 'coordinator';
 }

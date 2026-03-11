@@ -15,6 +15,11 @@ import {
 import { MEMBER_TYPES, MEMBER_TYPE_LABELS } from '@/lib/constants';
 import { Loader2 } from 'lucide-react';
 
+interface OtherMember {
+  id: string;
+  full_name: string;
+}
+
 interface PessoaFormProps {
   groupId: string;
   initialData?: {
@@ -23,7 +28,13 @@ interface PessoaFormProps {
     phone: string;
     birth_date: string | null;
     member_type: 'participant' | 'visitor';
+    discipulador_id?: string | null;
+    discipulador_full_name?: string | null;
   };
+  /** Outros membros do grupo (para select de discipulador). Apenas em edição. */
+  otherMembers?: OtherMember[];
+  /** Se o usuário pode alterar o vínculo discipulador (líder/secretário). */
+  canManageDiscipleship?: boolean;
 }
 
 const MONTHS = [
@@ -65,7 +76,7 @@ function isPlaceholderYear(year: string | null | undefined): boolean {
   return !year || year === '1900';
 }
 
-export function PessoaForm({ groupId, initialData }: PessoaFormProps) {
+export function PessoaForm({ groupId, initialData, otherMembers = [], canManageDiscipleship = false }: PessoaFormProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState(() => {
@@ -77,6 +88,7 @@ export function PessoaForm({ groupId, initialData }: PessoaFormProps) {
       birth_month: parsed.month,
       birth_year: parsed.year,
       member_type: initialData?.member_type || MEMBER_TYPES.PARTICIPANT,
+      discipulador_id: initialData?.discipulador_id ?? '',
     };
   });
 
@@ -90,6 +102,7 @@ export function PessoaForm({ groupId, initialData }: PessoaFormProps) {
         birth_month: parsed.month,
         birth_year: parsed.year,
         member_type: initialData.member_type || MEMBER_TYPES.PARTICIPANT,
+        discipulador_id: initialData.discipulador_id ?? '',
       });
     }
   }, [initialData?.id]);
@@ -118,6 +131,9 @@ export function PessoaForm({ groupId, initialData }: PessoaFormProps) {
     // Incluir birth_date sempre na edição para permitir limpar (null); na criação só envia se preenchido
     if (initialData) {
       payload.birth_date = birth_date;
+      if (canManageDiscipleship) {
+        payload.discipulador_id = formData.discipulador_id === '' ? null : formData.discipulador_id;
+      }
     } else if (birth_date !== null) {
       payload.birth_date = birth_date;
     }
@@ -245,6 +261,40 @@ export function PessoaForm({ groupId, initialData }: PessoaFormProps) {
           </SelectContent>
         </Select>
       </div>
+
+      {initialData && (canManageDiscipleship ? (
+        <div className="space-y-2">
+          <Label htmlFor="discipulador_id">Discipulado por</Label>
+          <Select
+            value={formData.discipulador_id === '' || formData.discipulador_id === null ? '__none__' : formData.discipulador_id}
+            onValueChange={(value) =>
+              setFormData({ ...formData, discipulador_id: value === '__none__' ? '' : value })
+            }
+          >
+            <SelectTrigger id="discipulador_id">
+              <SelectValue placeholder="Nenhum" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">Nenhum</SelectItem>
+              {otherMembers
+                .filter((m) => m.id !== initialData.id)
+                .map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.full_name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Atrelar esta pessoa a um discipulador (outro membro do grupo). O discipulador aparecerá com o label &quot;Discipulador de {initialData.full_name}&quot;.
+          </p>
+        </div>
+      ) : initialData.discipulador_full_name ? (
+        <div className="space-y-1">
+          <Label className="text-muted-foreground">Discipulado por</Label>
+          <p className="text-sm">{initialData.discipulador_full_name}</p>
+        </div>
+      ) : null)}
 
       <div className="flex gap-4 pt-4">
         <Button
