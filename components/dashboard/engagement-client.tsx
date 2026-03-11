@@ -8,7 +8,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { TrendingUp, TrendingDown, Award, CalendarSearch, Loader2, Users, CheckCircle, XCircle, Star, List } from 'lucide-react';
+import { TrendingUp, TrendingDown, Award, CalendarSearch, Loader2, Users, CheckCircle, XCircle, Star, List, Share2, Link2, UserPlus } from 'lucide-react';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +69,13 @@ interface TitleGroup {
   latest_date: string;
 }
 
+interface DiscipleshipStats {
+  totalMembers: number;
+  totalLinked: number;
+  totalUnlinked: number;
+  byDiscipulador: { discipuladorId: string; discipuladorName: string; count: number }[];
+}
+
 // ─── Configuração dos filtros de período ──────────────────────────────────────
 
 const PERIOD_OPTIONS: { value: Period; label: string; desc: string }[] = [
@@ -116,11 +123,17 @@ function PeriodSelector({
   onChange,
   titleFilter,
   onTitleFilterChange,
+  monthFilter,
+  onMonthFilterChange,
+  availableMonths,
 }: {
   selected: Period | 'meeting' | 'title_group';
   onChange: (v: Period | 'meeting' | 'title_group') => void;
   titleFilter?: string;
   onTitleFilterChange?: (v: string) => void;
+  monthFilter?: string;
+  onMonthFilterChange?: (v: string) => void;
+  availableMonths?: string[];
 }) {
   return (
     <div className="space-y-2">
@@ -149,6 +162,28 @@ function PeriodSelector({
           <span className="text-xs font-normal opacity-70 hidden sm:block">Vários do mesmo nome</span>
         </Button>
       </div>
+      {selected === 'monthly' && onMonthFilterChange && availableMonths && availableMonths.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-muted-foreground">Mês:</span>
+          <select
+            value={monthFilter ?? ''}
+            onChange={(e) => onMonthFilterChange(e.target.value)}
+            className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm min-w-[140px]"
+          >
+            <option value="">Todos (últimos 6 meses)</option>
+            {availableMonths.map((ym) => {
+              const [y, m] = ym.split('-');
+              const date = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1);
+              const label = date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+              return (
+                <option key={ym} value={ym}>
+                  {label}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      )}
       {onTitleFilterChange && selected !== 'meeting' && selected !== 'title_group' && (
         <div className="flex items-center gap-2">
           <input type="text" placeholder="Filtrar por título do encontro"
@@ -347,7 +382,7 @@ interface MeetingDetailResponse {
   summary: MeetingSummary;
 }
 
-function MeetingDetailView({ meetings, memberFilter }: { meetings: MeetingItem[]; memberFilter: MemberFilter }) {
+function MeetingDetailView({ meetings, memberFilter, apiSuffix }: { meetings: MeetingItem[]; memberFilter: MemberFilter; apiSuffix: string }) {
   const [selectedId, setSelectedId] = useState<string>(meetings[0]?.id ?? '');
   const [detail, setDetail] = useState<MeetingDetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -356,10 +391,12 @@ function MeetingDetailView({ meetings, memberFilter }: { meetings: MeetingItem[]
     if (!id) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/engagement?meeting_id=${id}&member_filter=${memberFilter}`);
+      let url = `/api/engagement?meeting_id=${id}&member_filter=${memberFilter}`;
+      if (apiSuffix) url += `&${apiSuffix}`;
+      const res = await fetch(url);
       if (res.ok) setDetail(await res.json());
     } finally { setLoading(false); }
-  }, [memberFilter]);
+  }, [memberFilter, apiSuffix]);
 
   useEffect(() => { if (selectedId) fetchDetail(selectedId); }, [selectedId, fetchDetail]);
 
@@ -477,7 +514,7 @@ function MeetingDetailView({ meetings, memberFilter }: { meetings: MeetingItem[]
 
 // ─── Visualização por nome de encontro (multi-ocorrência) ─────────────────────
 
-function TitleGroupView({ groupId, memberFilter }: { groupId?: string | null; memberFilter: MemberFilter }) {
+function TitleGroupView({ apiSuffix, memberFilter }: { apiSuffix: string; memberFilter: MemberFilter }) {
   const [titleGroups, setTitleGroups] = useState<TitleGroup[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [selectedTitle, setSelectedTitle] = useState<string | null>(null);
@@ -492,7 +529,7 @@ function TitleGroupView({ groupId, memberFilter }: { groupId?: string | null; me
   useEffect(() => {
     setLoadingGroups(true);
     let url = '/api/engagement?mode=title_groups';
-    if (groupId) url += `&group_id=${groupId}`;
+    if (apiSuffix) url += `&${apiSuffix}`;
     fetch(url)
       .then((r) => {
         if (!r.ok) {
@@ -510,14 +547,14 @@ function TitleGroupView({ groupId, memberFilter }: { groupId?: string | null; me
         setTitleGroups([]);
         setLoadingGroups(false);
       });
-  }, [groupId]);
+  }, [apiSuffix]);
 
   const fetchGroupDetail = useCallback(async (title: string) => {
     setLoadingDetail(true);
     setSelectedTitle(title);
     try {
       let url = `/api/engagement?title_group=${encodeURIComponent(title)}&member_filter=${memberFilter}`;
-      if (groupId) url += `&group_id=${groupId}`;
+      if (apiSuffix) url += `&${apiSuffix}`;
       const res = await fetch(url);
       if (!res.ok) {
         console.error('Erro ao buscar detalhes do título:', res.status, res.statusText);
@@ -534,7 +571,7 @@ function TitleGroupView({ groupId, memberFilter }: { groupId?: string | null; me
     } finally {
       setLoadingDetail(false);
     }
-  }, [groupId, memberFilter]);
+  }, [apiSuffix, memberFilter]);
 
   useEffect(() => {
     if (selectedTitle) fetchGroupDetail(selectedTitle);
@@ -665,28 +702,199 @@ function TitleGroupView({ groupId, memberFilter }: { groupId?: string | null; me
   );
 }
 
+// ─── Compartilhamento público (só para líder, sem publicToken) ─────────────────
+
+function EngagementShareToggle() {
+  const [enabled, setEnabled] = useState(false);
+  const [publicUrl, setPublicUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/groups/engagement-share')
+      .then((r) => r.ok ? r.json() : { enabled: false, publicUrl: undefined })
+      .then((d) => {
+        setEnabled(!!d.enabled);
+        setPublicUrl(d.publicUrl ?? null);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleToggle = async () => {
+    setUpdating(true);
+    try {
+      const res = await fetch('/api/groups/engagement-share', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !enabled }),
+      });
+      if (!res.ok) throw new Error('Falha ao atualizar');
+      const data = await res.json();
+      setEnabled(!!data.enabled);
+      setPublicUrl(data.publicUrl ?? null);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const copyLink = () => {
+    if (publicUrl) navigator.clipboard.writeText(publicUrl);
+  };
+
+  if (loading) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Share2 className="h-4 w-4" />
+          Página de engajamento pública
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant={enabled ? 'default' : 'outline'}
+            size="sm"
+            onClick={handleToggle}
+            disabled={updating}
+          >
+            {enabled ? 'Pública' : 'Privada'}
+          </Button>
+          {enabled && publicUrl && (
+            <Button variant="outline" size="sm" onClick={copyLink} className="gap-1.5">
+              <Link2 className="h-3.5 w-3.5" />
+              Copiar link
+            </Button>
+          )}
+        </div>
+        {enabled && publicUrl && (
+          <p className="text-xs text-muted-foreground break-all">
+            Qualquer pessoa com o link pode ver o relatório de engajamento (sem login). Desative para voltar a privado.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Gráfico e filtro por discipulador ───────────────────────────────────────
+
+function DiscipleshipCard({ apiSuffix }: { apiSuffix: string }) {
+  const [stats, setStats] = useState<DiscipleshipStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [filterDiscipuladorId, setFilterDiscipuladorId] = useState<string>('');
+
+  useEffect(() => {
+    setLoading(true);
+    const url = apiSuffix ? `/api/discipleship?${apiSuffix}` : '/api/discipleship';
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setStats)
+      .finally(() => setLoading(false));
+  }, [apiSuffix]);
+
+  if (loading || !stats) {
+    return (
+      <Card>
+        <CardContent className="py-8 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const list = filterDiscipuladorId
+    ? stats.byDiscipulador.filter((d) => d.discipuladorId === filterDiscipuladorId)
+    : stats.byDiscipulador;
+
+  const chartData = list.map((d) => ({ name: d.discipuladorName, count: d.count, total: d.count }));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <UserPlus className="h-5 w-5" />
+          Pessoas vinculadas a um discipulador
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          {stats.totalLinked} de {stats.totalMembers} pessoas com discipulador definido
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-muted-foreground">Filtrar por discipulador:</span>
+          <select
+            value={filterDiscipuladorId}
+            onChange={(e) => setFilterDiscipuladorId(e.target.value)}
+            className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm min-w-[180px]"
+          >
+            <option value="">Todos</option>
+            {stats.byDiscipulador.map((d) => (
+              <option key={d.discipuladorId} value={d.discipuladorId}>
+                {d.discipuladorName} ({d.count})
+              </option>
+            ))}
+          </select>
+        </div>
+        {chartData.length > 0 ? (
+          <>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} />
+                <YAxis tick={{ fontSize: 10 }} width={32} allowDecimals={false} />
+                <Tooltip />
+                <Bar dataKey="count" fill="hsl(215, 50%, 40%)" name="Pessoas" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="text-sm text-muted-foreground">
+              {list.map((d) => (
+                <div key={d.discipuladorId} className="flex justify-between py-0.5">
+                  <span>{d.discipuladorName}</span>
+                  <span className="font-medium">{d.count} pessoa{d.count !== 1 ? 's' : ''}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">Nenhum vínculo com discipulador cadastrado.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 interface EngagementClientProps {
   groupId?: string | null;
+  publicToken?: string | null;
 }
 
-export function EngagementClient({ groupId }: EngagementClientProps = {}) {
+export function EngagementClient({ groupId, publicToken }: EngagementClientProps = {}) {
+  const apiSuffix = publicToken
+    ? `public_token=${encodeURIComponent(publicToken)}`
+    : (groupId ? `group_id=${groupId}` : '');
+
   const [view, setView] = useState<Period | 'meeting' | 'title_group'>('monthly');
   const [memberFilter, setMemberFilter] = useState<MemberFilter>('total');
   const [titleFilter, setTitleFilter] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const [periodData, setPeriodData] = useState<PeriodDataPoint[]>([]);
   const [memberStats, setMemberStats] = useState<MemberStat[]>([]);
   const [meetingList, setMeetingList] = useState<MeetingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
 
-  const fetchPeriodData = useCallback(async (period: Period, title?: string) => {
+  const fetchPeriodData = useCallback(async (period: Period, title?: string, yearMonth?: string) => {
     setLoading(true);
     try {
       let url = `/api/engagement?period=${period}&member_filter=${memberFilter}`;
-      if (groupId) url += `&group_id=${groupId}`;
+      if (apiSuffix) url += `&${apiSuffix}`;
       if (title?.trim()) url += `&title_filter=${encodeURIComponent(title.trim())}`;
+      if (period === 'monthly' && yearMonth) url += `&year_month=${encodeURIComponent(yearMonth)}`;
       const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
@@ -695,7 +903,16 @@ export function EngagementClient({ groupId }: EngagementClientProps = {}) {
       setMeetingList(data.meetingList ?? []);
       setHasData((data.periodData ?? []).length > 0 || (data.meetingList ?? []).length > 0);
     } finally { setLoading(false); }
-  }, [groupId, memberFilter]);
+  }, [apiSuffix, memberFilter]);
+
+  useEffect(() => {
+    if (view === 'monthly') {
+      const url = apiSuffix ? `/api/engagement?mode=available_months&${apiSuffix}` : '/api/engagement?mode=available_months';
+      fetch(url)
+        .then((r) => (r.ok ? r.json() : { yearMonths: [] }))
+        .then((d) => setAvailableMonths(d.yearMonths ?? []));
+    }
+  }, [view, apiSuffix]);
 
   const [debouncedTitle, setDebouncedTitle] = useState(titleFilter);
   useEffect(() => {
@@ -705,11 +922,12 @@ export function EngagementClient({ groupId }: EngagementClientProps = {}) {
 
   useEffect(() => {
     if (view !== 'meeting' && view !== 'title_group') {
-      fetchPeriodData(view as Period, debouncedTitle);
+      const yearMonth = view === 'monthly' && selectedMonth ? selectedMonth : undefined;
+      fetchPeriodData(view as Period, debouncedTitle, yearMonth);
     } else if (view === 'meeting') {
       fetchPeriodData('monthly', debouncedTitle);
     }
-  }, [view, fetchPeriodData, debouncedTitle]);
+  }, [view, selectedMonth, fetchPeriodData, debouncedTitle]);
 
   const periodLabel = PERIOD_OPTIONS.find((o) => o.value === view)?.label ?? '';
   const topPresent = [...memberStats].filter((m) => m.presences + m.absences > 0).sort((a, b) => b.presences - a.presences).slice(0, 5);
@@ -728,12 +946,20 @@ export function EngagementClient({ groupId }: EngagementClientProps = {}) {
           onChange={setView}
           titleFilter={titleFilter}
           onTitleFilterChange={setTitleFilter}
+          monthFilter={selectedMonth}
+          onMonthFilterChange={setSelectedMonth}
+          availableMonths={availableMonths.length > 0 ? availableMonths : undefined}
         />
         <MemberFilterSelector value={memberFilter} onChange={setMemberFilter} />
       </div>
 
+      {!publicToken && !groupId && <EngagementShareToggle />}
+
       {view === 'title_group' ? (
-        <TitleGroupView groupId={groupId} memberFilter={memberFilter} />
+        <>
+          <TitleGroupView apiSuffix={apiSuffix} memberFilter={memberFilter} />
+          <DiscipleshipCard apiSuffix={apiSuffix} />
+        </>
       ) : loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -744,12 +970,16 @@ export function EngagementClient({ groupId }: EngagementClientProps = {}) {
           <p className="text-sm text-muted-foreground mt-1">Registre presenças na página de Chamada para ver as análises aqui.</p>
         </div>
       ) : view === 'meeting' ? (
-        <MeetingDetailView meetings={meetingList} memberFilter={memberFilter} />
+        <>
+          <MeetingDetailView meetings={meetingList} memberFilter={memberFilter} apiSuffix={apiSuffix} />
+          <DiscipleshipCard apiSuffix={apiSuffix} />
+        </>
       ) : (
         <>
           <StatsCards periodData={periodData} perfectAttendance={perfectAttendance} memberStats={memberStats} />
           <PeriodCharts data={periodData} periodLabel={periodLabel} />
           <MemberRankings topPresent={topPresent} topAbsent={topAbsent} perfectAttendance={perfectAttendance} />
+          <DiscipleshipCard apiSuffix={apiSuffix} />
         </>
       )}
     </div>

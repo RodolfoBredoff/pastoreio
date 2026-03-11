@@ -60,8 +60,6 @@ function formatPeriodLabel(dateStr: string, period: Period): string {
  */
 export async function GET(request: Request) {
   try {
-    await requireAuth();
-    const leader = await getCurrentLeader();
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period') as Period | null;
     const meetingId = searchParams.get('meeting_id');
@@ -69,36 +67,56 @@ export async function GET(request: Request) {
     const titleFilter = searchParams.get('title_filter')?.trim() || null;
     const mode = searchParams.get('mode');
     const titleGroup = searchParams.get('title_group')?.trim() || null;
+    const yearMonth = searchParams.get('year_month')?.trim() || null;
+    const publicToken = searchParams.get('public_token')?.trim() || null;
     const memberFilterParam = searchParams.get('member_filter');
     const memberFilter: MemberFilter =
       memberFilterParam === 'participants' || memberFilterParam === 'visitors'
         ? memberFilterParam
         : 'total';
 
-    let groupId: string | null = leader?.group_id ?? null;
+    let groupId: string | null = null;
     let isCoordinator = false;
-    
-    // Coordenadores podem filtrar por qualquer grupo da organização
-    if (leader?.role === 'coordinator') {
-      isCoordinator = true;
-      if (groupIdParam) {
-        // Verificar se o grupo pertence à organização do coordenador
-        const group = await queryOne<{ id: string; organization_id: string }>(
-          `SELECT id, organization_id FROM groups WHERE id = $1`,
-          [groupIdParam]
-        );
-        if (group && group.organization_id === leader.organization_id) {
-          groupId = groupIdParam;
-        } else {
-          return NextResponse.json({ error: 'Grupo não encontrado ou não pertence à sua organização' }, { status: 403 });
-        }
+
+    if (publicToken) {
+      // Modo público: não exige autenticação, mas valida token e se o compartilhamento está ativo
+      const group = await queryOne<{ id: string; engagement_share_enabled: boolean }>(
+        `SELECT id, engagement_share_enabled FROM groups WHERE engagement_share_token = $1`,
+        [publicToken]
+      );
+      if (!group || !group.engagement_share_enabled) {
+        return NextResponse.json({ error: 'Link de engajamento inválido ou desativado' }, { status: 404 });
       }
-    } else if (groupIdParam) {
-      // Admins também podem filtrar por grupo
-      const { getAdminSession } = await import('@/lib/auth/admin-session');
-      const admin = await getAdminSession();
-      if (admin) {
-        groupId = groupIdParam;
+      groupId = group.id;
+    } else {
+      // Modo autenticado (líder/coordenador/admin)
+      await requireAuth();
+      const leader = await getCurrentLeader();
+
+      groupId = leader?.group_id ?? null;
+
+      // Coordenadores podem filtrar por qualquer grupo da organização
+      if (leader?.role === 'coordinator') {
+        isCoordinator = true;
+        if (groupIdParam) {
+          // Verificar se o grupo pertence à organização do coordenador
+          const group = await queryOne<{ id: string; organization_id: string }>(
+            `SELECT id, organization_id FROM groups WHERE id = $1`,
+            [groupIdParam]
+          );
+          if (group && group.organization_id === leader.organization_id) {
+            groupId = groupIdParam;
+          } else {
+            return NextResponse.json({ error: 'Grupo não encontrado ou não pertence à sua organização' }, { status: 403 });
+          }
+        }
+      } else if (groupIdParam) {
+        // Admins também podem filtrar por grupo
+        const { getAdminSession } = await import('@/lib/auth/admin-session');
+        const admin = await getAdminSession();
+        if (admin) {
+          groupId = groupIdParam;
+        }
       }
     }
 
@@ -107,6 +125,21 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Selecione um grupo para visualizar os dados de engajamento' }, { status: 400 });
       }
       return NextResponse.json({ error: 'Líder não vinculado a um grupo' }, { status: 400 });
+    }
+
+    // ─── Modo: meses disponíveis (para filtro mensal no ano)
+    if (mode === 'available_months') {
+      const rows = await queryMany<{ year_month: string }>(
+        `SELECT DISTINCT to_char(meeting_date, 'YYYY-MM') as year_month
+         FROM meetings
+         WHERE group_id = $1
+           AND is_cancelled = FALSE
+           AND meeting_date <= CURRENT_DATE
+         ORDER BY year_month DESC
+         LIMIT 24`,
+        [groupId]
+      );
+      return NextResponse.json({ yearMonths: rows.map((r) => r.year_month) });
     }
 
     // ─── Modo: lista de títulos agrupados ──────────────────────────────────
@@ -298,43 +331,72 @@ export async function GET(request: Request) {
       ? period
       : 'monthly';
 
-    const { interval, truncate } = getPeriodConfig(effectivePeriod);
+    const isSingleMonthFilter = effectivePeriod === 'monthly' && !!yearMonth && /^\d{4}-\d{2}$/.test(yearMonth);
 
-    const periodStartExpr = effectivePeriod === 'semiannual'
-      ? `(CASE WHEN EXTRACT(MONTH FROM meeting_date) < 7 
-           THEN (EXTRACT(YEAR FROM meeting_date)::text || '-01-01') 
-           ELSE (EXTRACT(YEAR FROM meeting_date)::text || '-07-01') 
-         END)::date::text`
-      : `date_trunc($1, meeting_date)::date::text`;
+    let meetings;
 
-    const titleCond = titleFilter
-      ? (effectivePeriod === 'semiannual' ? ` AND title ILIKE $3` : ` AND title ILIKE $4`)
-      : '';
-    const queryParams: unknown[] = effectivePeriod === 'semiannual'
-      ? [groupId, interval, ...(titleFilter ? [`%${titleFilter}%`] : [])]
-      : [truncate, groupId, interval, ...(titleFilter ? [`%${titleFilter}%`] : [])];
+    if (isSingleMonthFilter) {
+      // Filtro por mês específico (ano-mês). Considera apenas encontros daquele mês.
+      const monthStart = `${yearMonth}-01`;
+      const titleCond = titleFilter ? ' AND title ILIKE $3' : '';
+      const params: unknown[] = [groupId, monthStart, ...(titleFilter ? [`%${titleFilter}%`] : [])];
 
-    const meetingsQuery = effectivePeriod === 'semiannual'
-      ? `SELECT id, meeting_date, title, meeting_type, ${periodStartExpr} as period_start
-         FROM meetings 
-         WHERE group_id = $1 AND is_cancelled = FALSE
-           AND meeting_date >= (CURRENT_DATE - $2::interval)
-           AND meeting_date <= CURRENT_DATE${titleCond}
-         ORDER BY meeting_date ASC`
-      : `SELECT id, meeting_date, title, meeting_type, ${periodStartExpr} as period_start
-         FROM meetings 
-         WHERE group_id = $2 AND is_cancelled = FALSE
-           AND meeting_date >= (CURRENT_DATE - $3::interval)
-           AND meeting_date <= CURRENT_DATE${titleCond}
-         ORDER BY meeting_date ASC`;
+      meetings = await queryMany<{
+        id: string;
+        meeting_date: string;
+        title: string | null;
+        meeting_type: string;
+        period_start: string;
+      }>(
+        `SELECT id, meeting_date, title, meeting_type,
+                date_trunc('month', meeting_date)::date::text as period_start
+         FROM meetings
+         WHERE group_id = $1
+           AND is_cancelled = FALSE
+           AND meeting_date >= $2::date
+           AND meeting_date < ($2::date + INTERVAL '1 month')${titleCond}
+         ORDER BY meeting_date ASC`,
+        params as string[]
+      );
+    } else {
+      const { interval, truncate } = getPeriodConfig(effectivePeriod);
 
-    const meetings = await queryMany<{
+      const periodStartExpr = effectivePeriod === 'semiannual'
+        ? `(CASE WHEN EXTRACT(MONTH FROM meeting_date) < 7 
+             THEN (EXTRACT(YEAR FROM meeting_date)::text || '-01-01') 
+             ELSE (EXTRACT(YEAR FROM meeting_date)::text || '-07-01') 
+           END)::date::text`
+        : `date_trunc($1, meeting_date)::date::text`;
+
+      const titleCond = titleFilter
+        ? (effectivePeriod === 'semiannual' ? ` AND title ILIKE $3` : ` AND title ILIKE $4`)
+        : '';
+      const queryParams: unknown[] = effectivePeriod === 'semiannual'
+        ? [groupId, interval, ...(titleFilter ? [`%${titleFilter}%`] : [])]
+        : [truncate, groupId, interval, ...(titleFilter ? [`%${titleFilter}%`] : [])];
+
+      const meetingsQuery = effectivePeriod === 'semiannual'
+        ? `SELECT id, meeting_date, title, meeting_type, ${periodStartExpr} as period_start
+           FROM meetings 
+           WHERE group_id = $1 AND is_cancelled = FALSE
+             AND meeting_date >= (CURRENT_DATE - $2::interval)
+             AND meeting_date <= CURRENT_DATE${titleCond}
+           ORDER BY meeting_date ASC`
+        : `SELECT id, meeting_date, title, meeting_type, ${periodStartExpr} as period_start
+           FROM meetings 
+           WHERE group_id = $2 AND is_cancelled = FALSE
+             AND meeting_date >= (CURRENT_DATE - $3::interval)
+             AND meeting_date <= CURRENT_DATE${titleCond}
+           ORDER BY meeting_date ASC`;
+
+      meetings = await queryMany<{
       id: string;
       meeting_date: string;
       title: string | null;
       meeting_type: string;
       period_start: string;
-    }>(meetingsQuery, queryParams as string[]);
+      }>(meetingsQuery, queryParams as string[]);
+    }
 
     if (meetings.length === 0) {
       return NextResponse.json({
