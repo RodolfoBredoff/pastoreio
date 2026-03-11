@@ -64,7 +64,12 @@ export async function GET(request: Request) {
     const linked = members.filter((m) => m.discipulador_id != null);
     const totalLinked = linked.length;
 
-    const byDiscipulador = new Map<string, { discipuladorId: string; discipuladorName: string; count: number }>();
+    const byDiscipulador = new Map<string, {
+      discipuladorId: string;
+      discipuladorName: string;
+      count: number;
+      members: { id: string; full_name: string }[];
+    }>();
     for (const m of linked) {
       if (!m.discipulador_id) continue;
       const key = m.discipulador_id;
@@ -73,12 +78,17 @@ export async function GET(request: Request) {
           discipuladorId: m.discipulador_id,
           discipuladorName: m.discipulador_name ?? 'Sem nome',
           count: 0,
+          members: [],
         });
       }
-      byDiscipulador.get(key)!.count++;
+      const entry = byDiscipulador.get(key)!;
+      entry.count++;
+      entry.members.push({ id: m.id, full_name: m.full_name });
     }
 
-    const byDiscipuladorList = Array.from(byDiscipulador.values()).sort((a, b) => b.count - a.count);
+    const byDiscipuladorList = Array.from(byDiscipulador.values())
+      .sort((a, b) => b.count - a.count)
+      .map((d) => ({ ...d, members: d.members.sort((a, b) => a.full_name.localeCompare(b.full_name)) }));
 
     return NextResponse.json({
       totalMembers,

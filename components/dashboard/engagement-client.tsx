@@ -73,7 +73,12 @@ interface DiscipleshipStats {
   totalMembers: number;
   totalLinked: number;
   totalUnlinked: number;
-  byDiscipulador: { discipuladorId: string; discipuladorName: string; count: number }[];
+  byDiscipulador: {
+    discipuladorId: string;
+    discipuladorName: string;
+    count: number;
+    members: { id: string; full_name: string }[];
+  }[];
 }
 
 // ─── Configuração dos filtros de período ──────────────────────────────────────
@@ -856,6 +861,26 @@ function DiscipleshipCard({ apiSuffix }: { apiSuffix: string }) {
                 </div>
               ))}
             </div>
+            {/* Lista de pessoas vinculadas a cada discipulador */}
+            <div className="border-t pt-4 space-y-4">
+              <h4 className="text-sm font-medium text-foreground">Pessoas vinculadas a cada discipulador</h4>
+              {list.map((d) => {
+                const members = d.members ?? [];
+                if (members.length === 0) return null;
+                return (
+                  <div key={d.discipuladorId} className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
+                    <p className="text-sm font-medium">
+                      {d.discipuladorName} — {members.length} pessoa{members.length !== 1 ? 's' : ''}
+                    </p>
+                    <ul className="text-sm text-muted-foreground list-disc list-inside space-y-0.5">
+                      {members.map((m) => (
+                        <li key={m.id}>{m.full_name}</li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
           </>
         ) : (
           <p className="text-sm text-muted-foreground">Nenhum vínculo com discipulador cadastrado.</p>
@@ -877,6 +902,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
     ? `public_token=${encodeURIComponent(publicToken)}`
     : (groupId ? `group_id=${groupId}` : '');
 
+  const [groupName, setGroupName] = useState<string | null>(null);
   const [view, setView] = useState<Period | 'meeting' | 'title_group'>('monthly');
   const [memberFilter, setMemberFilter] = useState<MemberFilter>('total');
   const [titleFilter, setTitleFilter] = useState('');
@@ -887,6 +913,14 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
   const [meetingList, setMeetingList] = useState<MeetingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
+
+  useEffect(() => {
+    if (!publicToken) return;
+    const url = `/api/engagement?mode=group_info&${apiSuffix}`;
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : { groupName: null }))
+      .then((d) => setGroupName(d.groupName ?? null));
+  }, [publicToken, apiSuffix]);
 
   const fetchPeriodData = useCallback(async (period: Period, title?: string, yearMonth?: string) => {
     setLoading(true);
@@ -938,6 +972,9 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
     <div className="space-y-6">
       <div className="space-y-3">
         <div>
+          {groupName && (
+            <p className="text-sm font-medium text-muted-foreground mb-1">Grupo: {groupName}</p>
+          )}
           <h1 className="text-2xl sm:text-3xl font-bold">Engajamento</h1>
           <p className="text-muted-foreground mt-1 text-sm">Análise de presença por período ou encontro</p>
         </div>

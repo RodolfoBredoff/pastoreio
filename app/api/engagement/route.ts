@@ -127,6 +127,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Líder não vinculado a um grupo' }, { status: 400 });
     }
 
+    // ─── Modo: nome do grupo (para exibir no topo da página pública)
+    if (mode === 'group_info') {
+      const group = await queryOne<{ name: string }>(`SELECT name FROM groups WHERE id = $1`, [groupId]);
+      return NextResponse.json({ groupName: group?.name ?? null });
+    }
+
     // ─── Modo: meses disponíveis (para filtro mensal no ano)
     if (mode === 'available_months') {
       const rows = await queryMany<{ year_month: string }>(
