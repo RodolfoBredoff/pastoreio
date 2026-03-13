@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  LineChart, Line, BarChart, Bar,
+  LineChart, Line, BarChart, Bar, LabelList,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -529,10 +529,10 @@ function MemberPresenceAbsenceDistribution({
                 <BarChart
                   layout="vertical"
                   data={chartData}
-                  margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
+                  margin={{ top: 8, right: 48, left: 8, bottom: 8 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} width={36} />
+                  <XAxis type="number" hide />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} tickLine={false} />
                   <Tooltip
                     cursor={{ fill: 'rgba(0,0,0,0.04)' }}
@@ -548,7 +548,14 @@ function MemberPresenceAbsenceDistribution({
                     maxBarSize={28}
                     onClick={(data: { id?: string; name: string }) => data?.id && handleSelectMember(data.id, data.name)}
                     style={{ cursor: 'pointer' }}
-                  />
+                  >
+                    <LabelList
+                      dataKey={isAbsences ? 'absences' : 'presences'}
+                      position="right"
+                      className="fill-foreground"
+                      style={{ fontSize: 12, fontWeight: 500 }}
+                    />
+                  </Bar>
                 </BarChart>
                 </ResponsiveContainer>
               </div>
