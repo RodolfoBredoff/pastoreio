@@ -77,6 +77,7 @@ export async function GET(request: Request) {
 
     let groupId: string | null = null;
     let isCoordinator = false;
+    let isAdmin = false;
 
     if (publicToken) {
       // Modo público: não exige autenticação, mas valida token e se o compartilhamento está ativo
@@ -89,39 +90,41 @@ export async function GET(request: Request) {
       }
       groupId = group.id;
     } else {
-      // Modo autenticado (líder/coordenador/admin)
-      await requireAuth();
-      const leader = await getCurrentLeader();
+      // Modo autenticado: admin (cookie admin) ou líder/coordenador (sessão app)
+      const { getAdminSession } = await import('@/lib/auth/admin-session');
+      const admin = await getAdminSession();
 
-      groupId = leader?.group_id ?? null;
+      if (admin) {
+        isAdmin = true;
+        if (groupIdParam) groupId = groupIdParam;
+      }
+      if (!isAdmin) {
+        // Líder ou coordenador: exige sessão da aplicação
+        await requireAuth();
+        const leader = await getCurrentLeader();
 
-      // Coordenadores podem filtrar por qualquer grupo da organização
-      if (leader?.role === 'coordinator') {
-        isCoordinator = true;
-        if (groupIdParam) {
-          // Verificar se o grupo pertence à organização do coordenador
-          const group = await queryOne<{ id: string; organization_id: string }>(
-            `SELECT id, organization_id FROM groups WHERE id = $1`,
-            [groupIdParam]
-          );
-          if (group && group.organization_id === leader.organization_id) {
-            groupId = groupIdParam;
-          } else {
-            return NextResponse.json({ error: 'Grupo não encontrado ou não pertence à sua organização' }, { status: 403 });
+        groupId = leader?.group_id ?? null;
+
+        // Coordenadores podem filtrar por qualquer grupo da organização
+        if (leader?.role === 'coordinator') {
+          isCoordinator = true;
+          if (groupIdParam) {
+            const group = await queryOne<{ id: string; organization_id: string }>(
+              `SELECT id, organization_id FROM groups WHERE id = $1`,
+              [groupIdParam]
+            );
+            if (group && group.organization_id === leader.organization_id) {
+              groupId = groupIdParam;
+            } else {
+              return NextResponse.json({ error: 'Grupo não encontrado ou não pertence à sua organização' }, { status: 403 });
+            }
           }
-        }
-      } else if (groupIdParam) {
-        // Admins também podem filtrar por grupo
-        const { getAdminSession } = await import('@/lib/auth/admin-session');
-        const admin = await getAdminSession();
-        if (admin) {
-          groupId = groupIdParam;
         }
       }
     }
 
     if (!groupId) {
-      if (isCoordinator) {
+      if (isCoordinator || isAdmin) {
         return NextResponse.json({ error: 'Selecione um grupo para visualizar os dados de engajamento' }, { status: 400 });
       }
       return NextResponse.json({ error: 'Líder não vinculado a um grupo' }, { status: 400 });
