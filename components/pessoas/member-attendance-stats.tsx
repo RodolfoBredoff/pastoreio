@@ -22,19 +22,24 @@ interface MemberAttendanceStatsProps {
   memberId: string;
   /** Quando true, não renderiza o Card externo (para uso dentro de dialog) */
   embedded?: boolean;
+  /** Opcional: group_id para contexto de engajamento por grupo (coordenador/admin) */
+  groupId?: string | null;
 }
 
-export function MemberAttendanceStats({ memberId, embedded = false }: MemberAttendanceStatsProps) {
+export function MemberAttendanceStats({ memberId, embedded = false, groupId }: MemberAttendanceStatsProps) {
   const [data, setData] = useState<AttendanceStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`/api/members/${memberId}/attendance`)
+    const url = groupId
+      ? `/api/members/${memberId}/attendance?group_id=${encodeURIComponent(groupId)}`
+      : `/api/members/${memberId}/attendance`;
+    fetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [memberId]);
+  }, [memberId, groupId]);
 
   if (loading) {
     return (

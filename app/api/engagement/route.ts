@@ -510,9 +510,10 @@ export async function GET(request: Request) {
       }
     }
 
-    const memberStats = Array.from(memberMap.values())
-      .filter((m) => m.presences + m.absences > 0)
-      .map((m) => ({
+    const memberStats = Array.from(memberMap.entries())
+      .filter(([, m]) => m.presences + m.absences > 0)
+      .map(([id, m]) => ({
+        id,
         ...m,
         taxa: Math.round((m.presences / (m.presences + m.absences)) * 100),
       }))

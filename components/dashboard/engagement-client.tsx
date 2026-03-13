@@ -9,6 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TrendingUp, TrendingDown, Award, CalendarSearch, Loader2, Users, CheckCircle, XCircle, Star, List, Share2, Link2, UserPlus } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { MemberAttendanceStats } from '@/components/pessoas/member-attendance-stats';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +34,7 @@ interface PeriodDataPoint {
 }
 
 interface MemberStat {
+  id?: string;
   name: string;
   type: string;
   presences: number;
@@ -409,20 +417,39 @@ function MemberRankings({ topPresent, topAbsent, perfectAttendance }: {
   );
 }
 
-function MemberPresenceAbsenceDistribution({ stats }: { stats: MemberStat[] }) {
-  const [mode, setMode] = useState<'absences' | 'presences'>('absences');
+const CHART_LIMIT_OPTIONS = [5, 10, 15, 20] as const;
 
-  const data = [...stats]
+function MemberPresenceAbsenceDistribution({
+  stats,
+  groupId,
+}: {
+  stats: MemberStat[];
+  groupId?: string | null;
+}) {
+  const [mode, setMode] = useState<'absences' | 'presences'>('absences');
+  const [chartLimit, setChartLimit] = useState<number>(10);
+  const [selectedMember, setSelectedMember] = useState<{ id: string; name: string } | null>(null);
+
+  const fullData = [...stats]
     .map((m) => ({
+      id: m.id,
       name: m.name,
       presences: m.presences,
       absences: m.absences,
     }))
     .filter((m) => (mode === 'absences' ? m.absences > 0 : m.presences > 0))
-    .sort((a, b) => (mode === 'absences' ? b.absences - a.absences : b.presences - a.presences))
-    .slice(0, 20);
+    .sort((a, b) => (mode === 'absences' ? b.absences - a.absences : b.presences - a.presences));
 
+  const chartData = chartLimit > 0 ? fullData.slice(0, chartLimit) : fullData;
   const isAbsences = mode === 'absences';
+  const barHeight = 32;
+  const chartHeight = Math.max(180, chartData.length * barHeight);
+  const chartContainerMaxHeight = 420;
+  const chartScrollable = chartHeight > chartContainerMaxHeight;
+
+  const handleSelectMember = (id: string | undefined, name: string) => {
+    if (id) setSelectedMember({ id, name });
+  };
 
   return (
     <Card>
@@ -458,42 +485,86 @@ function MemberPresenceAbsenceDistribution({ stats }: { stats: MemberStat[] }) {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground mt-1">
-          Lista em ordem decrescente, do mais {isAbsences ? 'ausente' : 'presente'} ao menos {isAbsences ? 'ausente' : 'presente'},
-          considerando os filtros de período, tipo (participantes/visitantes) e presença aplicados acima.
+          Lista em ordem decrescente, do mais {isAbsences ? 'ausente' : 'presente'} ao menos {isAbsences ? 'ausente' : 'presente'}.
+          Clique no nome (lista ou gráfico) para ver em quais encontros a pessoa esteve presente ou ausente.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
-        {data.length === 0 ? (
+        {fullData.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Nenhum dado suficiente para montar o ranking com o filtro atual.
           </p>
         ) : (
           <>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 24 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-30} textAnchor="end" height={50} />
-                  <YAxis tick={{ fontSize: 10 }} width={32} allowDecimals={false} />
-                  <Tooltip />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-muted-foreground">Exibir no gráfico:</span>
+              {CHART_LIMIT_OPTIONS.map((n) => (
+                <Button
+                  key={n}
+                  size="sm"
+                  variant={chartLimit === n ? 'default' : 'outline'}
+                  onClick={() => setChartLimit(n)}
+                >
+                  Top {n}
+                </Button>
+              ))}
+              <Button
+                size="sm"
+                variant={chartLimit === 0 ? 'default' : 'outline'}
+                onClick={() => setChartLimit(0)}
+              >
+                Todos ({fullData.length})
+              </Button>
+            </div>
+            <div
+              className="w-full overflow-x-auto"
+              style={
+                chartScrollable
+                  ? { maxHeight: chartContainerMaxHeight, overflowY: 'auto' as const }
+                  : undefined
+              }
+            >
+              <div style={{ height: chartHeight, minWidth: 280 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  layout="vertical"
+                  data={chartData}
+                  margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} width={36} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} tickLine={false} />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(0,0,0,0.04)' }}
+                    contentStyle={{ fontSize: 12 }}
+                    formatter={(value: number) => [isAbsences ? `${value} falta(s)` : `${value} presença(s)`, '']}
+                    labelFormatter={(label) => ` ${label}`}
+                  />
                   <Bar
                     dataKey={isAbsences ? 'absences' : 'presences'}
                     name={isAbsences ? 'Faltas' : 'Presenças'}
                     fill={isAbsences ? 'hsl(0, 84%, 60%)' : 'hsl(142, 76%, 36%)'}
-                    radius={[3, 3, 0, 0]}
+                    radius={[0, 4, 4, 0]}
+                    maxBarSize={28}
+                    onClick={(data: { id?: string; name: string }) => data?.id && handleSelectMember(data.id, data.name)}
+                    style={{ cursor: 'pointer' }}
                   />
                 </BarChart>
-              </ResponsiveContainer>
+                </ResponsiveContainer>
+              </div>
             </div>
-            <div className="space-y-1 max-h-56 overflow-y-auto">
-              {data.map((m, index) => (
-                <div
-                  key={m.name + index}
-                  className="flex items-center justify-between py-1.5 border-b last:border-0"
+            <div className="space-y-0 max-h-64 overflow-y-auto rounded-md border">
+              {fullData.map((m, index) => (
+                <button
+                  type="button"
+                  key={m.id ?? m.name + index}
+                  onClick={() => handleSelectMember(m.id, m.name)}
+                  disabled={!m.id}
+                  className={`flex w-full items-center justify-between py-2 px-3 text-left transition-colors hover:bg-muted/60 disabled:cursor-default disabled:opacity-70 disabled:hover:bg-transparent ${m.id ? 'cursor-pointer' : ''} border-b last:border-b-0`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span
-                      className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold ${
+                      className={`inline-flex shrink-0 items-center justify-center w-6 h-6 rounded-full text-xs font-semibold ${
                         isAbsences ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
                       }`}
                     >
@@ -502,18 +573,34 @@ function MemberPresenceAbsenceDistribution({ stats }: { stats: MemberStat[] }) {
                     <span className="text-sm truncate">{m.name}</span>
                   </div>
                   <span
-                    className={`text-sm font-medium ${
+                    className={`text-sm font-medium shrink-0 ml-2 ${
                       isAbsences ? 'text-red-700' : 'text-green-700'
                     }`}
                   >
                     {isAbsences ? `${m.absences} falta${m.absences !== 1 ? 's' : ''}` : `${m.presences} presença${m.presences !== 1 ? 's' : ''}`}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           </>
         )}
       </CardContent>
+      <Dialog open={!!selectedMember} onOpenChange={(open) => !open && setSelectedMember(null)}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedMember ? `Presença — ${selectedMember.name}` : 'Presença em encontros'}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedMember && (
+            <MemberAttendanceStats
+              memberId={selectedMember.id}
+              embedded
+              groupId={groupId}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -1175,7 +1262,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
           <StatsCards periodData={periodData} perfectAttendance={perfectAttendance} memberStats={filteredMemberStats} />
           <PeriodCharts data={periodData} periodLabel={periodLabel} />
           <MemberRankings topPresent={topPresent} topAbsent={topAbsent} perfectAttendance={perfectAttendance} />
-          <MemberPresenceAbsenceDistribution stats={filteredMemberStats} />
+          <MemberPresenceAbsenceDistribution stats={filteredMemberStats} groupId={groupId} />
           <DiscipleshipCard apiSuffix={apiSuffix} />
         </>
       )}

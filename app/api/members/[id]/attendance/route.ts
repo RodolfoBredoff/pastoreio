@@ -6,30 +6,50 @@ import { queryMany, queryOne } from '@/lib/db/postgres';
 /**
  * GET /api/members/[id]/attendance
  * Retorna estatísticas de presença do membro: total de encontros e frequência por nome de encontro
+ * Query: group_id (opcional) — ao visualizar engajamento por grupo (coordenador/admin), informar o group_id para autorizar.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAuth();
     const leader = await getCurrentLeader();
-    if (!leader?.group_id) {
+    const { id: memberId } = await params;
+    const { searchParams } = new URL(request.url);
+    const groupIdParam = searchParams.get('group_id');
+
+    let groupId: string | null = null;
+
+    if (leader?.group_id) {
+      groupId = leader.group_id;
+    }
+    if (groupIdParam && groupId !== groupIdParam) {
+      const { getAdminSession } = await import('@/lib/auth/admin-session');
+      const admin = await getAdminSession();
+      if (admin) {
+        groupId = groupIdParam;
+      } else if (leader?.role === 'coordinator' && leader.organization_id) {
+        const group = await queryOne<{ id: string }>(
+          `SELECT id FROM groups WHERE id = $1 AND organization_id = $2`,
+          [groupIdParam, leader.organization_id]
+        );
+        if (group) groupId = groupIdParam;
+      }
+    }
+
+    if (!groupId) {
       return NextResponse.json({ error: 'Líder não vinculado a um grupo' }, { status: 400 });
     }
 
-    const { id: memberId } = await params;
-
-    // Verificar se o membro pertence ao grupo do líder
     const member = await queryOne<{ id: string; group_id: string }>(
       `SELECT id, group_id FROM members WHERE id = $1 AND is_active = TRUE`,
       [memberId]
     );
-    if (!member || member.group_id !== leader.group_id) {
+    if (!member || member.group_id !== groupId) {
       return NextResponse.json({ error: 'Membro não encontrado' }, { status: 404 });
     }
 
-    // Total de encontros em que o membro teve registro de presença (presente ou ausente)
     const totalStats = await queryOne<{ total_meetings: number; present_count: number }>(
       `SELECT
          COUNT(DISTINCT a.meeting_id)::int AS total_meetings,
@@ -37,10 +57,9 @@ export async function GET(
        FROM attendance a
        JOIN meetings m ON m.id = a.meeting_id
        WHERE a.member_id = $1 AND m.group_id = $2 AND m.is_cancelled = FALSE AND m.meeting_date <= CURRENT_DATE`,
-      [memberId, leader.group_id]
+      [memberId, groupId]
     );
 
-    // Por nome de encontro: quantos encontros com esse nome, quantas vezes presente
     const byTitle = await queryMany<{
       title: string;
       meeting_count: number;
@@ -67,7 +86,7 @@ export async function GET(
        FROM presence_per_meeting
        GROUP BY title
        ORDER BY present_count DESC, meeting_count DESC`,
-      [memberId, leader.group_id]
+      [memberId, groupId]
     );
 
     return NextResponse.json({
