@@ -15,6 +15,7 @@ import { TrendingUp, TrendingDown, Award, CalendarSearch, Loader2, Users, CheckC
 type Period = 'weekly' | 'monthly' | 'quarterly' | 'semiannual' | 'yearly';
 
 type MemberFilter = 'total' | 'participants' | 'visitors';
+type PresenceFilter = 'all' | 'absent' | 'present';
 
 interface PeriodDataPoint {
   period: string;
@@ -97,6 +98,12 @@ const MEMBER_FILTER_OPTIONS: { value: MemberFilter; label: string }[] = [
   { value: 'visitors', label: 'Visitantes' },
 ];
 
+const PRESENCE_FILTER_OPTIONS: { value: PresenceFilter; label: string }[] = [
+  { value: 'all', label: 'Todos' },
+  { value: 'absent', label: 'Faltantes' },
+  { value: 'present', label: 'Presentes' },
+];
+
 // ─── Componentes internos ─────────────────────────────────────────────────────
 
 function MemberFilterSelector({
@@ -110,6 +117,30 @@ function MemberFilterSelector({
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-sm text-muted-foreground mr-1">Tipo:</span>
       {MEMBER_FILTER_OPTIONS.map((opt) => (
+        <Button
+          key={opt.value}
+          variant={value === opt.value ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => onChange(opt.value)}
+        >
+          {opt.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function PresenceFilterSelector({
+  value,
+  onChange,
+}: {
+  value: PresenceFilter;
+  onChange: (v: PresenceFilter) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-sm text-muted-foreground mr-1">Exibir:</span>
+      {PRESENCE_FILTER_OPTIONS.map((opt) => (
         <Button
           key={opt.value}
           variant={value === opt.value ? 'default' : 'outline'}
@@ -387,7 +418,7 @@ interface MeetingDetailResponse {
   summary: MeetingSummary;
 }
 
-function MeetingDetailView({ meetings, memberFilter, apiSuffix }: { meetings: MeetingItem[]; memberFilter: MemberFilter; apiSuffix: string }) {
+function MeetingDetailView({ meetings, memberFilter, presenceFilter, apiSuffix }: { meetings: MeetingItem[]; memberFilter: MemberFilter; presenceFilter: PresenceFilter; apiSuffix: string }) {
   const [selectedId, setSelectedId] = useState<string>(meetings[0]?.id ?? '');
   const [detail, setDetail] = useState<MeetingDetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -472,39 +503,43 @@ function MeetingDetailView({ meetings, memberFilter, apiSuffix }: { meetings: Me
           )}
           {(detail.attendance.length > 0 || guests.length > 0) ? (
             <div className="grid gap-4 md:grid-cols-2">
-              <Card>
-                <CardHeader><CardTitle className="flex items-center gap-2 text-sm text-green-700"><CheckCircle className="h-4 w-4" />Presentes ({detail.summary.present})</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="space-y-1.5">
-                    {present.length > 0 ? present.map((a) => (
-                      <div key={a.member_id} className="flex items-center justify-between py-1 border-b last:border-0">
-                        <p className="text-sm">{a.member_name}</p>
-                        <Badge variant="secondary" className="text-xs">{a.member_type === 'participant' ? 'Membro' : 'Visitante'}</Badge>
-                      </div>
-                    )) : null}
-                    {guests.length > 0 ? guests.map((g, i) => (
-                      <div key={`guest-${i}`} className="flex items-center justify-between py-1 border-b last:border-0">
-                        <p className="text-sm">{g.full_name}{g.phone ? ` — ${g.phone}` : ''}</p>
-                        <Badge variant="outline" className="text-xs">Visitante não cadastrado</Badge>
-                      </div>
-                    )) : null}
-                    {present.length === 0 && guests.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum presente registrado</p> : null}
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader><CardTitle className="flex items-center gap-2 text-sm text-red-700"><XCircle className="h-4 w-4" />Ausentes ({absent.length})</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="space-y-1.5">
-                    {absent.length > 0 ? absent.map((a) => (
-                      <div key={a.member_id} className="flex items-center justify-between py-1 border-b last:border-0">
-                        <p className="text-sm">{a.member_name}</p>
-                        <Badge variant="secondary" className="text-xs">{a.member_type === 'participant' ? 'Membro' : 'Visitante'}</Badge>
-                      </div>
-                    )) : <p className="text-sm text-muted-foreground">Nenhuma falta registrada</p>}
-                  </div>
-                </CardContent>
-              </Card>
+              {(presenceFilter === 'all' || presenceFilter === 'present') && (
+                <Card>
+                  <CardHeader><CardTitle className="flex items-center gap-2 text-sm text-green-700"><CheckCircle className="h-4 w-4" />Presentes ({detail.summary.present})</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="space-y-1.5">
+                      {present.length > 0 ? present.map((a) => (
+                        <div key={a.member_id} className="flex items-center justify-between py-1 border-b last:border-0">
+                          <p className="text-sm">{a.member_name}</p>
+                          <Badge variant="secondary" className="text-xs">{a.member_type === 'participant' ? 'Membro' : 'Visitante'}</Badge>
+                        </div>
+                      )) : null}
+                      {guests.length > 0 ? guests.map((g, i) => (
+                        <div key={`guest-${i}`} className="flex items-center justify-between py-1 border-b last:border-0">
+                          <p className="text-sm">{g.full_name}{g.phone ? ` — ${g.phone}` : ''}</p>
+                          <Badge variant="outline" className="text-xs">Visitante não cadastrado</Badge>
+                        </div>
+                      )) : null}
+                      {present.length === 0 && guests.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum presente registrado</p> : null}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+              {(presenceFilter === 'all' || presenceFilter === 'absent') && (
+                <Card>
+                  <CardHeader><CardTitle className="flex items-center gap-2 text-sm text-red-700"><XCircle className="h-4 w-4" />Ausentes ({absent.length})</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="space-y-1.5">
+                      {absent.length > 0 ? absent.map((a) => (
+                        <div key={a.member_id} className="flex items-center justify-between py-1 border-b last:border-0">
+                          <p className="text-sm">{a.member_name}</p>
+                          <Badge variant="secondary" className="text-xs">{a.member_type === 'participant' ? 'Membro' : 'Visitante'}</Badge>
+                        </div>
+                      )) : <p className="text-sm text-muted-foreground">Nenhuma falta registrada</p>}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           ) : (
             <div className="text-center py-8 border rounded-lg">
@@ -519,7 +554,7 @@ function MeetingDetailView({ meetings, memberFilter, apiSuffix }: { meetings: Me
 
 // ─── Visualização por nome de encontro (multi-ocorrência) ─────────────────────
 
-function TitleGroupView({ apiSuffix, memberFilter }: { apiSuffix: string; memberFilter: MemberFilter }) {
+function TitleGroupView({ apiSuffix, memberFilter, presenceFilter }: { apiSuffix: string; memberFilter: MemberFilter; presenceFilter: PresenceFilter }) {
   const [titleGroups, setTitleGroups] = useState<TitleGroup[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [selectedTitle, setSelectedTitle] = useState<string | null>(null);
@@ -595,8 +630,15 @@ function TitleGroupView({ apiSuffix, memberFilter }: { apiSuffix: string; member
     );
   }
 
-  const topPresent = groupDetail ? [...groupDetail.memberStats].sort((a, b) => b.presences - a.presences).slice(0, 5) : [];
-  const topAbsent = groupDetail ? [...groupDetail.memberStats].filter((m) => m.absences > 0).sort((a, b) => b.absences - a.absences).slice(0, 5) : [];
+  const filteredStats = groupDetail
+    ? presenceFilter === 'absent'
+      ? groupDetail.memberStats.filter((m) => m.absences > 0)
+      : presenceFilter === 'present'
+        ? groupDetail.memberStats.filter((m) => m.presences > 0)
+        : groupDetail.memberStats
+    : [];
+  const topPresent = [...filteredStats].sort((a, b) => b.presences - a.presences).slice(0, 5);
+  const topAbsent = [...filteredStats].filter((m) => m.absences > 0).sort((a, b) => b.absences - a.absences).slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -643,7 +685,7 @@ function TitleGroupView({ apiSuffix, memberFilter }: { apiSuffix: string; member
             <Card><CardContent className="pt-6 text-center"><p className="text-3xl font-bold text-indigo-600">{groupDetail.summary.avgRate}%</p><p className="text-sm text-muted-foreground mt-1">Taxa Média</p></CardContent></Card>
           </div>
 
-          {groupDetail.memberStats.length > 0 && (
+          {filteredStats.length > 0 && (
             <div className="grid gap-4 md:grid-cols-2">
               <Card>
                 <CardHeader><CardTitle className="flex items-center gap-2 text-base"><TrendingUp className="h-5 w-5 text-green-600" />Top 5 Mais Presentes</CardTitle></CardHeader>
@@ -905,6 +947,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
   const [groupName, setGroupName] = useState<string | null>(null);
   const [view, setView] = useState<Period | 'meeting' | 'title_group'>('monthly');
   const [memberFilter, setMemberFilter] = useState<MemberFilter>('total');
+  const [presenceFilter, setPresenceFilter] = useState<PresenceFilter>('all');
   const [titleFilter, setTitleFilter] = useState('');
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
@@ -964,9 +1007,15 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
   }, [view, selectedMonth, fetchPeriodData, debouncedTitle]);
 
   const periodLabel = PERIOD_OPTIONS.find((o) => o.value === view)?.label ?? '';
-  const topPresent = [...memberStats].filter((m) => m.presences + m.absences > 0).sort((a, b) => b.presences - a.presences).slice(0, 5);
-  const topAbsent = [...memberStats].filter((m) => m.absences > 0).sort((a, b) => b.absences - a.absences).slice(0, 5);
-  const perfectAttendance = memberStats.filter((m) => m.presences > 0 && m.absences === 0).map((m) => m.name);
+  const filteredMemberStats =
+    presenceFilter === 'absent'
+      ? memberStats.filter((m) => m.absences > 0)
+      : presenceFilter === 'present'
+        ? memberStats.filter((m) => m.presences > 0)
+        : memberStats;
+  const topPresent = [...filteredMemberStats].filter((m) => m.presences + m.absences > 0).sort((a, b) => b.presences - a.presences).slice(0, 5);
+  const topAbsent = [...filteredMemberStats].filter((m) => m.absences > 0).sort((a, b) => b.absences - a.absences).slice(0, 5);
+  const perfectAttendance = filteredMemberStats.filter((m) => m.presences > 0 && m.absences === 0).map((m) => m.name);
 
   return (
     <div className="space-y-6">
@@ -988,13 +1037,14 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
           availableMonths={availableMonths.length > 0 ? availableMonths : undefined}
         />
         <MemberFilterSelector value={memberFilter} onChange={setMemberFilter} />
+        <PresenceFilterSelector value={presenceFilter} onChange={setPresenceFilter} />
       </div>
 
       {!publicToken && !groupId && <EngagementShareToggle />}
 
       {view === 'title_group' ? (
         <>
-          <TitleGroupView apiSuffix={apiSuffix} memberFilter={memberFilter} />
+          <TitleGroupView apiSuffix={apiSuffix} memberFilter={memberFilter} presenceFilter={presenceFilter} />
           <DiscipleshipCard apiSuffix={apiSuffix} />
         </>
       ) : loading ? (
@@ -1008,12 +1058,12 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
         </div>
       ) : view === 'meeting' ? (
         <>
-          <MeetingDetailView meetings={meetingList} memberFilter={memberFilter} apiSuffix={apiSuffix} />
+          <MeetingDetailView meetings={meetingList} memberFilter={memberFilter} presenceFilter={presenceFilter} apiSuffix={apiSuffix} />
           <DiscipleshipCard apiSuffix={apiSuffix} />
         </>
       ) : (
         <>
-          <StatsCards periodData={periodData} perfectAttendance={perfectAttendance} memberStats={memberStats} />
+          <StatsCards periodData={periodData} perfectAttendance={perfectAttendance} memberStats={filteredMemberStats} />
           <PeriodCharts data={periodData} periodLabel={periodLabel} />
           <MemberRankings topPresent={topPresent} topAbsent={topAbsent} perfectAttendance={perfectAttendance} />
           <DiscipleshipCard apiSuffix={apiSuffix} />

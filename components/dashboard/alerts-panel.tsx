@@ -8,6 +8,9 @@ import { AlertCircle, Cake, Check, CalendarDays, Users, MessageCircle, UserX } f
 import { NOTIFICATION_TYPES } from '@/lib/constants';
 import { formatDate, isTodayBirthday } from '@/lib/utils';
 
+type PresenceFilter = 'absent' | 'present';
+type MemberTypeFilter = 'total' | 'participants' | 'visitors';
+
 interface Notification {
   id: string;
   notification_type: 'absence_alert' | 'birthday';
@@ -66,6 +69,17 @@ const BIRTHDAY_MESSAGES = [
   (name: string) => `🎉 Parabéns, ${name}! Que Deus continue abençoando sua vida e que você tenha muitos motivos para sorrir hoje e sempre! 🙌❤️`,
 ];
 
+function buildPresentWhatsAppLink(phone: string | null, name: string): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, '');
+  const fullNumber = digits.startsWith('55') ? digits : `55${digits}`;
+  const firstName = name.split(' ')[0];
+  const message = encodeURIComponent(
+    `Olá ${firstName}! Agradecemos sua presença no nosso último encontro. Que Deus continue abençoando você! 💙`
+  );
+  return `https://wa.me/${fullNumber}?text=${message}`;
+}
+
 function buildBirthdayWhatsAppLink(phone: string | null, name: string): string | null {
   if (!phone) return null;
   const digits = phone.replace(/\D/g, '');
@@ -83,13 +97,19 @@ export function AlertsPanel({
 }: AlertsPanelProps) {
   const [notifications, setNotifications] = useState(initialNotifications);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
+  const [presenceFilter, setPresenceFilter] = useState<PresenceFilter>('absent');
+  const [memberTypeFilter, setMemberTypeFilter] = useState<MemberTypeFilter>('total');
 
   useEffect(() => {
-    fetch('/api/members/absent')
+    const params = new URLSearchParams({
+      presence: presenceFilter,
+      member_filter: memberTypeFilter,
+    });
+    fetch(`/api/members/absent?${params}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data: AbsentMember[]) => setAbsentMembers(data))
       .catch(() => {});
-  }, []);
+  }, [presenceFilter, memberTypeFilter]);
 
   const markAsRead = async (notificationId: string) => {
     try {
@@ -145,24 +165,78 @@ export function AlertsPanel({
           </div>
         )}
 
-        {/* Membros mais ausentes */}
-        {absentMembers.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-              <UserX className="h-4 w-4" />
-              Membros Ausentes
+        {/* Faltantes / Presentes com filtro por tipo */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+            <UserX className="h-4 w-4" />
+            Faltantes / Presentes
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className="text-sm text-muted-foreground self-center">Exibir:</span>
+            <div className="flex gap-1">
+              <Button
+                variant={presenceFilter === 'absent' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setPresenceFilter('absent')}
+              >
+                Faltantes
+              </Button>
+              <Button
+                variant={presenceFilter === 'present' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setPresenceFilter('present')}
+              >
+                Presentes
+              </Button>
             </div>
-            <div className="space-y-2">
+            <span className="text-sm text-muted-foreground self-center ml-2">Tipo:</span>
+            <div className="flex gap-1">
+              <Button
+                variant={memberTypeFilter === 'total' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setMemberTypeFilter('total')}
+              >
+                Todos
+              </Button>
+              <Button
+                variant={memberTypeFilter === 'participants' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setMemberTypeFilter('participants')}
+              >
+                Participantes
+              </Button>
+              <Button
+                variant={memberTypeFilter === 'visitors' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setMemberTypeFilter('visitors')}
+              >
+                Visitantes
+              </Button>
+            </div>
+          </div>
+          {absentMembers.length > 0 ? (
+            <div className="space-y-2 pt-1">
+              <p className="text-xs text-muted-foreground">
+                {presenceFilter === 'absent' ? 'Faltantes' : 'Presentes'} ({memberTypeFilter === 'total' ? 'todos' : memberTypeFilter === 'participants' ? 'participantes' : 'visitantes'})
+              </p>
               {absentMembers.map((member) => {
                 const firstName = member.full_name.split(' ')[0];
-                const waLink = buildWhatsAppLink(member.phone, firstName, member.consecutive_absences);
+                const waLink = presenceFilter === 'absent'
+                  ? buildWhatsAppLink(member.phone, firstName, member.consecutive_absences ?? 0)
+                  : buildPresentWhatsAppLink(member.phone, member.full_name);
+                const isPresent = presenceFilter === 'present';
                 return (
-                  <div key={member.id} className="flex items-center justify-between p-3 rounded-lg border bg-red-50/50 border-red-100">
+                  <div
+                    key={member.id}
+                    className={`flex items-center justify-between p-3 rounded-lg border ${isPresent ? 'bg-green-50/50 border-green-100' : 'bg-red-50/50 border-red-100'}`}
+                  >
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium truncate">{member.full_name}</p>
-                      <p className="text-xs text-red-600 font-medium">
-                        {member.consecutive_absences} falta{member.consecutive_absences !== 1 ? 's' : ''} seguida{member.consecutive_absences !== 1 ? 's' : ''}
-                      </p>
+                      {!isPresent && (member.consecutive_absences ?? 0) > 0 && (
+                        <p className="text-xs text-red-600 font-medium">
+                          {member.consecutive_absences} falta{member.consecutive_absences !== 1 ? 's' : ''} seguida{member.consecutive_absences !== 1 ? 's' : ''}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
                       <Badge variant={member.member_type === 'participant' ? 'default' : 'secondary'} className="text-xs">
@@ -180,8 +254,13 @@ export function AlertsPanel({
                 );
               })}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="text-sm text-muted-foreground py-2">
+              Nenhum {presenceFilter === 'absent' ? 'faltante' : 'presente'}
+              {memberTypeFilter !== 'total' ? ` (${memberTypeFilter === 'participants' ? 'participantes' : 'visitantes'})` : ''} no momento.
+            </p>
+          )}
+        </div>
 
         {/* Próximos aniversariantes */}
         {upcomingBirthdays.length > 0 && (
