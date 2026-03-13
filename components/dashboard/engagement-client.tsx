@@ -409,6 +409,115 @@ function MemberRankings({ topPresent, topAbsent, perfectAttendance }: {
   );
 }
 
+function MemberPresenceAbsenceDistribution({ stats }: { stats: MemberStat[] }) {
+  const [mode, setMode] = useState<'absences' | 'presences'>('absences');
+
+  const data = [...stats]
+    .map((m) => ({
+      name: m.name,
+      presences: m.presences,
+      absences: m.absences,
+    }))
+    .filter((m) => (mode === 'absences' ? m.absences > 0 : m.presences > 0))
+    .sort((a, b) => (mode === 'absences' ? b.absences - a.absences : b.presences - a.presences))
+    .slice(0, 20);
+
+  const isAbsences = mode === 'absences';
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          {isAbsences ? (
+            <>
+              <TrendingDown className="h-5 w-5 text-red-600" />
+              Faltas por Pessoa
+            </>
+          ) : (
+            <>
+              <TrendingUp className="h-5 w-5 text-green-600" />
+              Presenças por Pessoa
+            </>
+          )}
+        </CardTitle>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <span className="text-sm text-muted-foreground self-center">Ordenar por:</span>
+          <Button
+            size="sm"
+            variant={isAbsences ? 'default' : 'outline'}
+            onClick={() => setMode('absences')}
+          >
+            Número de faltas
+          </Button>
+          <Button
+            size="sm"
+            variant={!isAbsences ? 'default' : 'outline'}
+            onClick={() => setMode('presences')}
+          >
+            Número de presenças
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Lista em ordem decrescente, do mais {isAbsences ? 'ausente' : 'presente'} ao menos {isAbsences ? 'ausente' : 'presente'},
+          considerando os filtros de período, tipo (participantes/visitantes) e presença aplicados acima.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Nenhum dado suficiente para montar o ranking com o filtro atual.
+          </p>
+        ) : (
+          <>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 24 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-30} textAnchor="end" height={50} />
+                  <YAxis tick={{ fontSize: 10 }} width={32} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar
+                    dataKey={isAbsences ? 'absences' : 'presences'}
+                    name={isAbsences ? 'Faltas' : 'Presenças'}
+                    fill={isAbsences ? 'hsl(0, 84%, 60%)' : 'hsl(142, 76%, 36%)'}
+                    radius={[3, 3, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="space-y-1 max-h-56 overflow-y-auto">
+              {data.map((m, index) => (
+                <div
+                  key={m.name + index}
+                  className="flex items-center justify-between py-1.5 border-b last:border-0"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold ${
+                        isAbsences ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                      }`}
+                    >
+                      {index + 1}
+                    </span>
+                    <span className="text-sm truncate">{m.name}</span>
+                  </div>
+                  <span
+                    className={`text-sm font-medium ${
+                      isAbsences ? 'text-red-700' : 'text-green-700'
+                    }`}
+                  >
+                    {isAbsences ? `${m.absences} falta${m.absences !== 1 ? 's' : ''}` : `${m.presences} presença${m.presences !== 1 ? 's' : ''}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Visualização por encontro individual ─────────────────────────────────────
 
 interface MeetingDetailResponse {
@@ -1066,6 +1175,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
           <StatsCards periodData={periodData} perfectAttendance={perfectAttendance} memberStats={filteredMemberStats} />
           <PeriodCharts data={periodData} periodLabel={periodLabel} />
           <MemberRankings topPresent={topPresent} topAbsent={topAbsent} perfectAttendance={perfectAttendance} />
+          <MemberPresenceAbsenceDistribution stats={filteredMemberStats} />
           <DiscipleshipCard apiSuffix={apiSuffix} />
         </>
       )}
