@@ -21,10 +21,11 @@ export async function GET(
       meeting_date: string;
       meeting_time: string | null;
       location: string | null;
+      notes: string | null;
       group_id: string;
       attendance_list_deadline: string | null;
     }>(
-      `SELECT id, title, meeting_date, meeting_time, location, group_id, attendance_list_deadline
+      `SELECT id, title, meeting_date, meeting_time, location, notes, group_id, attendance_list_deadline
        FROM meetings
        WHERE attendance_list_token = $1 AND is_cancelled = FALSE`,
       [token]
@@ -76,6 +77,7 @@ export async function GET(
         meeting_date: meeting.meeting_date,
         meeting_time: meeting.meeting_time,
         location: meeting.location,
+        notes: meeting.notes,
         attendance_list_deadline: meeting.attendance_list_deadline,
       },
       members: members.map((m) => ({

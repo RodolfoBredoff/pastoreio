@@ -36,6 +36,7 @@ interface ListData {
     meeting_date: string;
     meeting_time: string | null;
     location: string | null;
+    notes: string | null;
     attendance_list_deadline?: string | null;
   };
   members: MemberItem[];
@@ -249,6 +250,12 @@ export default function ListaPresencaPage() {
                 ) : (
                   meeting.location
                 )}
+              </span>
+            )}
+            {meeting.notes && meeting.notes.trim() && (
+              <span className="flex items-baseline gap-1.5 w-full justify-center">
+                <span className="text-muted-foreground font-medium shrink-0">Informações:</span>
+                <span className="text-sm text-muted-foreground">{meeting.notes.trim()}</span>
               </span>
             )}
           </div>
