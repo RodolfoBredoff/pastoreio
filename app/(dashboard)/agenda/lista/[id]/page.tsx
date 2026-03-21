@@ -12,6 +12,9 @@ import {
   internalCheckKeyMember,
   internalCheckKeyGuest,
   normalizeInternalChecks,
+  getPair,
+  emptyCheckPair,
+  type InternalCheckPair,
 } from '@/lib/attendance-list-internal';
 
 interface MemberResponse {
@@ -43,10 +46,11 @@ interface ListData {
     location: string | null;
     attendance_list_deadline?: string | null;
     attendance_list_internal_label?: string | null;
-    attendance_list_internal_checks?: Record<string, boolean>;
+    attendance_list_internal_checks?: Record<string, InternalCheckPair>;
     attendance_list_internal_enabled?: boolean;
     attendance_list_internal_result_positive?: string | null;
     attendance_list_internal_result_negative?: string | null;
+    attendance_list_internal_unmarked_label?: string | null;
   };
   members: MemberRow[];
   guests: GuestRow[];
@@ -90,18 +94,22 @@ function guestRegisteredBy(g: GuestRow): string {
 }
 
 function checksEqualForRows(
-  a: Record<string, boolean>,
-  b: Record<string, boolean>,
+  a: Record<string, InternalCheckPair>,
+  b: Record<string, InternalCheckPair>,
   memberIds: string[],
   guestIds: string[]
 ): boolean {
   for (const id of memberIds) {
     const k = internalCheckKeyMember(id);
-    if (Boolean(a[k]) !== Boolean(b[k])) return false;
+    const pa = a[k] ?? emptyCheckPair();
+    const pb = b[k] ?? emptyCheckPair();
+    if (pa.a !== pb.a || pa.b !== pb.b) return false;
   }
   for (const id of guestIds) {
     const k = internalCheckKeyGuest(id);
-    if (Boolean(a[k]) !== Boolean(b[k])) return false;
+    const pa = a[k] ?? emptyCheckPair();
+    const pb = b[k] ?? emptyCheckPair();
+    if (pa.a !== pb.a || pa.b !== pb.b) return false;
   }
   return true;
 }
@@ -110,10 +118,11 @@ function syncInternalStateFromMeeting(d: ListData) {
   const m = d.meeting;
   return {
     label: m.attendance_list_internal_label ?? '',
-    checks: normalizeInternalChecks(m.attendance_list_internal_checks ?? {}),
+    checks: normalizeInternalChecks(m.attendance_list_internal_checks as Record<string, unknown> ?? {}),
     enabled: m.attendance_list_internal_enabled ?? false,
     resultPositive: m.attendance_list_internal_result_positive ?? '',
     resultNegative: m.attendance_list_internal_result_negative ?? '',
+    unmarked: m.attendance_list_internal_unmarked_label ?? '',
   };
 }
 
@@ -126,10 +135,11 @@ export default function ListaConfirmacaoPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [internalLabel, setInternalLabel] = useState('');
-  const [internalChecks, setInternalChecks] = useState<Record<string, boolean>>({});
+  const [internalChecks, setInternalChecks] = useState<Record<string, InternalCheckPair>>({});
   const [internalEnabled, setInternalEnabled] = useState(false);
   const [internalResultPositive, setInternalResultPositive] = useState('');
   const [internalResultNegative, setInternalResultNegative] = useState('');
+  const [internalUnmarked, setInternalUnmarked] = useState('');
   const [internalSaving, setInternalSaving] = useState(false);
   const [checklistSaveOk, setChecklistSaveOk] = useState(false);
   const [leaderGuestFirst, setLeaderGuestFirst] = useState('');
@@ -154,18 +164,28 @@ export default function ListaConfirmacaoPage() {
           setInternalEnabled(s.enabled);
           setInternalResultPositive(s.resultPositive);
           setInternalResultNegative(s.resultNegative);
+          setInternalUnmarked(s.unmarked);
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Erro ao carregar'));
   };
 
   const saveInternalChecklist = async () => {
-    if (!meetingId) return;
+    if (!meetingId || !data) return;
     setInternalSaving(true);
     setChecklistSaveOk(false);
     setError(null);
     try {
       const labelVal = internalLabel.trim() === '' ? null : internalLabel.trim();
+      const fullChecks: Record<string, InternalCheckPair> = {};
+      for (const m of data.members) {
+        const k = internalCheckKeyMember(m.id);
+        fullChecks[k] = internalChecks[k] ?? emptyCheckPair();
+      }
+      for (const g of data.guests) {
+        const k = internalCheckKeyGuest(g.id);
+        fullChecks[k] = internalChecks[k] ?? emptyCheckPair();
+      }
       const res = await fetch(`/api/meetings/${meetingId}/attendance-list`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -176,7 +196,9 @@ export default function ListaConfirmacaoPage() {
             internalResultPositive.trim() === '' ? null : internalResultPositive.trim().slice(0, 120),
           internal_result_negative:
             internalResultNegative.trim() === '' ? null : internalResultNegative.trim().slice(0, 120),
-          internal_checks: internalChecks,
+          internal_unmarked_label:
+            internalUnmarked.trim() === '' ? null : internalUnmarked.trim().slice(0, 120),
+          internal_checks: fullChecks,
         }),
       });
       const json = await res.json();
@@ -194,6 +216,7 @@ export default function ListaConfirmacaoPage() {
           setInternalEnabled(s.enabled);
           setInternalResultPositive(s.resultPositive);
           setInternalResultNegative(s.resultNegative);
+          setInternalUnmarked(s.unmarked);
           setChecklistSaveOk(true);
           setTimeout(() => setChecklistSaveOk(false), 4000);
         })
@@ -205,14 +228,11 @@ export default function ListaConfirmacaoPage() {
     }
   };
 
-  const handleInternalToggleMember = (memberId: string, checked: boolean) => {
-    const k = internalCheckKeyMember(memberId);
-    setInternalChecks((prev) => ({ ...prev, [k]: checked }));
-  };
-
-  const handleInternalToggleGuest = (guestId: string, checked: boolean) => {
-    const k = internalCheckKeyGuest(guestId);
-    setInternalChecks((prev) => ({ ...prev, [k]: checked }));
+  const handleInternalToggle = (rowKey: string, field: 'a' | 'b', checked: boolean) => {
+    setInternalChecks((prev) => {
+      const cur = prev[rowKey] ?? emptyCheckPair();
+      return { ...prev, [rowKey]: { ...cur, [field]: checked } };
+    });
   };
 
   const handleAddLeaderGuest = async () => {
@@ -264,6 +284,7 @@ export default function ListaConfirmacaoPage() {
         setInternalEnabled(s.enabled);
         setInternalResultPositive(s.resultPositive);
         setInternalResultNegative(s.resultNegative);
+        setInternalUnmarked(s.unmarked);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Erro ao carregar'))
       .finally(() => setLoading(false));
@@ -278,7 +299,9 @@ export default function ListaConfirmacaoPage() {
     const localPos = internalResultPositive.trim();
     const savedNeg = (m.attendance_list_internal_result_negative ?? '').trim();
     const localNeg = internalResultNegative.trim();
-    const savedChecks = normalizeInternalChecks(m.attendance_list_internal_checks ?? {});
+    const savedUnmarked = (m.attendance_list_internal_unmarked_label ?? '').trim();
+    const localUnmarked = internalUnmarked.trim();
+    const savedChecks = normalizeInternalChecks(m.attendance_list_internal_checks as Record<string, unknown> ?? {});
     const memberIds = data.members.map((x) => x.id);
     const guestIds = data.guests.map((x) => x.id);
     return (
@@ -286,6 +309,7 @@ export default function ListaConfirmacaoPage() {
       localLabel !== savedLabel ||
       localPos !== savedPos ||
       localNeg !== savedNeg ||
+      localUnmarked !== savedUnmarked ||
       !checksEqualForRows(internalChecks, savedChecks, memberIds, guestIds)
     );
   }, [
@@ -295,6 +319,7 @@ export default function ListaConfirmacaoPage() {
     internalEnabled,
     internalResultPositive,
     internalResultNegative,
+    internalUnmarked,
   ]);
 
   useEffect(() => {
@@ -387,12 +412,21 @@ export default function ListaConfirmacaoPage() {
     ...members.map((m) => internalCheckKeyMember(m.id)),
     ...guests.map((g) => internalCheckKeyGuest(g.id)),
   ];
-  const internalCheckedCount = checklistRowKeys.filter((k) => internalChecks[k] === true).length;
-  const internalUncheckedCount = checklistRowKeys.length - internalCheckedCount;
-  const columnTitle = internalLabel.trim() || 'Marcar';
-  const summaryTitle = internalLabel.trim() || 'Checklist';
-  const posLabel = internalResultPositive.trim() || 'Marcados';
-  const negLabel = internalResultNegative.trim() || 'Não marcados';
+  let countCheckA = 0;
+  let countCheckB = 0;
+  let countNeither = 0;
+  for (const k of checklistRowKeys) {
+    const p = getPair(internalChecks, k);
+    if (p.a) countCheckA++;
+    if (p.b) countCheckB++;
+    if (!p.a && !p.b) countNeither++;
+  }
+  const listNameDisplay = internalLabel.trim() || 'Checklist';
+  const headerCheckboxA = internalResultPositive.trim() || 'Opção 1';
+  const headerCheckboxB = internalResultNegative.trim() || 'Opção 2';
+  const labelResultA = internalResultPositive.trim() || 'Marcado (1º)';
+  const labelResultB = internalResultNegative.trim() || 'Marcado (2º)';
+  const labelNeither = internalUnmarked.trim() || 'Não marcados';
 
   return (
     <div className="space-y-6">
@@ -588,8 +622,8 @@ export default function ListaConfirmacaoPage() {
         <div className="px-4 py-3 border-b bg-muted/50 space-y-1">
           <h2 className="font-medium">Checklist interno</h2>
           <p className="text-xs text-muted-foreground">
-            Opcional. Ative quando quiser marcar itens por pessoa (participantes e visitantes da lista). Personalize
-            o nome da lista e dos resultados. Salve para registrar.
+            Opcional. Dois checkboxes por pessoa (participantes e convidados). Nomeie a lista (ex.: Pagamento) e cada
+            checkbox (ex.: Pago e A pagar). Salve para registrar.
           </p>
         </div>
         <div className="p-4 space-y-4">
@@ -614,7 +648,7 @@ export default function ListaConfirmacaoPage() {
             <>
               <div className="grid gap-4 sm:grid-cols-2 max-w-3xl">
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="internal-checklist-label">Nome da lista / coluna (ex.: Pagamento)</Label>
+                  <Label htmlFor="internal-checklist-label">Nome da lista de checklist (ex.: Pagamento)</Label>
                   <Input
                     id="internal-checklist-label"
                     placeholder="Ex.: Pagamento, Material, Contribuição…"
@@ -624,22 +658,32 @@ export default function ListaConfirmacaoPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="internal-result-pos">Texto para quem está marcado</Label>
+                  <Label htmlFor="internal-result-pos">Nome do 1º checkbox</Label>
                   <Input
                     id="internal-result-pos"
-                    placeholder="Padrão: Marcados"
+                    placeholder="Ex.: Pago"
                     value={internalResultPositive}
                     onChange={(e) => setInternalResultPositive(e.target.value)}
                     disabled={internalSaving}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="internal-result-neg">Texto para quem não está marcado</Label>
+                  <Label htmlFor="internal-result-neg">Nome do 2º checkbox</Label>
                   <Input
                     id="internal-result-neg"
-                    placeholder="Padrão: Não marcados"
+                    placeholder="Ex.: A pagar"
                     value={internalResultNegative}
                     onChange={(e) => setInternalResultNegative(e.target.value)}
+                    disabled={internalSaving}
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="internal-unmarked">Texto para quem não marcou nenhum dos dois</Label>
+                  <Input
+                    id="internal-unmarked"
+                    placeholder="Padrão: Não marcados"
+                    value={internalUnmarked}
+                    onChange={(e) => setInternalUnmarked(e.target.value)}
                     disabled={internalSaving}
                   />
                 </div>
@@ -668,43 +712,68 @@ export default function ListaConfirmacaoPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/30">
-                      <th className="text-left p-3 font-medium">Nome</th>
-                      <th className="text-center p-3 font-medium w-32">{columnTitle}</th>
+                      <th className="text-left p-3 font-medium min-w-[140px]">Nome</th>
+                      <th className="text-center p-3 font-medium w-28">{headerCheckboxA}</th>
+                      <th className="text-center p-3 font-medium w-28">{headerCheckboxB}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {members.map((m) => (
-                      <tr key={m.id} className="border-b last:border-0">
-                        <td className="p-3">
-                          <span className="font-medium">{m.full_name}</span>
-                          <span className="block text-xs text-muted-foreground">Participante</span>
-                        </td>
-                        <td className="p-3 text-center">
-                          <Checkbox
-                            checked={internalChecks[internalCheckKeyMember(m.id)] === true}
-                            onCheckedChange={(c) => handleInternalToggleMember(m.id, c === true)}
-                            disabled={internalSaving}
-                            aria-label={`${columnTitle} ${m.full_name}`}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                    {guests.map((g) => (
-                      <tr key={`g-${g.id}`} className="border-b last:border-0 bg-muted/20">
-                        <td className="p-3">
-                          <span className="font-medium">{g.full_name}</span>
-                          <span className="block text-xs text-muted-foreground">Convidado</span>
-                        </td>
-                        <td className="p-3 text-center">
-                          <Checkbox
-                            checked={internalChecks[internalCheckKeyGuest(g.id)] === true}
-                            onCheckedChange={(c) => handleInternalToggleGuest(g.id, c === true)}
-                            disabled={internalSaving}
-                            aria-label={`${columnTitle} ${g.full_name}`}
-                          />
-                        </td>
-                      </tr>
-                    ))}
+                    {members.map((m) => {
+                      const rk = internalCheckKeyMember(m.id);
+                      const p = getPair(internalChecks, rk);
+                      return (
+                        <tr key={m.id} className="border-b last:border-0">
+                          <td className="p-3">
+                            <span className="font-medium">{m.full_name}</span>
+                            <span className="block text-xs text-muted-foreground">Participante</span>
+                          </td>
+                          <td className="p-3 text-center">
+                            <Checkbox
+                              checked={p.a}
+                              onCheckedChange={(c) => handleInternalToggle(rk, 'a', c === true)}
+                              disabled={internalSaving}
+                              aria-label={`${headerCheckboxA} — ${m.full_name}`}
+                            />
+                          </td>
+                          <td className="p-3 text-center">
+                            <Checkbox
+                              checked={p.b}
+                              onCheckedChange={(c) => handleInternalToggle(rk, 'b', c === true)}
+                              disabled={internalSaving}
+                              aria-label={`${headerCheckboxB} — ${m.full_name}`}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {guests.map((g) => {
+                      const rk = internalCheckKeyGuest(g.id);
+                      const p = getPair(internalChecks, rk);
+                      return (
+                        <tr key={`g-${g.id}`} className="border-b last:border-0 bg-muted/20">
+                          <td className="p-3">
+                            <span className="font-medium">{g.full_name}</span>
+                            <span className="block text-xs text-muted-foreground">Convidado</span>
+                          </td>
+                          <td className="p-3 text-center">
+                            <Checkbox
+                              checked={p.a}
+                              onCheckedChange={(c) => handleInternalToggle(rk, 'a', c === true)}
+                              disabled={internalSaving}
+                              aria-label={`${headerCheckboxA} — ${g.full_name}`}
+                            />
+                          </td>
+                          <td className="p-3 text-center">
+                            <Checkbox
+                              checked={p.b}
+                              onCheckedChange={(c) => handleInternalToggle(rk, 'b', c === true)}
+                              disabled={internalSaving}
+                              aria-label={`${headerCheckboxB} — ${g.full_name}`}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
                 {members.length === 0 && guests.length === 0 && (
@@ -712,14 +781,22 @@ export default function ListaConfirmacaoPage() {
                 )}
               </div>
 
-              <div className="rounded-lg border bg-muted/40 px-4 py-3 text-sm">
-                <p className="font-medium text-foreground">{summaryTitle}</p>
-                <p className="text-muted-foreground mt-1">
-                  {posLabel}: <span className="font-semibold text-foreground">{internalCheckedCount}</span>
-                  {' · '}
-                  {negLabel}:{' '}
-                  <span className="font-semibold text-foreground">{internalUncheckedCount}</span>
-                </p>
+              <div className="rounded-lg border bg-muted/40 px-4 py-3 text-sm space-y-2">
+                <p className="font-semibold text-foreground">{listNameDisplay}</p>
+                <ul className="text-muted-foreground space-y-1 list-none pl-0">
+                  <li>
+                    {labelResultA}:{' '}
+                    <span className="font-semibold text-foreground">{countCheckA}</span>
+                  </li>
+                  <li>
+                    {labelResultB}:{' '}
+                    <span className="font-semibold text-foreground">{countCheckB}</span>
+                  </li>
+                  <li>
+                    {labelNeither}:{' '}
+                    <span className="font-semibold text-foreground">{countNeither}</span>
+                  </li>
+                </ul>
               </div>
             </>
           )}

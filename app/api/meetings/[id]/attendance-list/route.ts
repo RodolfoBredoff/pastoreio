@@ -72,13 +72,15 @@ export async function GET(
       attendance_list_internal_enabled: boolean;
       attendance_list_internal_result_positive: string | null;
       attendance_list_internal_result_negative: string | null;
+      attendance_list_internal_unmarked_label: string | null;
     }>(
       `SELECT id, group_id, title, meeting_date, meeting_time, location, attendance_list_token, attendance_list_deadline,
               attendance_list_internal_label,
               COALESCE(attendance_list_internal_checks, '{}'::jsonb) AS attendance_list_internal_checks,
               COALESCE(attendance_list_internal_enabled, FALSE) AS attendance_list_internal_enabled,
               attendance_list_internal_result_positive,
-              attendance_list_internal_result_negative
+              attendance_list_internal_result_negative,
+              attendance_list_internal_unmarked_label
        FROM meetings WHERE id = $1`,
       [meetingId]
     );
@@ -143,6 +145,7 @@ export async function GET(
         attendance_list_internal_enabled: meetingRow.attendance_list_internal_enabled ?? false,
         attendance_list_internal_result_positive: meetingRow.attendance_list_internal_result_positive,
         attendance_list_internal_result_negative: meetingRow.attendance_list_internal_result_negative,
+        attendance_list_internal_unmarked_label: meetingRow.attendance_list_internal_unmarked_label,
       },
       members: members.map((m) => ({
         id: m.id,
@@ -194,14 +197,16 @@ export async function PATCH(
       internal_enabled,
       internal_result_positive,
       internal_result_negative,
+      internal_unmarked_label,
     } = body as {
       member_id?: string;
       status?: string;
       internal_label?: string | null;
-      internal_checks?: Record<string, boolean>;
+      internal_checks?: Record<string, { a: boolean; b: boolean }>;
       internal_enabled?: boolean;
       internal_result_positive?: string | null;
       internal_result_negative?: string | null;
+      internal_unmarked_label?: string | null;
     };
 
     const hasInternalPatch =
@@ -209,7 +214,8 @@ export async function PATCH(
       internal_checks !== undefined ||
       internal_enabled !== undefined ||
       internal_result_positive !== undefined ||
-      internal_result_negative !== undefined;
+      internal_result_negative !== undefined ||
+      internal_unmarked_label !== undefined;
 
     if (hasInternalPatch) {
       const parts: string[] = [];
@@ -245,6 +251,14 @@ export async function PATCH(
           internal_result_negative === null || String(internal_result_negative).trim() === ''
             ? null
             : String(internal_result_negative).trim().slice(0, 120);
+        vals.push(v);
+      }
+      if (internal_unmarked_label !== undefined) {
+        parts.push(`attendance_list_internal_unmarked_label = $${p++}`);
+        const v =
+          internal_unmarked_label === null || String(internal_unmarked_label).trim() === ''
+            ? null
+            : String(internal_unmarked_label).trim().slice(0, 120);
         vals.push(v);
       }
       if (parts.length > 0) {
