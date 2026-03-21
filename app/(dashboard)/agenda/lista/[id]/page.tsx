@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus, RotateCcw, Save } from 'lucide-react';
 
 interface MemberResponse {
   status: string;
@@ -79,6 +79,17 @@ function guestRegisteredBy(g: GuestRow): string {
   return '—';
 }
 
+function checksEqualForMembers(
+  a: Record<string, boolean>,
+  b: Record<string, boolean>,
+  memberIds: string[]
+): boolean {
+  for (const id of memberIds) {
+    if (Boolean(a[id]) !== Boolean(b[id])) return false;
+  }
+  return true;
+}
+
 export default function ListaConfirmacaoPage() {
   const params = useParams();
   const meetingId = params?.id as string | undefined;
@@ -90,6 +101,9 @@ export default function ListaConfirmacaoPage() {
   const [internalLabel, setInternalLabel] = useState('');
   const [internalChecks, setInternalChecks] = useState<Record<string, boolean>>({});
   const [internalSaving, setInternalSaving] = useState(false);
+  const [checklistSaveOk, setChecklistSaveOk] = useState(false);
+  /** Evita sobrescrever rascunho do checklist ao recarregar só membros/confirmações */
+  const checklistDraftDirtyRef = useRef(false);
 
   const fetchList = () => {
     if (!meetingId) return;
@@ -100,52 +114,53 @@ export default function ListaConfirmacaoPage() {
       })
       .then((d) => {
         setData(d);
-        setInternalLabel(d.meeting.attendance_list_internal_label ?? '');
-        setInternalChecks(d.meeting.attendance_list_internal_checks ?? {});
+        if (!checklistDraftDirtyRef.current) {
+          setInternalLabel(d.meeting.attendance_list_internal_label ?? '');
+          setInternalChecks(d.meeting.attendance_list_internal_checks ?? {});
+        }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Erro ao carregar'));
   };
 
-  const persistInternal = async (next: {
-    label?: string | null;
-    checks?: Record<string, boolean>;
-  }): Promise<boolean> => {
-    if (!meetingId) return false;
+  const saveInternalChecklist = async () => {
+    if (!meetingId) return;
     setInternalSaving(true);
+    setChecklistSaveOk(false);
+    setError(null);
     try {
-      const body: { internal_label?: string | null; internal_checks?: Record<string, boolean> } = {};
-      if (next.label !== undefined) body.internal_label = next.label;
-      if (next.checks !== undefined) body.internal_checks = next.checks;
+      const labelVal = internalLabel.trim() === '' ? null : internalLabel.trim();
       const res = await fetch(`/api/meetings/${meetingId}/attendance-list`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          internal_label: labelVal,
+          internal_checks: internalChecks,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Erro ao salvar');
-      fetchList();
-      return true;
+      fetch(`/api/meetings/${meetingId}/attendance-list`)
+        .then((r) => {
+          if (!r.ok) return r.json().then((d) => Promise.reject(new Error(d.error || 'Erro ao carregar')));
+          return r.json();
+        })
+        .then((d) => {
+          setData(d);
+          setInternalLabel(d.meeting.attendance_list_internal_label ?? '');
+          setInternalChecks(d.meeting.attendance_list_internal_checks ?? {});
+          setChecklistSaveOk(true);
+          setTimeout(() => setChecklistSaveOk(false), 4000);
+        })
+        .catch((e) => setError(e instanceof Error ? e.message : 'Erro ao carregar'));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao salvar checklist');
-      return false;
     } finally {
       setInternalSaving(false);
     }
   };
 
-  const handleInternalToggle = async (memberId: string, checked: boolean) => {
-    const prev = { ...internalChecks };
-    const next = { ...internalChecks, [memberId]: checked };
-    setInternalChecks(next);
-    const ok = await persistInternal({ checks: next });
-    if (!ok) setInternalChecks(prev);
-  };
-
-  const handleInternalLabelBlur = () => {
-    const trimmed = internalLabel.trim();
-    const prev = (data?.meeting.attendance_list_internal_label ?? '').trim();
-    if (trimmed === prev) return;
-    void persistInternal({ label: trimmed === '' ? null : trimmed });
+  const handleInternalToggle = (memberId: string, checked: boolean) => {
+    setInternalChecks((prev) => ({ ...prev, [memberId]: checked }));
   };
 
   useEffect(() => {
@@ -169,6 +184,22 @@ export default function ListaConfirmacaoPage() {
       .catch((e) => setError(e instanceof Error ? e.message : 'Erro ao carregar'))
       .finally(() => setLoading(false));
   }, [meetingId]);
+
+  const checklistDirty = useMemo(() => {
+    if (!data) return false;
+    const m = data.meeting;
+    const savedLabel = (m.attendance_list_internal_label ?? '').trim();
+    const localLabel = internalLabel.trim();
+    const savedChecks = m.attendance_list_internal_checks ?? {};
+    const ids = data.members.map((x) => x.id);
+    return (
+      localLabel !== savedLabel || !checksEqualForMembers(internalChecks, savedChecks, ids)
+    );
+  }, [data, internalLabel, internalChecks]);
+
+  useEffect(() => {
+    checklistDraftDirtyRef.current = checklistDirty;
+  }, [checklistDirty]);
 
   const handleChangeStatus = async (memberId: string, status: 'present' | 'absent') => {
     setActionLoading(memberId);
@@ -280,21 +311,39 @@ export default function ListaConfirmacaoPage() {
         <div className="px-4 py-3 border-b bg-muted/50 space-y-1">
           <h2 className="font-medium">Checklist interno</h2>
           <p className="text-xs text-muted-foreground">
-            Visível apenas para líder e secretário. Use para conferências que não aparecem no link público.
+            Visível apenas para líder e secretário. Ajuste o texto e os checkboxes e clique em Salvar checklist para
+            registrar. Ao voltar nesta página, alterações novas também precisam ser salvas.
           </p>
         </div>
         <div className="p-4 space-y-4">
-          <div className="space-y-2 max-w-md">
-            <Label htmlFor="internal-checklist-label">Descrição no cabeçalho (ex.: o que conferir)</Label>
-            <Input
-              id="internal-checklist-label"
-              placeholder="Ex.: Levou material, Contribuição, etc."
-              value={internalLabel}
-              onChange={(e) => setInternalLabel(e.target.value)}
-              onBlur={() => handleInternalLabelBlur()}
-              disabled={internalSaving}
-            />
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3 max-w-2xl">
+            <div className="space-y-2 flex-1 min-w-0">
+              <Label htmlFor="internal-checklist-label">Descrição no cabeçalho (ex.: o que conferir)</Label>
+              <Input
+                id="internal-checklist-label"
+                placeholder="Ex.: Levou material, Contribuição, etc."
+                value={internalLabel}
+                onChange={(e) => setInternalLabel(e.target.value)}
+                disabled={internalSaving}
+              />
+            </div>
+            <Button
+              type="button"
+              onClick={() => void saveInternalChecklist()}
+              disabled={internalSaving || !checklistDirty}
+              className="shrink-0"
+            >
+              {internalSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Save className="h-4 w-4 mr-2" />
+              )}
+              Salvar checklist
+            </Button>
           </div>
+          {checklistSaveOk && (
+            <p className="text-sm text-green-700 dark:text-green-400">Checklist salvo com sucesso.</p>
+          )}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -310,7 +359,7 @@ export default function ListaConfirmacaoPage() {
                     <td className="p-3 text-center">
                       <Checkbox
                         checked={Boolean(internalChecks[m.id])}
-                        onCheckedChange={(c) => void handleInternalToggle(m.id, c === true)}
+                        onCheckedChange={(c) => handleInternalToggle(m.id, c === true)}
                         disabled={internalSaving}
                         aria-label={`Marcar ${m.full_name}`}
                       />
