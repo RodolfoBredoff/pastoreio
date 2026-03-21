@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
+import { normalizeInternalChecks } from '@/lib/attendance-list-internal';
 
 type AuthError = { message: string; status: number };
 type MeetingAuth =
@@ -68,10 +69,16 @@ export async function GET(
       attendance_list_deadline: string | null;
       attendance_list_internal_label: string | null;
       attendance_list_internal_checks: Record<string, boolean>;
+      attendance_list_internal_enabled: boolean;
+      attendance_list_internal_result_positive: string | null;
+      attendance_list_internal_result_negative: string | null;
     }>(
       `SELECT id, group_id, title, meeting_date, meeting_time, location, attendance_list_token, attendance_list_deadline,
               attendance_list_internal_label,
-              COALESCE(attendance_list_internal_checks, '{}'::jsonb) AS attendance_list_internal_checks
+              COALESCE(attendance_list_internal_checks, '{}'::jsonb) AS attendance_list_internal_checks,
+              COALESCE(attendance_list_internal_enabled, FALSE) AS attendance_list_internal_enabled,
+              attendance_list_internal_result_positive,
+              attendance_list_internal_result_negative
        FROM meetings WHERE id = $1`,
       [meetingId]
     );
@@ -113,11 +120,15 @@ export async function GET(
       last_name: string;
       registered_by_email: string | null;
       registered_by_phone: string | null;
+      registered_by_leader: boolean;
     }>(
-      `SELECT id, first_name, last_name, registered_by_email, registered_by_phone
+      `SELECT id, first_name, last_name, registered_by_email, registered_by_phone,
+              COALESCE(registered_by_leader, FALSE) AS registered_by_leader
        FROM attendance_list_guests WHERE meeting_id = $1 ORDER BY created_at ASC`,
       [meetingId]
     ).catch(() => []);
+
+    const checksNorm = normalizeInternalChecks(meetingRow.attendance_list_internal_checks);
 
     return NextResponse.json({
       meeting: {
@@ -128,7 +139,10 @@ export async function GET(
         location: meetingRow.location,
         attendance_list_deadline: meetingRow.attendance_list_deadline,
         attendance_list_internal_label: meetingRow.attendance_list_internal_label,
-        attendance_list_internal_checks: meetingRow.attendance_list_internal_checks ?? {},
+        attendance_list_internal_checks: checksNorm,
+        attendance_list_internal_enabled: meetingRow.attendance_list_internal_enabled ?? false,
+        attendance_list_internal_result_positive: meetingRow.attendance_list_internal_result_positive,
+        attendance_list_internal_result_negative: meetingRow.attendance_list_internal_result_negative,
       },
       members: members.map((m) => ({
         id: m.id,
@@ -142,6 +156,7 @@ export async function GET(
         full_name: `${g.first_name} ${g.last_name}`.trim(),
         registered_by_email: g.registered_by_email,
         registered_by_phone: g.registered_by_phone,
+        registered_by_leader: g.registered_by_leader,
       })),
     });
   } catch (error) {
@@ -176,14 +191,27 @@ export async function PATCH(
       status: newStatus,
       internal_label,
       internal_checks,
+      internal_enabled,
+      internal_result_positive,
+      internal_result_negative,
     } = body as {
       member_id?: string;
       status?: string;
       internal_label?: string | null;
       internal_checks?: Record<string, boolean>;
+      internal_enabled?: boolean;
+      internal_result_positive?: string | null;
+      internal_result_negative?: string | null;
     };
 
-    if (internal_label !== undefined || internal_checks !== undefined) {
+    const hasInternalPatch =
+      internal_label !== undefined ||
+      internal_checks !== undefined ||
+      internal_enabled !== undefined ||
+      internal_result_positive !== undefined ||
+      internal_result_negative !== undefined;
+
+    if (hasInternalPatch) {
       const parts: string[] = [];
       const vals: unknown[] = [meetingId];
       let p = 2;
@@ -197,7 +225,27 @@ export async function PATCH(
       }
       if (internal_checks !== undefined) {
         parts.push(`attendance_list_internal_checks = $${p++}::jsonb`);
-        vals.push(JSON.stringify(internal_checks ?? {}));
+        vals.push(JSON.stringify(normalizeInternalChecks(internal_checks ?? {})));
+      }
+      if (internal_enabled !== undefined) {
+        parts.push(`attendance_list_internal_enabled = $${p++}`);
+        vals.push(Boolean(internal_enabled));
+      }
+      if (internal_result_positive !== undefined) {
+        parts.push(`attendance_list_internal_result_positive = $${p++}`);
+        const v =
+          internal_result_positive === null || String(internal_result_positive).trim() === ''
+            ? null
+            : String(internal_result_positive).trim().slice(0, 120);
+        vals.push(v);
+      }
+      if (internal_result_negative !== undefined) {
+        parts.push(`attendance_list_internal_result_negative = $${p++}`);
+        const v =
+          internal_result_negative === null || String(internal_result_negative).trim() === ''
+            ? null
+            : String(internal_result_negative).trim().slice(0, 120);
+        vals.push(v);
       }
       if (parts.length > 0) {
         await query(`UPDATE meetings SET ${parts.join(', ')} WHERE id = $1`, vals);
