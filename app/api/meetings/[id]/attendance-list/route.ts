@@ -57,7 +57,7 @@ export async function GET(
 
     const { id: meetingId } = await params;
 
-    const meeting = await queryOne<{
+    const meetingRow = await queryOne<{
       id: string;
       group_id: string;
       title: string | null;
@@ -66,17 +66,21 @@ export async function GET(
       location: string | null;
       attendance_list_token: string | null;
       attendance_list_deadline: string | null;
+      attendance_list_internal_label: string | null;
+      attendance_list_internal_checks: Record<string, boolean>;
     }>(
-      `SELECT id, group_id, title, meeting_date, meeting_time, location, attendance_list_token, attendance_list_deadline
+      `SELECT id, group_id, title, meeting_date, meeting_time, location, attendance_list_token, attendance_list_deadline,
+              attendance_list_internal_label,
+              COALESCE(attendance_list_internal_checks, '{}'::jsonb) AS attendance_list_internal_checks
        FROM meetings WHERE id = $1`,
       [meetingId]
     );
 
-    if (!meeting || meeting.group_id !== leader.group_id) {
+    if (!meetingRow || meetingRow.group_id !== leader.group_id) {
       return NextResponse.json({ error: 'Reunião não encontrada' }, { status: 404 });
     }
 
-    if (!meeting.attendance_list_token) {
+    if (!meetingRow.attendance_list_token) {
       return NextResponse.json(
         { error: 'Este encontro não possui lista de presença' },
         { status: 400 }
@@ -85,7 +89,7 @@ export async function GET(
 
     const members = await queryMany<{ id: string; full_name: string }>(
       `SELECT id, full_name FROM members WHERE group_id = $1 AND is_active = TRUE ORDER BY full_name ASC`,
-      [meeting.group_id]
+      [meetingRow.group_id]
     );
 
     const responses = await queryMany<{
@@ -117,12 +121,14 @@ export async function GET(
 
     return NextResponse.json({
       meeting: {
-        id: meeting.id,
-        title: meeting.title,
-        meeting_date: meeting.meeting_date,
-        meeting_time: meeting.meeting_time,
-        location: meeting.location,
-        attendance_list_deadline: meeting.attendance_list_deadline,
+        id: meetingRow.id,
+        title: meetingRow.title,
+        meeting_date: meetingRow.meeting_date,
+        meeting_time: meetingRow.meeting_time,
+        location: meetingRow.location,
+        attendance_list_deadline: meetingRow.attendance_list_deadline,
+        attendance_list_internal_label: meetingRow.attendance_list_internal_label,
+        attendance_list_internal_checks: meetingRow.attendance_list_internal_checks ?? {},
       },
       members: members.map((m) => ({
         id: m.id,
@@ -165,11 +171,45 @@ export async function PATCH(
     const { meeting } = auth;
 
     const body = await request.json();
-    const { member_id, status: newStatus } = body as { member_id?: string; status?: string };
+    const {
+      member_id,
+      status: newStatus,
+      internal_label,
+      internal_checks,
+    } = body as {
+      member_id?: string;
+      status?: string;
+      internal_label?: string | null;
+      internal_checks?: Record<string, boolean>;
+    };
+
+    if (internal_label !== undefined || internal_checks !== undefined) {
+      const parts: string[] = [];
+      const vals: unknown[] = [meetingId];
+      let p = 2;
+      if (internal_label !== undefined) {
+        parts.push(`attendance_list_internal_label = $${p++}`);
+        const v =
+          internal_label === null || String(internal_label).trim() === ''
+            ? null
+            : String(internal_label).trim().slice(0, 500);
+        vals.push(v);
+      }
+      if (internal_checks !== undefined) {
+        parts.push(`attendance_list_internal_checks = $${p++}::jsonb`);
+        vals.push(JSON.stringify(internal_checks ?? {}));
+      }
+      if (parts.length > 0) {
+        await query(`UPDATE meetings SET ${parts.join(', ')} WHERE id = $1`, vals);
+      }
+      if (!member_id || !newStatus) {
+        return NextResponse.json({ ok: true });
+      }
+    }
 
     if (!member_id || !newStatus) {
       return NextResponse.json(
-        { error: 'Informe member_id e status (present ou absent)' },
+        { error: 'Informe member_id e status (present ou absent), ou campos de checklist interno' },
         { status: 400 }
       );
     }

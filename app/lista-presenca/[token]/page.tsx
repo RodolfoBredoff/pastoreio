@@ -45,6 +45,8 @@ interface ListData {
   count_absent: number;
   count_guests: number;
   is_expired?: boolean;
+  public_summary_only?: boolean;
+  count_unconfirmed?: number;
 }
 
 function formatDate(d: string) {
@@ -213,9 +215,21 @@ export default function ListaPresencaPage() {
     );
   }
 
-  const { meeting, members, guests = [], count_present, count_absent, count_guests = 0, is_expired } = data;
+  const {
+    meeting,
+    members,
+    guests = [],
+    count_present,
+    count_absent,
+    count_guests = 0,
+    is_expired,
+    public_summary_only,
+    count_unconfirmed,
+  } = data;
 
   const isExpired = Boolean(is_expired);
+  const summaryOnly = Boolean(public_summary_only);
+  const displayAbsentCount = summaryOnly && count_unconfirmed != null ? count_unconfirmed : count_absent;
 
   const mapsUrl =
     meeting.location && meeting.location.trim().length > 0
@@ -265,7 +279,9 @@ export default function ListaPresencaPage() {
           <div className="flex items-center gap-2 text-green-700">
             <CheckCircle2 className="h-5 w-5" />
             <span className="font-medium">{count_present}</span>
-            <span className="text-sm text-muted-foreground">presentes</span>
+            <span className="text-sm text-muted-foreground">
+              {summaryOnly ? 'confirmaram presença' : 'presentes'}
+            </span>
           </div>
           {count_guests > 0 && (
             <div className="flex items-center gap-2 text-blue-700">
@@ -276,23 +292,34 @@ export default function ListaPresencaPage() {
           )}
           <div className="flex items-center gap-2 text-amber-700">
             <XCircle className="h-5 w-5" />
-            <span className="font-medium">{count_absent}</span>
-            <span className="text-sm text-muted-foreground">ausências</span>
+            <span className="font-medium">{displayAbsentCount}</span>
+            <span className="text-sm text-muted-foreground">
+              {summaryOnly ? 'não confirmaram (inclui quem não respondeu)' : 'ausências'}
+            </span>
           </div>
         </div>
+
+        {summaryOnly && (
+          <p className="text-center text-sm text-muted-foreground px-2">
+            Após o prazo, os totais continuam públicos, mas não é possível ver quem confirmou ou deixou de confirmar.
+          </p>
+        )}
 
         <div className="rounded-lg border bg-card overflow-hidden">
           <div className="px-4 py-3 border-b bg-muted/50 space-y-1">
             <p className="text-sm text-muted-foreground">
-              Selecione sua opção e informe e-mail ou telefone para registrar.
+              {summaryOnly
+                ? 'O prazo para registrar confirmações por este link foi encerrado.'
+                : 'Selecione sua opção e informe e-mail ou telefone para registrar.'}
             </p>
-            {isExpired && (
+            {isExpired && !summaryOnly && (
               <p className="text-xs text-amber-700">
                 O prazo de confirmação para este encontro foi encerrado. Você ainda pode visualizar a lista,
                 mas não é mais possível registrar novas respostas.
               </p>
             )}
           </div>
+          {!summaryOnly && (
           <ul className="divide-y">
             {members.map((member) => (
               <li key={member.id} className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -351,21 +378,29 @@ export default function ListaPresencaPage() {
               </li>
             ))}
           </ul>
+          )}
+          {summaryOnly && (
+            <p className="px-4 py-6 text-sm text-muted-foreground text-center">
+              A lista nominal com as respostas individuais não é exibida após o encerramento do prazo.
+            </p>
+          )}
         </div>
 
         <div className="rounded-lg border bg-card overflow-hidden">
           <div className="px-4 py-3 border-b bg-muted/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <p className="text-sm text-muted-foreground">
-              Vai levar alguém que ainda não está na lista? Cadastre o visitante abaixo.
+              {summaryOnly
+                ? 'Cadastro de visitantes pelo link não está mais disponível após o prazo.'
+                : 'Vai levar alguém que ainda não está na lista? Cadastre o visitante abaixo.'}
             </p>
-            {!isExpired && (
+            {!isExpired && !summaryOnly && (
               <Button variant="outline" size="sm" onClick={() => { setGuestModalOpen(true); setGuestError(''); }}>
                 <UserPlus className="h-4 w-4 mr-2" />
                 Vou levar um visitante
               </Button>
             )}
           </div>
-          {guests.length > 0 ? (
+          {!summaryOnly && guests.length > 0 ? (
             <ul className="divide-y">
               {guests.map((g) => (
                 <li key={g.id} className="px-4 py-2 text-sm">
@@ -373,8 +408,14 @@ export default function ListaPresencaPage() {
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : !summaryOnly ? (
             <p className="px-4 py-3 text-sm text-muted-foreground">Nenhum visitante cadastrado ainda.</p>
+          ) : count_guests > 0 ? (
+            <p className="px-4 py-3 text-sm text-muted-foreground">
+              Há {count_guests} visitante(s) cadastrado(s); os nomes não são exibidos após o prazo.
+            </p>
+          ) : (
+            <p className="px-4 py-3 text-sm text-muted-foreground">Nenhum visitante cadastrado.</p>
           )}
         </div>
       </div>

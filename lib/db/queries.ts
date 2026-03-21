@@ -444,6 +444,25 @@ export async function saveAttendance(
   const { groupId, guests = [] } = options;
 
   await transaction(async (client) => {
+    const meetingRow = await client.query<{ meeting_date: string }>(
+      `SELECT meeting_date::text AS meeting_date FROM meetings WHERE id = $1`,
+      [meetingId]
+    );
+    const meetingDate = meetingRow.rows[0]?.meeting_date;
+    /** null = não filtrar (fallback); Set = só esses membros podem ter presença neste encontro */
+    let eligibleMemberIds: Set<string> | null = null;
+    if (meetingDate && attendance.length > 0) {
+      const ids = attendance.map((a) => a.member_id);
+      const elig = await client.query<{ id: string }>(
+        `SELECT id FROM members
+         WHERE id = ANY($1::uuid[])
+           AND group_id = $2
+           AND (created_at AT TIME ZONE 'UTC')::date <= $3::date`,
+        [ids, groupId, meetingDate]
+      );
+      eligibleMemberIds = new Set(elig.rows.map((r) => r.id));
+    }
+
     // Remover presenças existentes (membros)
     await client.query(
       `DELETE FROM attendance WHERE meeting_id = $1`,
@@ -456,8 +475,9 @@ export async function saveAttendance(
       [meetingId]
     );
 
-    // Inserir presenças dos membros
+    // Inserir presenças dos membros (só quem já pertencia ao grupo na data do encontro)
     for (const item of attendance) {
+      if (eligibleMemberIds !== null && !eligibleMemberIds.has(item.member_id)) continue;
       await client.query(
         `INSERT INTO attendance (meeting_id, member_id, is_present)
          VALUES ($1, $2, $3)

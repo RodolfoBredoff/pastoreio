@@ -45,7 +45,6 @@ export async function GET(
       [meeting.id]
     );
 
-    // Dados de confirmação (email/telefone) ficam só no app para líder/secretários; aqui só status para exibição pública
     const responseMap: Record<string, { status: 'present' | 'absent' }> = {};
     let countPresent = 0;
     let countAbsent = 0;
@@ -69,6 +68,33 @@ export async function GET(
       meeting.attendance_list_deadline !== null &&
       !Number.isNaN(new Date(meeting.attendance_list_deadline).getTime()) &&
       new Date() > new Date(meeting.attendance_list_deadline);
+
+    const totalMembers = members.length;
+    const noResponseCount = totalMembers - countPresent - countAbsent;
+    /** Após o prazo: não expor quem confirmou ou não; contabilizar não respondidos como não confirmados */
+    const countUnconfirmed = isExpired ? countAbsent + Math.max(0, noResponseCount) : countAbsent;
+
+    if (isExpired) {
+      return NextResponse.json({
+        meeting: {
+          id: meeting.id,
+          title: meeting.title,
+          meeting_date: meeting.meeting_date,
+          meeting_time: meeting.meeting_time,
+          location: meeting.location,
+          notes: meeting.notes,
+          attendance_list_deadline: meeting.attendance_list_deadline,
+        },
+        members: [],
+        guests: [],
+        count_present: countPresent,
+        count_absent: countUnconfirmed,
+        count_unconfirmed: countUnconfirmed,
+        count_guests: guests.length,
+        is_expired: true,
+        public_summary_only: true,
+      });
+    }
 
     return NextResponse.json({
       meeting: {
@@ -94,7 +120,8 @@ export async function GET(
       count_present: countPresent,
       count_absent: countAbsent,
       count_guests: guests.length,
-      is_expired: isExpired,
+      is_expired: false,
+      public_summary_only: false,
     });
   } catch (error) {
     console.error('Erro ao buscar lista de presença:', error);

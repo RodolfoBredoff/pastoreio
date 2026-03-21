@@ -57,7 +57,7 @@ export async function GET(request: Request) {
     if (presence === 'present') {
       const presentMembers = await queryMany<AbsentMember>(
         `WITH last_meeting AS (
-           SELECT id FROM meetings
+           SELECT id, meeting_date FROM meetings
            WHERE group_id = $1 AND is_cancelled = FALSE AND meeting_date <= CURRENT_DATE
            ORDER BY meeting_date DESC LIMIT 1
          )
@@ -66,6 +66,7 @@ export async function GET(request: Request) {
          INNER JOIN attendance a ON a.member_id = m.id
          INNER JOIN last_meeting lm ON lm.id = a.meeting_id
          WHERE m.group_id = $1 AND m.is_active = TRUE AND a.is_present = TRUE${typeCond}
+           AND lm.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
          ORDER BY m.full_name ASC`,
         [leader.group_id]
       );
@@ -79,6 +80,7 @@ export async function GET(request: Request) {
          FROM members m
          INNER JOIN meetings mt ON mt.group_id = m.group_id AND mt.id = ANY($2::uuid[])
          WHERE m.group_id = $1 AND m.is_active = TRUE${typeCond}
+           AND mt.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
            AND NOT EXISTS (
              SELECT 1 FROM attendance a
              WHERE a.meeting_id = mt.id AND a.member_id = m.id AND a.is_present = TRUE
@@ -106,7 +108,8 @@ export async function GET(request: Request) {
              (
                SELECT COUNT(*)::int FROM last_meetings lm
                LEFT JOIN attendance a ON a.meeting_id = lm.id AND a.member_id = m.id
-               WHERE a.id IS NULL OR a.is_present = FALSE
+               WHERE (a.id IS NULL OR a.is_present = FALSE)
+                 AND lm.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
              ) AS total_absences
            FROM members m
            WHERE m.group_id = $1 AND m.is_active = TRUE${typeCond}
@@ -145,6 +148,7 @@ export async function GET(request: Request) {
                       COALESCE(a.is_present, FALSE) as is_present
                FROM last_meetings lm
                LEFT JOIN attendance a ON a.meeting_id = lm.id AND a.member_id = m.id
+               WHERE lm.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
                ORDER BY lm.meeting_date DESC
              ) AS recent
              WHERE is_present = FALSE
@@ -154,6 +158,7 @@ export async function GET(request: Request) {
                    FROM last_meetings lm2
                    LEFT JOIN attendance a2 ON a2.meeting_id = lm2.id AND a2.member_id = m.id
                    WHERE COALESCE(a2.is_present, FALSE) = TRUE
+                     AND lm2.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
                  ) present_dates), '1900-01-01'::date
                )
            ) AS consecutive_absences

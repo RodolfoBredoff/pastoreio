@@ -241,7 +241,7 @@ function EditMeetingDialog({
                 onChange={(e) => setAttendanceDeadline(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Após esta data, o link público não aceitará novas confirmações. Você pode alterar ou estender este prazo a qualquer momento.
+                Após esta data, o link continua aberto só com totais (confirmados e não confirmados); quem respondeu ou não deixa de aparecer publicamente. Você pode alterar ou estender o prazo a qualquer momento.
               </p>
             </div>
           )}
@@ -450,7 +450,7 @@ function AddMeetingDialog({
                         onChange={(e) => setAttendanceDeadline(e.target.value)}
                       />
                       <p className="text-xs text-muted-foreground">
-                        Após esta data, o link público não aceitará novas confirmações. Você pode alterar ou estender este prazo depois, na agenda.
+                        Após esta data, o link segue público com totais agregados, sem expor quem confirmou. Você pode alterar ou estender este prazo depois, na agenda.
                       </p>
                     </div>
                   )}

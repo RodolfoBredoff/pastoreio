@@ -212,7 +212,9 @@ export async function GET(request: Request) {
           `SELECT a.meeting_id, a.member_id, m.full_name as member_name, m.member_type, a.is_present
            FROM attendance a
            JOIN members m ON m.id = a.member_id
-           WHERE a.meeting_id = ANY($1::uuid[])`,
+           JOIN meetings mt ON mt.id = a.meeting_id
+           WHERE a.meeting_id = ANY($1::uuid[])
+             AND (m.created_at AT TIME ZONE 'UTC')::date <= mt.meeting_date`,
           [meetingIds]
         ),
         queryMany<{ meeting_id: string; cnt: number }>(
@@ -298,7 +300,9 @@ export async function GET(request: Request) {
           `SELECT a.member_id, m.full_name as member_name, m.member_type, a.is_present
            FROM attendance a
            JOIN members m ON m.id = a.member_id
+           JOIN meetings mt ON mt.id = a.meeting_id
            WHERE a.meeting_id = $1
+             AND (m.created_at AT TIME ZONE 'UTC')::date <= mt.meeting_date
            ORDER BY m.full_name ASC`,
           [meetingId]
         ),
@@ -434,7 +438,9 @@ export async function GET(request: Request) {
            a.is_present
          FROM attendance a
          JOIN members m ON m.id = a.member_id
-         WHERE a.meeting_id = ANY($1::uuid[])`,
+         JOIN meetings mt ON mt.id = a.meeting_id
+         WHERE a.meeting_id = ANY($1::uuid[])
+           AND (m.created_at AT TIME ZONE 'UTC')::date <= mt.meeting_date`,
         [meetingIds]
       ),
       queryMany<{ meeting_id: string; cnt: number }>(
