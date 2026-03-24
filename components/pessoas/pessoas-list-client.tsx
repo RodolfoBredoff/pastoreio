@@ -1,17 +1,18 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PessoaCard } from '@/components/pessoas/pessoa-card';
 import { BroadcastDialogClient } from '@/components/pessoas/broadcast-dialog-client';
+import { PessoasEngagementPanel } from '@/components/pessoas/pessoas-engagement-panel';
 import { LinkButton } from '@/components/ui/link-button';
 import { Button } from '@/components/ui/button';
 import { UserPlus, Users } from 'lucide-react';
 import type { Member } from '@/lib/db/queries';
 
-type ListMode = 'all' | 'absent' | 'present';
+type ListMode = 'all' | 'absent' | 'engagement';
 type MemberTypeFilter = 'total' | 'participants' | 'visitors';
 type AbsentMetricMode = 'most_absent' | 'consecutive' | 'month';
-type AbsentScope = 'all' | 'last10';
+type AbsentWindow = 'all' | 'last5';
 
 interface AbsentRow {
   id: string;
@@ -40,16 +41,24 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
-  const [absentScope, setAbsentScope] = useState<AbsentScope>('all');
+  const [absentWindow, setAbsentWindow] = useState<AbsentWindow>('all');
   const [absentRows, setAbsentRows] = useState<AbsentRow[]>([]);
-  const [presentRows, setPresentRows] = useState<AbsentRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loadingAbsent, setLoadingAbsent] = useState(false);
+  const [engagementMembers, setEngagementMembers] = useState<Member[]>([]);
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
 
+  const setEngagementFiltered = useCallback((list: Member[]) => {
+    setEngagementMembers(list);
+  }, []);
+
+  useEffect(() => {
+    if (listMode !== 'engagement') setEngagementMembers([]);
+  }, [listMode]);
+
   useEffect(() => {
     if (listMode !== 'absent') return;
-    setLoading(true);
+    setLoadingAbsent(true);
     const params = new URLSearchParams({
       presence: 'absent',
       member_filter: memberTypeFilter,
@@ -57,34 +66,20 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
     });
     if (absentMetricMode === 'most_absent') {
       params.set('mode', 'most_absent');
-      params.set('scope', absentScope === 'all' ? 'all' : 'last10');
+      params.set('scope', absentWindow === 'all' ? 'all' : 'last5');
     } else if (absentMetricMode === 'month') {
       params.set('mode', 'month');
       params.set('year_month', absentYearMonth);
     } else {
       params.set('mode', 'consecutive');
-      params.set('scope', absentScope === 'all' ? 'all' : 'last10');
+      params.set('scope', absentWindow === 'all' ? 'all' : 'last5');
     }
     fetch(`/api/members/absent?${params}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data: AbsentRow[]) => setAbsentRows(data))
       .catch(() => setAbsentRows([]))
-      .finally(() => setLoading(false));
-  }, [listMode, memberTypeFilter, absentMetricMode, absentYearMonth, absentScope]);
-
-  useEffect(() => {
-    if (listMode !== 'present') return;
-    setLoading(true);
-    const params = new URLSearchParams({
-      presence: 'present',
-      member_filter: memberTypeFilter,
-    });
-    fetch(`/api/members/absent?${params}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: AbsentRow[]) => setPresentRows(data))
-      .catch(() => setPresentRows([]))
-      .finally(() => setLoading(false));
-  }, [listMode, memberTypeFilter]);
+      .finally(() => setLoadingAbsent(false));
+  }, [listMode, memberTypeFilter, absentMetricMode, absentYearMonth, absentWindow]);
 
   const displayedMembers = useMemo(() => {
     if (listMode === 'all') {
@@ -92,15 +87,16 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
         a.full_name.localeCompare(b.full_name, 'pt-BR')
       );
     }
-    if (listMode === 'present') {
-      return presentRows
-        .map((row) => memberById.get(row.id))
-        .filter((m): m is Member => !!m);
+    if (listMode === 'engagement') {
+      return engagementMembers;
     }
     return absentRows
       .map((row) => memberById.get(row.id))
       .filter((m): m is Member => !!m);
-  }, [listMode, members, memberTypeFilter, absentRows, presentRows, memberById]);
+  }, [listMode, members, memberTypeFilter, absentRows, engagementMembers, memberById]);
+
+  const forBroadcast =
+    displayedMembers.length > 0 ? displayedMembers : listMode === 'all' ? members : [];
 
   return (
     <div className="space-y-6 w-full min-w-0">
@@ -111,8 +107,10 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
             {members?.length || 0} {members?.length === 1 ? 'pessoa' : 'pessoas'} no grupo
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {members && members.length > 0 && <BroadcastDialogClient members={members} />}
+        <div className="flex flex-wrap gap-2 items-center">
+          {members && members.length > 0 && forBroadcast.length > 0 && (
+            <BroadcastDialogClient members={forBroadcast} />
+          )}
           <LinkButton href="/pessoas/novo" className="w-full sm:w-auto">
             <UserPlus className="mr-2 h-4 w-4 shrink-0" />
             Nova Pessoa
@@ -124,7 +122,7 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
         <div className="space-y-3 rounded-lg border p-4 bg-muted/20">
           <p className="text-sm font-medium">Filtrar lista</p>
           <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-xs text-muted-foreground">Presença:</span>
+            <span className="text-xs text-muted-foreground">Modo:</span>
             <Button
               variant={listMode === 'all' ? 'default' : 'outline'}
               size="sm"
@@ -140,91 +138,100 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
               Faltantes
             </Button>
             <Button
-              variant={listMode === 'present' ? 'default' : 'outline'}
+              variant={listMode === 'engagement' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setListMode('present')}
+              onClick={() => setListMode('engagement')}
             >
-              Presentes (último encontro)
+              Por engajamento
             </Button>
           </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-xs text-muted-foreground">Tipo:</span>
-            <Button
-              variant={memberTypeFilter === 'total' ? 'secondary' : 'outline'}
-              size="sm"
-              onClick={() => setMemberTypeFilter('total')}
-            >
-              Todos
-            </Button>
-            <Button
-              variant={memberTypeFilter === 'participants' ? 'secondary' : 'outline'}
-              size="sm"
-              onClick={() => setMemberTypeFilter('participants')}
-            >
-              Participantes
-            </Button>
-            <Button
-              variant={memberTypeFilter === 'visitors' ? 'secondary' : 'outline'}
-              size="sm"
-              onClick={() => setMemberTypeFilter('visitors')}
-            >
-              Visitantes
-            </Button>
-          </div>
+          {listMode !== 'engagement' && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-muted-foreground">Tipo:</span>
+              <Button
+                variant={memberTypeFilter === 'total' ? 'secondary' : 'outline'}
+                size="sm"
+                onClick={() => setMemberTypeFilter('total')}
+              >
+                Todos
+              </Button>
+              <Button
+                variant={memberTypeFilter === 'participants' ? 'secondary' : 'outline'}
+                size="sm"
+                onClick={() => setMemberTypeFilter('participants')}
+              >
+                Participantes
+              </Button>
+              <Button
+                variant={memberTypeFilter === 'visitors' ? 'secondary' : 'outline'}
+                size="sm"
+                onClick={() => setMemberTypeFilter('visitors')}
+              >
+                Visitantes
+              </Button>
+            </div>
+          )}
           {listMode === 'absent' && (
-            <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-xs text-muted-foreground">Critério de faltas:</span>
-              <Button
-                variant={absentMetricMode === 'most_absent' ? 'secondary' : 'outline'}
-                size="sm"
-                onClick={() => setAbsentMetricMode('most_absent')}
-              >
-                Mais faltantes
-              </Button>
-              <Button
-                variant={absentMetricMode === 'consecutive' ? 'secondary' : 'outline'}
-                size="sm"
-                onClick={() => setAbsentMetricMode('consecutive')}
-              >
-                Faltas seguidas
-              </Button>
-              <Button
-                variant={absentMetricMode === 'month' ? 'secondary' : 'outline'}
-                size="sm"
-                onClick={() => setAbsentMetricMode('month')}
-              >
-                Faltas no mês
-              </Button>
-              {absentMetricMode === 'month' && (
-                <input
-                  type="month"
-                  className="border rounded-md px-2 py-1 text-sm bg-background"
-                  value={absentYearMonth}
-                  onChange={(e) => setAbsentYearMonth(e.target.value)}
-                />
+            <>
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-xs text-muted-foreground">Critério de faltas:</span>
+                <Button
+                  variant={absentMetricMode === 'most_absent' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentMetricMode('most_absent')}
+                >
+                  Mais faltantes
+                </Button>
+                <Button
+                  variant={absentMetricMode === 'consecutive' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentMetricMode('consecutive')}
+                >
+                  Faltas seguidas
+                </Button>
+                <Button
+                  variant={absentMetricMode === 'month' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentMetricMode('month')}
+                >
+                  Faltas no mês
+                </Button>
+                {absentMetricMode === 'month' && (
+                  <input
+                    type="month"
+                    className="border rounded-md px-2 py-1 text-sm bg-background"
+                    value={absentYearMonth}
+                    onChange={(e) => setAbsentYearMonth(e.target.value)}
+                  />
+                )}
+              </div>
+              {absentMetricMode !== 'month' && (
+                <div className="flex flex-wrap gap-2 items-center">
+                  <span className="text-xs text-muted-foreground">Janela:</span>
+                  <Button
+                    variant={absentWindow === 'last5' ? 'secondary' : 'outline'}
+                    size="sm"
+                    onClick={() => setAbsentWindow('last5')}
+                  >
+                    Últimos 5 encontros
+                  </Button>
+                  <Button
+                    variant={absentWindow === 'all' ? 'secondary' : 'outline'}
+                    size="sm"
+                    onClick={() => setAbsentWindow('all')}
+                  >
+                    Todos os encontros
+                  </Button>
+                </div>
               )}
-            </div>
+            </>
           )}
-          {listMode === 'absent' && absentMetricMode !== 'month' && (
-            <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-xs text-muted-foreground">Janela:</span>
-              <Button
-                variant={absentScope === 'last10' ? 'secondary' : 'outline'}
-                size="sm"
-                onClick={() => setAbsentScope('last10')}
-              >
-                Últimos 10 encontros
-              </Button>
-              <Button
-                variant={absentScope === 'all' ? 'secondary' : 'outline'}
-                size="sm"
-                onClick={() => setAbsentScope('all')}
-              >
-                Todos os encontros
-              </Button>
-            </div>
+          {listMode === 'engagement' && (
+            <PessoasEngagementPanel members={members} onFilteredMembersChange={setEngagementFiltered} />
           )}
-          {loading && <p className="text-xs text-muted-foreground">Carregando…</p>}
+          {loadingAbsent && listMode === 'absent' && (
+            <p className="text-xs text-muted-foreground">Carregando…</p>
+          )}
         </div>
       )}
 

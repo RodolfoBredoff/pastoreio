@@ -12,8 +12,14 @@ type PresenceFilter = 'absent' | 'present';
 type MemberTypeFilter = 'total' | 'participants' | 'visitors';
 /** Critério ao listar faltantes (presentes usam só o último encontro). */
 type AbsentMetricMode = 'most_absent' | 'consecutive' | 'month';
-/** Janela de encontros para most_absent e consecutive (API: scope=all | last10). */
-type AbsentScope = 'all' | 'last10';
+/** Janela de encontros para most_absent e consecutive (API: scope=all | last10 | last5). */
+type AbsentScope = 'all' | 'last10' | 'last5';
+
+function scopeLabel(s: AbsentScope): string {
+  if (s === 'all') return 'todos os encontros';
+  if (s === 'last5') return 'últimos 5 encontros';
+  return 'últimos 10 encontros';
+}
 
 interface Notification {
   id: string;
@@ -119,13 +125,19 @@ export function AlertsPanel({
     if (presenceFilter === 'absent') {
       if (absentMetricMode === 'most_absent') {
         params.set('mode', 'most_absent');
-        params.set('scope', absentScope === 'all' ? 'all' : 'last10');
+        params.set(
+          'scope',
+          absentScope === 'all' ? 'all' : absentScope === 'last5' ? 'last5' : 'last10'
+        );
       } else if (absentMetricMode === 'month') {
         params.set('mode', 'month');
         params.set('year_month', absentYearMonth);
       } else {
         params.set('mode', 'consecutive');
-        params.set('scope', absentScope === 'all' ? 'all' : 'last10');
+        params.set(
+          'scope',
+          absentScope === 'all' ? 'all' : absentScope === 'last5' ? 'last5' : 'last10'
+        );
       }
     }
     fetch(`/api/members/absent?${params}`)
@@ -278,11 +290,18 @@ export function AlertsPanel({
               <span className="text-sm text-muted-foreground">Janela:</span>
               <div className="flex flex-wrap gap-1">
                 <Button
+                  variant={absentScope === 'last5' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentScope('last5')}
+                >
+                  Últimos 5
+                </Button>
+                <Button
                   variant={absentScope === 'last10' ? 'secondary' : 'outline'}
                   size="sm"
                   onClick={() => setAbsentScope('last10')}
                 >
-                  Últimos 10 encontros
+                  Últimos 10
                 </Button>
                 <Button
                   variant={absentScope === 'all' ? 'secondary' : 'outline'}
@@ -316,10 +335,10 @@ export function AlertsPanel({
                         <p className="text-xs text-red-600 font-medium">
                           {member.consecutive_absences} falta{member.consecutive_absences !== 1 ? 's' : ''}
                           {absentMetricMode === 'consecutive'
-                            ? ` seguida${member.consecutive_absences !== 1 ? 's' : ''} (${absentScope === 'last10' ? 'últimos 10 encontros' : 'todos os encontros'})`
+                            ? ` seguida${member.consecutive_absences !== 1 ? 's' : ''} (${scopeLabel(absentScope)})`
                             : absentMetricMode === 'month'
                               ? ` no mês ${absentYearMonth.split('-').reverse().join('/')}`
-                              : ` no período (${absentScope === 'last10' ? 'últimos 10 encontros' : 'todos os encontros'})`}
+                              : ` no período (${scopeLabel(absentScope)})`}
                         </p>
                       )}
                     </div>

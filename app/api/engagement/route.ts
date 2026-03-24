@@ -242,8 +242,12 @@ export async function GET(request: Request) {
         else memberMap.get(att.member_id)!.absences++;
       }
 
-      const memberStats = Array.from(memberMap.values())
-        .map((m) => ({ ...m, taxa: m.presences + m.absences > 0 ? Math.round((m.presences / (m.presences + m.absences)) * 100) : 0 }))
+      const memberStats = Array.from(memberMap.entries())
+        .map(([id, m]) => ({
+          id,
+          ...m,
+          taxa: m.presences + m.absences > 0 ? Math.round((m.presences / (m.presences + m.absences)) * 100) : 0,
+        }))
         .sort((a, b) => b.presences - a.presences);
 
       const totalPresent = filteredAttendance.filter((a) => a.is_present).length + guestsForTotal;

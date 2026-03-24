@@ -84,7 +84,7 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   /** Enquadrar contagens em últimos 10 encontros ou em todo o histórico (most_absent / consecutive). */
-  const [absentScope, setAbsentScope] = useState<'all' | 'last10'>('all');
+  const [absentScope, setAbsentScope] = useState<'all' | 'last10' | 'last5'>('all');
   const [meetingsList, setMeetingsList] = useState<{ id: string; meeting_date: string; title: string | null }[]>([]);
   const [selectedMeetingIds, setSelectedMeetingIds] = useState<Set<string>>(new Set());
   const [loadingAbsent, setLoadingAbsent] = useState(false);
@@ -112,7 +112,10 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
     params.set('limit', '80');
     if (absentSubMode === 'most_absent') {
       params.set('mode', 'most_absent');
-      params.set('scope', absentScope === 'all' ? 'all' : 'last10');
+      params.set(
+        'scope',
+        absentScope === 'all' ? 'all' : absentScope === 'last5' ? 'last5' : 'last10'
+      );
     } else if (absentSubMode === 'month') {
       params.set('mode', 'month');
       params.set('year_month', absentYearMonth);
@@ -120,7 +123,10 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
       params.set('meeting_ids', Array.from(selectedMeetingIds).join(','));
     } else {
       params.set('mode', 'consecutive');
-      params.set('scope', absentScope === 'all' ? 'all' : 'last10');
+      params.set(
+        'scope',
+        absentScope === 'all' ? 'all' : absentScope === 'last5' ? 'last5' : 'last10'
+      );
     }
     const url = `/api/members/absent?${params.toString()}`;
     fetch(url)
@@ -361,11 +367,19 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
                   <Label className="text-xs text-muted-foreground shrink-0">Janela:</Label>
                   <Button
                     type="button"
+                    variant={absentScope === 'last5' ? 'secondary' : 'outline'}
+                    size="sm"
+                    onClick={() => setAbsentScope('last5')}
+                  >
+                    Últimos 5
+                  </Button>
+                  <Button
+                    type="button"
                     variant={absentScope === 'last10' ? 'secondary' : 'outline'}
                     size="sm"
                     onClick={() => setAbsentScope('last10')}
                   >
-                    Últimos 10 encontros
+                    Últimos 10
                   </Button>
                   <Button
                     type="button"

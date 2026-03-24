@@ -439,9 +439,17 @@ export async function getGuestVisitorById(id: string): Promise<GuestVisitor | nu
 export async function saveAttendance(
   meetingId: string,
   attendance: Array<{ member_id: string; is_present: boolean }>,
-  options: { groupId: string; guests?: Array<{ full_name: string; phone?: string | null }> } = { groupId: '' }
+  options: {
+    groupId: string;
+    guests?: Array<{ full_name: string; phone?: string | null }>;
+    /**
+     * Se true, só grava linhas de membros que já estavam no grupo na data do encontro.
+     * Se false (padrão), grava o que o líder marcar — necessário para retroativos e encontros antigos.
+     */
+    restrictToMembersBeforeMeetingDate?: boolean;
+  } = { groupId: '' }
 ): Promise<void> {
-  const { groupId, guests = [] } = options;
+  const { groupId, guests = [], restrictToMembersBeforeMeetingDate = false } = options;
 
   await transaction(async (client) => {
     const meetingRow = await client.query<{ meeting_date: string }>(
@@ -449,9 +457,9 @@ export async function saveAttendance(
       [meetingId]
     );
     const meetingDate = meetingRow.rows[0]?.meeting_date;
-    /** null = não filtrar (fallback); Set = só esses membros podem ter presença neste encontro */
+    /** null = não filtrar; Set = só esses membros */
     let eligibleMemberIds: Set<string> | null = null;
-    if (meetingDate && attendance.length > 0) {
+    if (restrictToMembersBeforeMeetingDate && meetingDate && attendance.length > 0) {
       const ids = attendance.map((a) => a.member_id);
       const elig = await client.query<{ id: string }>(
         `SELECT id FROM members
