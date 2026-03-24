@@ -10,6 +10,10 @@ import { formatDate, isTodayBirthday } from '@/lib/utils';
 
 type PresenceFilter = 'absent' | 'present';
 type MemberTypeFilter = 'total' | 'participants' | 'visitors';
+/** Critério ao listar faltantes (presentes usam só o último encontro). */
+type AbsentMetricMode = 'most_absent' | 'consecutive' | 'month';
+/** Janela de encontros para most_absent e consecutive (API: scope=all | last10). */
+type AbsentScope = 'all' | 'last10';
 
 interface Notification {
   id: string;
@@ -99,17 +103,36 @@ export function AlertsPanel({
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [presenceFilter, setPresenceFilter] = useState<PresenceFilter>('absent');
   const [memberTypeFilter, setMemberTypeFilter] = useState<MemberTypeFilter>('total');
+  const [absentMetricMode, setAbsentMetricMode] = useState<AbsentMetricMode>('most_absent');
+  const [absentYearMonth, setAbsentYearMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [absentScope, setAbsentScope] = useState<AbsentScope>('all');
 
   useEffect(() => {
     const params = new URLSearchParams({
       presence: presenceFilter,
       member_filter: memberTypeFilter,
+      limit: '80',
     });
+    if (presenceFilter === 'absent') {
+      if (absentMetricMode === 'most_absent') {
+        params.set('mode', 'most_absent');
+        params.set('scope', absentScope === 'all' ? 'all' : 'last10');
+      } else if (absentMetricMode === 'month') {
+        params.set('mode', 'month');
+        params.set('year_month', absentYearMonth);
+      } else {
+        params.set('mode', 'consecutive');
+        params.set('scope', absentScope === 'all' ? 'all' : 'last10');
+      }
+    }
     fetch(`/api/members/absent?${params}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data: AbsentMember[]) => setAbsentMembers(data))
       .catch(() => {});
-  }, [presenceFilter, memberTypeFilter]);
+  }, [presenceFilter, memberTypeFilter, absentMetricMode, absentYearMonth, absentScope]);
 
   const markAsRead = async (notificationId: string) => {
     try {
@@ -214,6 +237,63 @@ export function AlertsPanel({
               </Button>
             </div>
           </div>
+          {presenceFilter === 'absent' && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-sm text-muted-foreground">Critério:</span>
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  variant={absentMetricMode === 'most_absent' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentMetricMode('most_absent')}
+                >
+                  Mais faltantes
+                </Button>
+                <Button
+                  variant={absentMetricMode === 'consecutive' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentMetricMode('consecutive')}
+                >
+                  Faltas seguidas
+                </Button>
+                <Button
+                  variant={absentMetricMode === 'month' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentMetricMode('month')}
+                >
+                  Faltas no mês
+                </Button>
+              </div>
+              {absentMetricMode === 'month' && (
+                <input
+                  type="month"
+                  className="border rounded-md px-2 py-1 text-sm bg-background"
+                  value={absentYearMonth}
+                  onChange={(e) => setAbsentYearMonth(e.target.value)}
+                />
+              )}
+            </div>
+          )}
+          {presenceFilter === 'absent' && absentMetricMode !== 'month' && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-sm text-muted-foreground">Janela:</span>
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  variant={absentScope === 'last10' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentScope('last10')}
+                >
+                  Últimos 10 encontros
+                </Button>
+                <Button
+                  variant={absentScope === 'all' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentScope('all')}
+                >
+                  Todos os encontros
+                </Button>
+              </div>
+            </div>
+          )}
           {absentMembers.length > 0 ? (
             <div className="space-y-2 pt-1">
               <p className="text-xs text-muted-foreground">
@@ -234,7 +314,12 @@ export function AlertsPanel({
                       <p className="text-sm font-medium truncate">{member.full_name}</p>
                       {!isPresent && (member.consecutive_absences ?? 0) > 0 && (
                         <p className="text-xs text-red-600 font-medium">
-                          {member.consecutive_absences} falta{member.consecutive_absences !== 1 ? 's' : ''} seguida{member.consecutive_absences !== 1 ? 's' : ''}
+                          {member.consecutive_absences} falta{member.consecutive_absences !== 1 ? 's' : ''}
+                          {absentMetricMode === 'consecutive'
+                            ? ` seguida${member.consecutive_absences !== 1 ? 's' : ''} (${absentScope === 'last10' ? 'últimos 10 encontros' : 'todos os encontros'})`
+                            : absentMetricMode === 'month'
+                              ? ` no mês ${absentYearMonth.split('-').reverse().join('/')}`
+                              : ` no período (${absentScope === 'last10' ? 'últimos 10 encontros' : 'todos os encontros'})`}
                         </p>
                       )}
                     </div>

@@ -77,7 +77,14 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState(0);
   const [absentMembers, setAbsentMembers] = useState<AbsentMemberItem[]>([]);
-  const [absentSubMode, setAbsentSubMode] = useState<'consecutive' | 'most_absent' | 'by_meetings'>('consecutive');
+  const [absentSubMode, setAbsentSubMode] = useState<'consecutive' | 'most_absent' | 'by_meetings' | 'month'>('most_absent');
+  const [absentMemberFilter, setAbsentMemberFilter] = useState<'total' | 'participants' | 'visitors'>('total');
+  const [absentYearMonth, setAbsentYearMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  /** Enquadrar contagens em últimos 10 encontros ou em todo o histórico (most_absent / consecutive). */
+  const [absentScope, setAbsentScope] = useState<'all' | 'last10'>('all');
   const [meetingsList, setMeetingsList] = useState<{ id: string; meeting_date: string; title: string | null }[]>([]);
   const [selectedMeetingIds, setSelectedMeetingIds] = useState<Set<string>>(new Set());
   const [loadingAbsent, setLoadingAbsent] = useState(false);
@@ -92,7 +99,7 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
       .catch(() => setMeetingsList([]));
   }, [open, filter]);
 
-  // Buscar faltantes conforme submodo e encontros selecionados
+  // Buscar faltantes conforme submodo, tipo (todos/participantes/visitantes) e encontros selecionados
   useEffect(() => {
     if (!open || filter !== 'absent') return;
     if (absentSubMode === 'by_meetings' && selectedMeetingIds.size === 0) {
@@ -101,19 +108,27 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
     }
     setLoadingAbsent(true);
     const params = new URLSearchParams();
+    params.set('member_filter', absentMemberFilter);
+    params.set('limit', '80');
     if (absentSubMode === 'most_absent') {
       params.set('mode', 'most_absent');
-      params.set('limit', '50');
+      params.set('scope', absentScope === 'all' ? 'all' : 'last10');
+    } else if (absentSubMode === 'month') {
+      params.set('mode', 'month');
+      params.set('year_month', absentYearMonth);
     } else if (absentSubMode === 'by_meetings' && selectedMeetingIds.size > 0) {
       params.set('meeting_ids', Array.from(selectedMeetingIds).join(','));
+    } else {
+      params.set('mode', 'consecutive');
+      params.set('scope', absentScope === 'all' ? 'all' : 'last10');
     }
-    const url = `/api/members/absent${params.toString() ? `?${params.toString()}` : ''}`;
+    const url = `/api/members/absent?${params.toString()}`;
     fetch(url)
       .then((r) => (r.ok ? r.json() : []))
       .then((data: AbsentMemberItem[]) => setAbsentMembers(data))
       .catch(() => setAbsentMembers([]))
       .finally(() => setLoadingAbsent(false));
-  }, [open, filter, absentSubMode, selectedMeetingIds]);
+  }, [open, filter, absentSubMode, selectedMeetingIds, absentMemberFilter, absentYearMonth, absentScope]);
 
   // Lista base conforme filtro: todos / participantes / visitantes / faltantes
   const baseList: { id: string; full_name: string; phone: string | null; member_type: 'participant' | 'visitor' }[] =
@@ -268,16 +283,35 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
           {/* Sub-opções quando Faltantes está ativo */}
           {filter === 'absent' && (
             <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Critério dos faltantes:</Label>
+              <Label className="text-xs text-muted-foreground">Quem incluir nos faltantes:</Label>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  variant={absentSubMode === 'consecutive' ? 'secondary' : 'outline'}
+                  variant={absentMemberFilter === 'total' ? 'secondary' : 'outline'}
                   size="sm"
-                  onClick={() => setAbsentSubMode('consecutive')}
+                  onClick={() => setAbsentMemberFilter('total')}
                 >
-                  Faltas seguidas (1–2)
+                  Todos
                 </Button>
+                <Button
+                  type="button"
+                  variant={absentMemberFilter === 'participants' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentMemberFilter('participants')}
+                >
+                  Só participantes
+                </Button>
+                <Button
+                  type="button"
+                  variant={absentMemberFilter === 'visitors' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentMemberFilter('visitors')}
+                >
+                  Só visitantes
+                </Button>
+              </div>
+              <Label className="text-xs text-muted-foreground">Critério dos faltantes:</Label>
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant={absentSubMode === 'most_absent' ? 'secondary' : 'outline'}
@@ -288,6 +322,22 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
                 </Button>
                 <Button
                   type="button"
+                  variant={absentSubMode === 'consecutive' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentSubMode('consecutive')}
+                >
+                  Faltas seguidas
+                </Button>
+                <Button
+                  type="button"
+                  variant={absentSubMode === 'month' ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setAbsentSubMode('month')}
+                >
+                  Faltantes do mês
+                </Button>
+                <Button
+                  type="button"
                   variant={absentSubMode === 'by_meetings' ? 'secondary' : 'outline'}
                   size="sm"
                   onClick={() => setAbsentSubMode('by_meetings')}
@@ -295,6 +345,38 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
                   Por encontro(s)
                 </Button>
               </div>
+              {absentSubMode === 'month' && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Label className="text-xs shrink-0">Mês:</Label>
+                  <Input
+                    type="month"
+                    className="h-9 w-[min(100%,11rem)]"
+                    value={absentYearMonth}
+                    onChange={(e) => setAbsentYearMonth(e.target.value)}
+                  />
+                </div>
+              )}
+              {(absentSubMode === 'most_absent' || absentSubMode === 'consecutive') && (
+                <div className="flex flex-wrap gap-2 items-center pt-1">
+                  <Label className="text-xs text-muted-foreground shrink-0">Janela:</Label>
+                  <Button
+                    type="button"
+                    variant={absentScope === 'last10' ? 'secondary' : 'outline'}
+                    size="sm"
+                    onClick={() => setAbsentScope('last10')}
+                  >
+                    Últimos 10 encontros
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={absentScope === 'all' ? 'secondary' : 'outline'}
+                    size="sm"
+                    onClick={() => setAbsentScope('all')}
+                  >
+                    Todos os encontros
+                  </Button>
+                </div>
+              )}
               {absentSubMode === 'by_meetings' && (
                 <div className="space-y-2 pt-2 border-t">
                   <Label className="text-xs flex items-center gap-1">

@@ -19,14 +19,21 @@ function memberTypeCondition(memberFilter: MemberFilter): string {
   return '';
 }
 
+/** Limite de encontros passados a considerar em mode=most_absent quando scope=last10 */
+const MEETING_LIMIT_LAST = 10;
+/** Limite alto quando scope=all (todos os encontros registrados) */
+const MEETING_LIMIT_ALL = 500;
+
 /**
  * GET /api/members/absent
  * Query params:
- * - mode=consecutive (default): 1–2 faltas seguidas nos últimos encontros.
- * - mode=most_absent: quem mais faltou nos últimos 10 encontros (ordenado por total de faltas). Use limit=N (default 50).
- * - meeting_ids=id1,id2: faltantes em pelo menos um dos encontros informados (ignora mode).
- * - member_filter=total|participants|visitors: filtrar por tipo (total, só participantes ou só visitantes).
- * - presence=absent|present: absent (default) = lista de faltantes; present = lista de presentes no último encontro.
+ * - mode=consecutive|most_absent|month — critério de faltas (default consecutive)
+ * - scope=all|last10 — com most_absent: conta faltas em todos os encontros ou só nos últimos 10 (default last10 para compat.)
+ * - year_month=YYYY-MM — obrigatório se mode=month
+ * - meeting_ids=id1,id2 — faltantes em pelo menos um dos encontros (ignora mode)
+ * - member_filter=total|participants|visitors
+ * - presence=absent|present
+ * - limit=N — limite de resultados (default 50, max 200)
  */
 export async function GET(request: Request) {
   try {
@@ -38,13 +45,15 @@ export async function GET(request: Request) {
     }
 
     const { searchParams } = new URL(request.url);
-    const mode = searchParams.get('mode') || 'consecutive';
+    const modeParam = searchParams.get('mode') || 'consecutive';
     const meetingIdsParam = searchParams.get('meeting_ids');
     const limit = Math.min(Number(searchParams.get('limit')) || 50, 200);
     const memberFilterParam = searchParams.get('member_filter');
     const memberFilter: MemberFilter =
       memberFilterParam === 'participants' || memberFilterParam === 'visitors' ? memberFilterParam : 'total';
     const presence = searchParams.get('presence') === 'present' ? 'present' : 'absent';
+    const scope = searchParams.get('scope') === 'all' ? 'all' : 'last10';
+    const yearMonth = searchParams.get('year_month')?.trim() || null;
 
     const meetingIds =
       meetingIdsParam && meetingIdsParam.trim()
@@ -53,7 +62,6 @@ export async function GET(request: Request) {
 
     const typeCond = memberTypeCondition(memberFilter);
 
-    // Presentes: quem esteve presente no último encontro
     if (presence === 'present') {
       const presentMembers = await queryMany<AbsentMember>(
         `WITH last_meeting AS (
@@ -73,7 +81,6 @@ export async function GET(request: Request) {
       return NextResponse.json(presentMembers);
     }
 
-    // Faltantes em encontro(s) específico(s): quem não esteve presente em pelo menos um dos encontros
     if (meetingIds.length > 0) {
       const absentByMeeting = await queryMany<AbsentMember>(
         `SELECT DISTINCT m.id, m.full_name, m.phone, m.member_type
@@ -91,13 +98,15 @@ export async function GET(request: Request) {
       return NextResponse.json(absentByMeeting);
     }
 
-    // Mais faltantes: total de faltas nos últimos 10 encontros, ordenado do que mais faltou
-    if (mode === 'most_absent') {
-      const mostAbsent = await queryMany<AbsentMember & { total_absences: number }>(
+    const meetingLimit = scope === 'all' ? MEETING_LIMIT_ALL : MEETING_LIMIT_LAST;
+
+    if (modeParam === 'most_absent') {
+      const mostAbsent = await queryMany<AbsentMember>(
         `WITH last_meetings AS (
-           SELECT id FROM meetings
+           SELECT id, meeting_date FROM meetings
            WHERE group_id = $1 AND is_cancelled = FALSE AND meeting_date <= CURRENT_DATE
-           ORDER BY meeting_date DESC LIMIT 10
+           ORDER BY meeting_date DESC
+           LIMIT $3
          ),
          member_total AS (
            SELECT
@@ -108,8 +117,8 @@ export async function GET(request: Request) {
              (
                SELECT COUNT(*)::int FROM last_meetings lm
                LEFT JOIN attendance a ON a.meeting_id = lm.id AND a.member_id = m.id
-               WHERE (a.id IS NULL OR a.is_present = FALSE)
-                 AND lm.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
+               WHERE lm.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
+                 AND (a.id IS NULL OR a.is_present = FALSE)
              ) AS total_absences
            FROM members m
            WHERE m.group_id = $1 AND m.is_active = TRUE${typeCond}
@@ -119,12 +128,48 @@ export async function GET(request: Request) {
          WHERE total_absences >= 1
          ORDER BY total_absences DESC, full_name ASC
          LIMIT $2`,
-        [leader.group_id, limit]
+        [leader.group_id, limit, meetingLimit]
       );
       return NextResponse.json(mostAbsent);
     }
 
-    // Default: 1 ou 2 faltas seguidas (comportamento original)
+    if (modeParam === 'month' && yearMonth && /^\d{4}-\d{2}$/.test(yearMonth)) {
+      const monthAbsent = await queryMany<AbsentMember>(
+        `WITH meetings_month AS (
+           SELECT id, meeting_date FROM meetings
+           WHERE group_id = $1 AND is_cancelled = FALSE AND meeting_date <= CURRENT_DATE
+             AND to_char(meeting_date, 'YYYY-MM') = $3
+         ),
+         member_total AS (
+           SELECT
+             m.id,
+             m.full_name,
+             m.phone,
+             m.member_type,
+             (
+               SELECT COUNT(*)::int FROM meetings_month mm
+               LEFT JOIN attendance a ON a.meeting_id = mm.id AND a.member_id = m.id
+               WHERE mm.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
+                 AND (a.id IS NULL OR a.is_present = FALSE)
+             ) AS total_absences
+           FROM members m
+           WHERE m.group_id = $1 AND m.is_active = TRUE${typeCond}
+         )
+         SELECT id, full_name, phone, member_type, total_absences AS consecutive_absences
+         FROM member_total
+         WHERE total_absences >= 1
+         ORDER BY total_absences DESC, full_name ASC
+         LIMIT $2`,
+        [leader.group_id, limit, yearMonth]
+      );
+      return NextResponse.json(monthAbsent);
+    }
+
+    if (modeParam === 'month') {
+      return NextResponse.json([]);
+    }
+
+    // consecutive: faltas seguidas desde o encontro mais recente até a última presença
     const absentMembers = await queryMany<AbsentMember>(
       `WITH last_meetings AS (
          SELECT id, meeting_date
@@ -133,43 +178,34 @@ export async function GET(request: Request) {
            AND is_cancelled = FALSE
            AND meeting_date <= CURRENT_DATE
          ORDER BY meeting_date DESC
-         LIMIT 10
-       ),
-       member_absences AS (
-         SELECT
-           m.id,
-           m.full_name,
-           m.phone,
-           m.member_type,
-           (
-             SELECT COUNT(*)::int
-             FROM (
-               SELECT lm.id, lm.meeting_date,
-                      COALESCE(a.is_present, FALSE) as is_present
-               FROM last_meetings lm
-               LEFT JOIN attendance a ON a.meeting_id = lm.id AND a.member_id = m.id
-               WHERE lm.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
-               ORDER BY lm.meeting_date DESC
-             ) AS recent
-             WHERE is_present = FALSE
-               AND meeting_date > COALESCE(
-                 (SELECT MAX(meeting_date) FROM (
-                   SELECT lm2.meeting_date
-                   FROM last_meetings lm2
-                   LEFT JOIN attendance a2 ON a2.meeting_id = lm2.id AND a2.member_id = m.id
-                   WHERE COALESCE(a2.is_present, FALSE) = TRUE
-                     AND lm2.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
-                 ) present_dates), '1900-01-01'::date
-               )
-           ) AS consecutive_absences
-         FROM members m
-         WHERE m.group_id = $1 AND m.is_active = TRUE${typeCond}
+         LIMIT $2
        )
-       SELECT id, full_name, phone, member_type, consecutive_absences
-       FROM member_absences
-       WHERE consecutive_absences >= 1 AND consecutive_absences <= 2
-       ORDER BY consecutive_absences DESC, full_name ASC`,
-      [leader.group_id]
+       SELECT m.id, m.full_name, m.phone, m.member_type, ca.consecutive_absences
+       FROM members m
+       CROSS JOIN LATERAL (
+         WITH ordered AS (
+           SELECT
+             lm.meeting_date,
+             COALESCE(a.is_present, FALSE) AS is_present,
+             ROW_NUMBER() OVER (ORDER BY lm.meeting_date DESC) AS rn
+           FROM last_meetings lm
+           LEFT JOIN attendance a ON a.meeting_id = lm.id AND a.member_id = m.id
+           WHERE lm.meeting_date >= (m.created_at AT TIME ZONE 'UTC')::date
+         ),
+         fp AS (
+           SELECT MIN(rn) AS first_present_rn FROM ordered WHERE is_present = TRUE
+         )
+         SELECT CASE
+           WHEN (SELECT first_present_rn FROM fp) IS NULL THEN (
+             (SELECT COUNT(*)::int FROM ordered o WHERE NOT o.is_present)
+           )
+           ELSE GREATEST((SELECT first_present_rn FROM fp) - 1, 0)
+         END::int AS consecutive_absences
+       ) ca
+       WHERE m.group_id = $1 AND m.is_active = TRUE${typeCond}
+         AND ca.consecutive_absences >= 1
+       ORDER BY ca.consecutive_absences DESC, m.full_name ASC`,
+      [leader.group_id, meetingLimit]
     );
 
     return NextResponse.json(absentMembers);
