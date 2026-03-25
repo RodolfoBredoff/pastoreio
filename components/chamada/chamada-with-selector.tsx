@@ -64,7 +64,7 @@ export function ChamadaWithSelector({
   const selectedMeeting = meetings.find((m) => m.id === selectedMeetingId);
 
   const fetchAttendance = (meetingId: string) => {
-    return fetch(`/api/attendance?meeting_id=${meetingId}`)
+    return fetch(`/api/attendance?meeting_id=${meetingId}`, { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : { attendance: [], guests: [] }))
       .then((data: { attendance?: Attendance[]; guests?: GuestVisitor[] }) => ({
         attendance: Array.isArray(data.attendance) ? data.attendance : [],

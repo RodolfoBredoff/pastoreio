@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PessoaCard } from '@/components/pessoas/pessoa-card';
 import { BroadcastDialogClient } from '@/components/pessoas/broadcast-dialog-client';
 import { PessoasEngagementPanel } from '@/components/pessoas/pessoas-engagement-panel';
+import { PessoasTagChartsPanel } from '@/components/pessoas/pessoas-tag-charts-panel';
 import { LinkButton } from '@/components/ui/link-button';
 import { Button } from '@/components/ui/button';
 import { UserPlus, Users } from 'lucide-react';
@@ -234,6 +235,8 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
           )}
         </div>
       )}
+
+      {members && members.length > 0 && <PessoasTagChartsPanel />}
 
       {members && members.length > 0 ? (
         displayedMembers.length > 0 ? (

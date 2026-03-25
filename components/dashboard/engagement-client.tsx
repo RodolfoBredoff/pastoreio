@@ -487,7 +487,7 @@ function MeetingDetailView({ meetings, memberFilter, presenceFilter, apiSuffix }
     try {
       let url = `/api/engagement?meeting_id=${id}&member_filter=${memberFilter}`;
       if (apiSuffix) url += `&${apiSuffix}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: 'no-store' });
       if (res.ok) setDetail(await res.json());
     } finally { setLoading(false); }
   }, [memberFilter, apiSuffix]);
@@ -612,7 +612,7 @@ function MeetingDetailView({ meetings, memberFilter, presenceFilter, apiSuffix }
 
 // ─── Visualização por nome de encontro (multi-ocorrência) ─────────────────────
 
-function TitleGroupView({ apiSuffix, memberFilter, presenceFilter }: { apiSuffix: string; memberFilter: MemberFilter; presenceFilter: PresenceFilter }) {
+function TitleGroupView({ apiSuffix, memberFilter, presenceFilter, refreshKey = 0 }: { apiSuffix: string; memberFilter: MemberFilter; presenceFilter: PresenceFilter; refreshKey?: number }) {
   const [titleGroups, setTitleGroups] = useState<TitleGroup[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [selectedTitle, setSelectedTitle] = useState<string | null>(null);
@@ -628,7 +628,7 @@ function TitleGroupView({ apiSuffix, memberFilter, presenceFilter }: { apiSuffix
     setLoadingGroups(true);
     let url = '/api/engagement?mode=title_groups';
     if (apiSuffix) url += `&${apiSuffix}`;
-    fetch(url)
+    fetch(url, { cache: 'no-store' })
       .then((r) => {
         if (!r.ok) {
           console.error('Erro ao buscar títulos:', r.status, r.statusText);
@@ -645,15 +645,14 @@ function TitleGroupView({ apiSuffix, memberFilter, presenceFilter }: { apiSuffix
         setTitleGroups([]);
         setLoadingGroups(false);
       });
-  }, [apiSuffix]);
+  }, [apiSuffix, refreshKey]);
 
   const fetchGroupDetail = useCallback(async (title: string) => {
     setLoadingDetail(true);
-    setSelectedTitle(title);
     try {
       let url = `/api/engagement?title_group=${encodeURIComponent(title)}&member_filter=${memberFilter}`;
       if (apiSuffix) url += `&${apiSuffix}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) {
         console.error('Erro ao buscar detalhes do título:', res.status, res.statusText);
         const errorData = await res.json().catch(() => ({}));
@@ -672,8 +671,9 @@ function TitleGroupView({ apiSuffix, memberFilter, presenceFilter }: { apiSuffix
   }, [apiSuffix, memberFilter]);
 
   useEffect(() => {
-    if (selectedTitle) fetchGroupDetail(selectedTitle);
-  }, [memberFilter]);
+    if (!selectedTitle) return;
+    void fetchGroupDetail(selectedTitle);
+  }, [selectedTitle, memberFilter, fetchGroupDetail, refreshKey]);
 
   if (loadingGroups) {
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
@@ -710,7 +710,7 @@ function TitleGroupView({ apiSuffix, memberFilter, presenceFilter }: { apiSuffix
         <CardContent>
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {titleGroups.map((tg) => (
-              <button key={tg.title} onClick={() => fetchGroupDetail(tg.title)}
+              <button type="button" key={tg.title} onClick={() => setSelectedTitle(tg.title)}
                 className={`w-full text-left flex items-center justify-between p-3 rounded-lg border transition-colors ${selectedTitle === tg.title ? 'bg-primary/10 border-primary/30' : 'hover:bg-muted/50'}`}>
                 <div>
                   <p className="text-sm font-medium">{tg.title}</p>
@@ -893,7 +893,7 @@ function DiscipleshipCard({ apiSuffix }: { apiSuffix: string }) {
   useEffect(() => {
     setLoading(true);
     const url = apiSuffix ? `/api/discipleship?${apiSuffix}` : '/api/discipleship';
-    fetch(url)
+    fetch(url, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then(setStats)
       .finally(() => setLoading(false));
@@ -1014,14 +1014,23 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
   const [meetingList, setMeetingList] = useState<MeetingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') setRefreshNonce((n) => n + 1);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   useEffect(() => {
     if (!publicToken) return;
     const url = `/api/engagement?mode=group_info&${apiSuffix}`;
-    fetch(url)
+    fetch(url, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : { groupName: null }))
       .then((d) => setGroupName(d.groupName ?? null));
-  }, [publicToken, apiSuffix]);
+  }, [publicToken, apiSuffix, refreshNonce]);
 
   const fetchPeriodData = useCallback(async (period: Period, title?: string, yearMonth?: string) => {
     setLoading(true);
@@ -1030,7 +1039,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
       if (apiSuffix) url += `&${apiSuffix}`;
       if (title?.trim()) url += `&title_filter=${encodeURIComponent(title.trim())}`;
       if (period === 'monthly' && yearMonth) url += `&year_month=${encodeURIComponent(yearMonth)}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       setPeriodData(data.periodData ?? []);
@@ -1043,11 +1052,11 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
   useEffect(() => {
     if (view === 'monthly') {
       const url = apiSuffix ? `/api/engagement?mode=available_months&${apiSuffix}` : '/api/engagement?mode=available_months';
-      fetch(url)
+      fetch(url, { cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : { yearMonths: [] }))
         .then((d) => setAvailableMonths(d.yearMonths ?? []));
     }
-  }, [view, apiSuffix]);
+  }, [view, apiSuffix, refreshNonce]);
 
   const [debouncedTitle, setDebouncedTitle] = useState(titleFilter);
   useEffect(() => {
@@ -1062,7 +1071,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
     } else if (view === 'meeting') {
       fetchPeriodData('monthly', debouncedTitle);
     }
-  }, [view, selectedMonth, fetchPeriodData, debouncedTitle]);
+  }, [view, selectedMonth, fetchPeriodData, debouncedTitle, refreshNonce]);
 
   const periodLabel = PERIOD_OPTIONS.find((o) => o.value === view)?.label ?? '';
   const filteredMemberStats =
@@ -1102,7 +1111,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
 
       {view === 'title_group' ? (
         <>
-          <TitleGroupView apiSuffix={apiSuffix} memberFilter={memberFilter} presenceFilter={presenceFilter} />
+          <TitleGroupView apiSuffix={apiSuffix} memberFilter={memberFilter} presenceFilter={presenceFilter} refreshKey={refreshNonce} />
           <DiscipleshipCard apiSuffix={apiSuffix} />
         </>
       ) : loading ? (

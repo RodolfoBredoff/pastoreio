@@ -40,6 +40,15 @@ interface PessoasEngagementPanelProps {
 
 export function PessoasEngagementPanel({ members, onFilteredMembersChange }: PessoasEngagementPanelProps) {
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') setRefreshNonce((n) => n + 1);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   const [view, setView] = useState<Period | 'meeting' | 'title_group'>('monthly');
   const [memberFilter, setMemberFilter] = useState<MemberFilter>('total');
@@ -64,7 +73,7 @@ export function PessoasEngagementPanel({ members, onFilteredMembersChange }: Pes
         let url = `/api/engagement?period=${period}&member_filter=${memberFilter}`;
         if (title?.trim()) url += `&title_filter=${encodeURIComponent(title.trim())}`;
         if (period === 'monthly' && yearMonth) url += `&year_month=${encodeURIComponent(yearMonth)}`;
-        const res = await fetch(url);
+        const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
         setMemberStats(data.memberStats ?? []);
@@ -78,11 +87,11 @@ export function PessoasEngagementPanel({ members, onFilteredMembersChange }: Pes
 
   useEffect(() => {
     if (view === 'monthly') {
-      fetch('/api/engagement?mode=available_months')
+      fetch('/api/engagement?mode=available_months', { cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : { yearMonths: [] }))
         .then((d) => setAvailableMonths(d.yearMonths ?? []));
     }
-  }, [view]);
+  }, [view, refreshNonce]);
 
   useEffect(() => {
     if (view !== 'meeting' && view !== 'title_group') {
@@ -91,7 +100,7 @@ export function PessoasEngagementPanel({ members, onFilteredMembersChange }: Pes
     } else if (view === 'meeting') {
       fetchPeriodData('monthly', debouncedTitle);
     }
-  }, [view, selectedMonth, fetchPeriodData, debouncedTitle]);
+  }, [view, selectedMonth, fetchPeriodData, debouncedTitle, refreshNonce]);
 
   // ─── Por encontro ───────────────────────────────────────────────────────
   const [selectedMeetingId, setSelectedMeetingId] = useState('');
@@ -107,13 +116,13 @@ export function PessoasEngagementPanel({ members, onFilteredMembersChange }: Pes
     }
     setMeetingLoading(true);
     let url = `/api/engagement?meeting_id=${selectedMeetingId}&member_filter=${memberFilter}`;
-    fetch(url)
+    fetch(url, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         setMeetingAttendance(data?.attendance ?? []);
       })
       .finally(() => setMeetingLoading(false));
-  }, [view, selectedMeetingId, memberFilter]);
+  }, [view, selectedMeetingId, memberFilter, refreshNonce]);
 
   useEffect(() => {
     if (view !== 'meeting' || meetingList.length === 0) return;
@@ -132,21 +141,21 @@ export function PessoasEngagementPanel({ members, onFilteredMembersChange }: Pes
   useEffect(() => {
     if (view !== 'title_group') return;
     setLoadingGroups(true);
-    fetch('/api/engagement?mode=title_groups')
+    fetch('/api/engagement?mode=title_groups', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : { titleGroups: [] }))
       .then((d) => {
         setTitleGroups(d.titleGroups ?? []);
         setLoadingGroups(false);
       })
       .catch(() => setLoadingGroups(false));
-  }, [view]);
+  }, [view, refreshNonce]);
 
   const loadGroupDetail = useCallback(
     async (title: string) => {
       setLoadingGroupDetail(true);
       try {
         const url = `/api/engagement?title_group=${encodeURIComponent(title)}&member_filter=${memberFilter}`;
-        const res = await fetch(url);
+        const res = await fetch(url, { cache: 'no-store' });
         const data = res.ok ? await res.json() : { memberStats: [] };
         setGroupMemberStats(data.memberStats ?? []);
       } finally {
@@ -166,7 +175,7 @@ export function PessoasEngagementPanel({ members, onFilteredMembersChange }: Pes
       return;
     }
     loadGroupDetail(selectedTitle);
-  }, [view, memberFilter, selectedTitle, loadGroupDetail]);
+  }, [view, memberFilter, selectedTitle, loadGroupDetail, refreshNonce]);
 
   // ─── Resolver lista de Member para o grid ──────────────────────────────
   useEffect(() => {

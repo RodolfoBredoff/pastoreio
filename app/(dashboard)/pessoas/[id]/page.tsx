@@ -2,6 +2,7 @@ import { getCurrentLeader, getMemberById, getMembersByLeaderGroup } from '@/lib/
 import { canDeleteMembers, canManageDiscipleship } from '@/lib/auth/permissions';
 import { PessoaForm } from '@/components/pessoas/pessoa-form';
 import { MemberAttendanceStats } from '@/components/pessoas/member-attendance-stats';
+import { MemberTagsEditor } from '@/components/pessoas/member-tags-editor';
 import { DeleteMemberButton } from '@/components/pessoas/delete-member-button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { notFound } from 'next/navigation';
@@ -67,6 +68,15 @@ export default async function EditarPessoaPage({
       )}
 
       <MemberAttendanceStats memberId={id} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Tags (chave / valor)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <MemberTagsEditor memberId={id} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

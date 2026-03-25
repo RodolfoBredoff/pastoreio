@@ -3,6 +3,13 @@ import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { queryMany, queryOne } from '@/lib/db/postgres';
 
+/** Inclui encontros já realizados (data ≤ hoje) ou com qualquer registro de chamada salvo. */
+const MEETING_ENGAGEMENT_VISIBILITY = `(
+  meeting_date <= CURRENT_DATE
+  OR EXISTS (SELECT 1 FROM attendance a WHERE a.meeting_id = meetings.id)
+  OR EXISTS (SELECT 1 FROM attendance_guests ag WHERE ag.meeting_id = meetings.id)
+)`;
+
 export type Period = 'weekly' | 'monthly' | 'quarterly' | 'semiannual' | 'yearly';
 
 export type MemberFilter = 'total' | 'participants' | 'visitors';
@@ -143,7 +150,7 @@ export async function GET(request: Request) {
          FROM meetings
          WHERE group_id = $1
            AND is_cancelled = FALSE
-           AND meeting_date <= CURRENT_DATE
+           AND ${MEETING_ENGAGEMENT_VISIBILITY.replace(/\n/g, ' ')}
          ORDER BY year_month DESC
          LIMIT 24`,
         [groupId]
@@ -160,7 +167,7 @@ export async function GET(request: Request) {
            AND title IS NOT NULL
            AND TRIM(title) <> ''
            AND is_cancelled = FALSE
-           AND meeting_date <= CURRENT_DATE
+           AND ${MEETING_ENGAGEMENT_VISIBILITY.replace(/\n/g, ' ')}
          GROUP BY TRIM(title)
          HAVING COUNT(*) > 0
          ORDER BY MAX(meeting_date) DESC`,
@@ -184,7 +191,7 @@ export async function GET(request: Request) {
          WHERE group_id = $1
            AND LOWER(TRIM(title)) = LOWER(TRIM($2))
            AND is_cancelled = FALSE
-           AND meeting_date <= CURRENT_DATE
+           AND ${MEETING_ENGAGEMENT_VISIBILITY.replace(/\n/g, ' ')}
          ORDER BY meeting_date DESC`,
         [groupId, trimmedTitle]
       );
@@ -214,7 +221,7 @@ export async function GET(request: Request) {
            JOIN members m ON m.id = a.member_id
            JOIN meetings mt ON mt.id = a.meeting_id
            WHERE a.meeting_id = ANY($1::uuid[])
-             AND (m.created_at AT TIME ZONE 'UTC')::date <= mt.meeting_date`,
+             AND m.group_id = mt.group_id`,
           [meetingIds]
         ),
         queryMany<{ meeting_id: string; cnt: number }>(
@@ -306,7 +313,7 @@ export async function GET(request: Request) {
            JOIN members m ON m.id = a.member_id
            JOIN meetings mt ON mt.id = a.meeting_id
            WHERE a.meeting_id = $1
-             AND (m.created_at AT TIME ZONE 'UTC')::date <= mt.meeting_date
+             AND m.group_id = mt.group_id
            ORDER BY m.full_name ASC`,
           [meetingId]
         ),
@@ -370,6 +377,7 @@ export async function GET(request: Request) {
          FROM meetings
          WHERE group_id = $1
            AND is_cancelled = FALSE
+           AND ${MEETING_ENGAGEMENT_VISIBILITY.replace(/\n/g, ' ')}
            AND meeting_date >= $2::date
            AND meeting_date < ($2::date + INTERVAL '1 month')${titleCond}
          ORDER BY meeting_date ASC`,
@@ -392,16 +400,19 @@ export async function GET(request: Request) {
         ? [groupId, interval, ...(titleFilter ? [`%${titleFilter}%`] : [])]
         : [truncate, groupId, interval, ...(titleFilter ? [`%${titleFilter}%`] : [])];
 
+      const vis = MEETING_ENGAGEMENT_VISIBILITY.replace(/\n/g, ' ');
       const meetingsQuery = effectivePeriod === 'semiannual'
         ? `SELECT id, meeting_date, title, meeting_type, ${periodStartExpr} as period_start
            FROM meetings 
            WHERE group_id = $1 AND is_cancelled = FALSE
+             AND ${vis}
              AND meeting_date >= (CURRENT_DATE - $2::interval)
              AND meeting_date <= CURRENT_DATE${titleCond}
            ORDER BY meeting_date ASC`
         : `SELECT id, meeting_date, title, meeting_type, ${periodStartExpr} as period_start
            FROM meetings 
            WHERE group_id = $2 AND is_cancelled = FALSE
+             AND ${vis}
              AND meeting_date >= (CURRENT_DATE - $3::interval)
              AND meeting_date <= CURRENT_DATE${titleCond}
            ORDER BY meeting_date ASC`;
@@ -444,7 +455,7 @@ export async function GET(request: Request) {
          JOIN members m ON m.id = a.member_id
          JOIN meetings mt ON mt.id = a.meeting_id
          WHERE a.meeting_id = ANY($1::uuid[])
-           AND (m.created_at AT TIME ZONE 'UTC')::date <= mt.meeting_date`,
+           AND m.group_id = mt.group_id`,
         [meetingIds]
       ),
       queryMany<{ meeting_id: string; cnt: number }>(

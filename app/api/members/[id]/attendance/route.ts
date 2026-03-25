@@ -56,9 +56,7 @@ export async function GET(
          COUNT(*) FILTER (WHERE a.is_present = TRUE)::int AS present_count
        FROM attendance a
        JOIN meetings m ON m.id = a.meeting_id
-       JOIN members mem ON mem.id = a.member_id
-       WHERE a.member_id = $1 AND m.group_id = $2 AND m.is_cancelled = FALSE AND m.meeting_date <= CURRENT_DATE
-         AND m.meeting_date >= (mem.created_at AT TIME ZONE 'UTC')::date`,
+       WHERE a.member_id = $1 AND m.group_id = $2 AND m.is_cancelled = FALSE`,
       [memberId, groupId]
     );
 
@@ -70,17 +68,19 @@ export async function GET(
     }>(
       `WITH meetings_with_title AS (
          SELECT id, TRIM(title) AS title, meeting_date
-         FROM meetings
-         WHERE group_id = $2 AND is_cancelled = FALSE AND meeting_date <= CURRENT_DATE
-           AND title IS NOT NULL AND TRIM(title) <> ''
+         FROM meetings m
+         WHERE m.group_id = $2 AND m.is_cancelled = FALSE
+           AND m.title IS NOT NULL AND TRIM(m.title) <> ''
+           AND (
+             m.meeting_date <= CURRENT_DATE
+             OR EXISTS (SELECT 1 FROM attendance a0 WHERE a0.meeting_id = m.id AND a0.member_id = $1)
+           )
        ),
        presence_per_meeting AS (
          SELECT mwt.title, mwt.id AS meeting_id,
                 (a.member_id IS NOT NULL AND a.is_present) AS was_present
          FROM meetings_with_title mwt
          LEFT JOIN attendance a ON a.meeting_id = mwt.id AND a.member_id = $1
-         INNER JOIN members mem ON mem.id = $1
-         WHERE mwt.meeting_date >= (mem.created_at AT TIME ZONE 'UTC')::date
        )
        SELECT
          title,
