@@ -15,15 +15,29 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { LinkButton } from '@/components/ui/link-button';
 import { Loader2, Plus, Tags, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { TAG_BUCKET_SEM_TAG } from '@/lib/member-tags-filter';
+import { MEMBER_TYPE_LABELS } from '@/lib/constants';
 
 interface Distribution {
   tagKey: string;
   buckets: { value: string; count: number }[];
 }
 
-export function PessoasTagChartsPanel() {
+interface PessoasTagChartsPanelProps {
+  /** Incrementar para recarregar chaves do grupo (ex.: após salvar tags na lista). */
+  tagsRefreshSignal?: number;
+}
+
+export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChartsPanelProps) {
   const [existingKeys, setExistingKeys] = useState<string[]>([]);
   const [chartKeys, setChartKeys] = useState<string[]>([]);
   const [customKeyInput, setCustomKeyInput] = useState('');
@@ -34,6 +48,13 @@ export function PessoasTagChartsPanel() {
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [loadingValues, setLoadingValues] = useState(false);
   const [loadingChart, setLoadingChart] = useState(false);
+  const [membersQuery, setMembersQuery] = useState<{ keysCsv: string; filtersJson: string } | null>(null);
+  const [bucketDialogOpen, setBucketDialogOpen] = useState(false);
+  const [bucketLoading, setBucketLoading] = useState(false);
+  const [bucketTitle, setBucketTitle] = useState('');
+  const [bucketMembers, setBucketMembers] = useState<
+    { id: string; full_name: string; phone: string | null; member_type: string }[]
+  >([]);
 
   const loadKeys = useCallback(async () => {
     setLoadingMeta(true);
@@ -49,6 +70,10 @@ export function PessoasTagChartsPanel() {
   useEffect(() => {
     void loadKeys();
   }, [loadKeys]);
+
+  useEffect(() => {
+    if (tagsRefreshSignal > 0) void loadKeys();
+  }, [tagsRefreshSignal, loadKeys]);
 
   const addChartKey = (k: string) => {
     const t = k.trim();
@@ -117,12 +142,43 @@ export function PessoasTagChartsPanel() {
       const data = res.ok ? await res.json() : { distributions: [], memberCount: 0 };
       setDistributions(Array.isArray(data.distributions) ? data.distributions : []);
       setMemberCount(typeof data.memberCount === 'number' ? data.memberCount : 0);
+      setMembersQuery({
+        keysCsv: keysParam,
+        filtersJson: Object.keys(filterPayload).length > 0 ? JSON.stringify(filterPayload) : '',
+      });
     } finally {
       setLoadingChart(false);
     }
   };
 
+  const openBucketMembers = async (tagKey: string, bucket: string) => {
+    if (!membersQuery) return;
+    const label =
+      bucket === TAG_BUCKET_SEM_TAG
+        ? 'sem esta tag'
+        : bucket === ''
+          ? '(valor vazio)'
+          : bucket;
+    setBucketTitle(`${tagKey} — ${label}`);
+    setBucketDialogOpen(true);
+    setBucketLoading(true);
+    setBucketMembers([]);
+    try {
+      const params = new URLSearchParams();
+      params.set('keys', membersQuery.keysCsv);
+      params.set('tag_key', tagKey);
+      params.set('bucket', bucket);
+      if (membersQuery.filtersJson) params.set('filters', membersQuery.filtersJson);
+      const res = await fetch(`/api/member-tags/members?${params.toString()}`, { cache: 'no-store' });
+      const data = res.ok ? await res.json() : { members: [] };
+      setBucketMembers(Array.isArray(data.members) ? data.members : []);
+    } finally {
+      setBucketLoading(false);
+    }
+  };
+
   return (
+    <>
     <Card className="border-dashed">
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
@@ -131,7 +187,8 @@ export function PessoasTagChartsPanel() {
         </CardTitle>
         <p className="text-sm text-muted-foreground font-normal">
           Escolha uma ou mais chaves para ver quantas pessoas há em cada valor. Use o filtro por valores para
-          cruzar tags (somente quem atende a todos os filtros entra nos gráficos).
+          cruzar tags (somente quem atende a todos os filtros entra nos gráficos). Depois de atualizar os gráficos,
+          clique em uma barra para ver a lista de cadastros daquele valor.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -153,7 +210,9 @@ export function PessoasTagChartsPanel() {
             {loadingMeta ? (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             ) : existingKeys.length === 0 ? (
-              <span className="text-xs text-muted-foreground">Nenhuma ainda — cadastre na edição da pessoa.</span>
+              <span className="text-xs text-muted-foreground">
+                Nenhuma ainda — use Tags nos cards ou a edição da pessoa.
+              </span>
             ) : (
               existingKeys.map((k) => (
                 <Button
@@ -281,11 +340,36 @@ export function PessoasTagChartsPanel() {
                   <ResponsiveContainer width="100%" height={220}>
                     <BarChart data={dist.buckets} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="value" tick={{ fontSize: 10 }} interval={0} angle={-25} textAnchor="end" height={56} />
+                      <XAxis
+                        dataKey="value"
+                        tick={{ fontSize: 10 }}
+                        interval={0}
+                        angle={-25}
+                        textAnchor="end"
+                        height={56}
+                        tickFormatter={(v: string) => (v === '' ? '(vazio)' : v)}
+                      />
                       <YAxis tick={{ fontSize: 10 }} width={32} allowDecimals={false} />
-                      <Tooltip />
+                      <Tooltip
+                        formatter={(count: number) => [`${count} pessoa(s)`, '']}
+                        labelFormatter={(v: string) => (v === '' ? '(valor vazio)' : v)}
+                      />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="count" fill="hsl(215, 55%, 45%)" name="Pessoas" radius={[3, 3, 0, 0]} />
+                      <Bar
+                        dataKey="count"
+                        fill="hsl(215, 55%, 45%)"
+                        name="Pessoas"
+                        radius={[3, 3, 0, 0]}
+                        cursor={membersQuery ? 'pointer' : 'default'}
+                        onClick={
+                          membersQuery
+                            ? (_: unknown, index: number) => {
+                                const b = dist.buckets[index];
+                                if (b) void openBucketMembers(dist.tagKey, b.value);
+                              }
+                            : undefined
+                        }
+                      />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -295,5 +379,41 @@ export function PessoasTagChartsPanel() {
         )}
       </CardContent>
     </Card>
+
+    <Dialog open={bucketDialogOpen} onOpenChange={setBucketDialogOpen}>
+      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-left">Cadastros — {bucketTitle}</DialogTitle>
+        </DialogHeader>
+        {bucketLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
+            <Loader2 className="h-5 w-5 animate-spin" /> Carregando…
+          </div>
+        ) : bucketMembers.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4">Nenhuma pessoa neste grupo.</p>
+        ) : (
+          <ul className="space-y-2">
+            {bucketMembers.map((m) => (
+              <li
+                key={m.id}
+                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border/60 pb-2 last:border-0"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium text-sm truncate">{m.full_name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {MEMBER_TYPE_LABELS[m.member_type as keyof typeof MEMBER_TYPE_LABELS] ?? m.member_type}
+                    {m.phone ? ` · ${m.phone}` : ''}
+                  </p>
+                </div>
+                <LinkButton href={`/pessoas/${m.id}`} variant="outline" size="sm" className="shrink-0 w-full sm:w-auto">
+                  Abrir cadastro
+                </LinkButton>
+              </li>
+            ))}
+          </ul>
+        )}
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

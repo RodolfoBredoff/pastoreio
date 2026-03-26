@@ -5,6 +5,7 @@ import { PessoaCard } from '@/components/pessoas/pessoa-card';
 import { BroadcastDialogClient } from '@/components/pessoas/broadcast-dialog-client';
 import { PessoasEngagementPanel } from '@/components/pessoas/pessoas-engagement-panel';
 import { PessoasTagChartsPanel } from '@/components/pessoas/pessoas-tag-charts-panel';
+import { BulkMemberTagsDialog } from '@/components/pessoas/bulk-member-tags-dialog';
 import { LinkButton } from '@/components/ui/link-button';
 import { Button } from '@/components/ui/button';
 import { UserPlus, Users } from 'lucide-react';
@@ -46,8 +47,23 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
   const [absentRows, setAbsentRows] = useState<AbsentRow[]>([]);
   const [loadingAbsent, setLoadingAbsent] = useState(false);
   const [engagementMembers, setEngagementMembers] = useState<Member[]>([]);
+  const [tagsEpoch, setTagsEpoch] = useState(0);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkTagOpen, setBulkTagOpen] = useState(false);
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
+
+  const bumpTags = useCallback(() => setTagsEpoch((n) => n + 1), []);
+
+  const toggleMemberSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const setEngagementFiltered = useCallback((list: Member[]) => {
     setEngagementMembers(list);
@@ -55,6 +71,13 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
 
   useEffect(() => {
     if (listMode !== 'engagement') setEngagementMembers([]);
+  }, [listMode]);
+
+  useEffect(() => {
+    if (listMode !== 'all') {
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+    }
   }, [listMode]);
 
   useEffect(() => {
@@ -236,13 +259,57 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
         </div>
       )}
 
-      {members && members.length > 0 && <PessoasTagChartsPanel />}
+      {members && members.length > 0 && (
+        <PessoasTagChartsPanel tagsRefreshSignal={tagsEpoch} />
+      )}
+
+      {listMode === 'all' && members.length > 0 && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <Button
+            type="button"
+            variant={selectionMode ? 'secondary' : 'outline'}
+            size="sm"
+            onClick={() => {
+              setSelectionMode((m) => {
+                if (m) setSelectedIds(new Set());
+                return !m;
+              });
+            }}
+          >
+            {selectionMode ? 'Cancelar seleção' : 'Selecionar para etiquetar'}
+          </Button>
+          {selectionMode && selectedIds.size > 0 && (
+            <Button type="button" size="sm" onClick={() => setBulkTagOpen(true)}>
+              Etiquetar {selectedIds.size} selecionada{selectedIds.size !== 1 ? 's' : ''}
+            </Button>
+          )}
+        </div>
+      )}
+
+      <BulkMemberTagsDialog
+        open={bulkTagOpen}
+        onOpenChange={setBulkTagOpen}
+        memberIds={[...selectedIds]}
+        onApplied={() => {
+          bumpTags();
+          setSelectedIds(new Set());
+          setSelectionMode(false);
+        }}
+      />
 
       {members && members.length > 0 ? (
         displayedMembers.length > 0 ? (
           <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
             {displayedMembers.map((member) => (
-              <PessoaCard key={member.id} member={member} canDelete={canDelete} />
+              <PessoaCard
+                key={member.id}
+                member={member}
+                canDelete={canDelete}
+                selectionMode={listMode === 'all' && selectionMode}
+                selected={selectedIds.has(member.id)}
+                onToggleSelect={toggleMemberSelect}
+                onTagsChanged={bumpTags}
+              />
             ))}
           </div>
         ) : (

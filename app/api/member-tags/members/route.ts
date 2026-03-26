@@ -10,9 +10,10 @@ import {
 } from '@/lib/member-tags-filter';
 
 /**
- * GET /api/member-tags/analytics?keys=a,b,c&filters={"chave":["v1"]}
- * Para cada chave em `keys`, histograma de valores entre membros ativos do grupo
- * que satisfazem todos os filtros (AND por chave: valor da tag deve estar na lista).
+ * GET /api/member-tags/members?keys=a,b&filters={}&tag_key=X&bucket=Y
+ * Membros ativos do grupo que passam pelos filtros de tag e caem no bucket da chave `tag_key`:
+ * - bucket = "(sem tag)" → não possuem essa chave
+ * - caso contrário → valor exato da tag (string vazia permitida)
  */
 export async function GET(request: Request) {
   try {
@@ -21,17 +22,24 @@ export async function GET(request: Request) {
     if (!leader?.group_id) {
       return NextResponse.json({ error: 'Líder não vinculado a um grupo' }, { status: 400 });
     }
+
     const { searchParams } = new URL(request.url);
     const keysRaw = searchParams.get('keys')?.trim();
-    if (!keysRaw) {
-      return NextResponse.json({
-        memberCount: 0,
-        distributions: [] as { tagKey: string; buckets: { value: string; count: number }[] }[],
-      });
+    const tagKey = searchParams.get('tag_key')?.trim();
+    const bucket = searchParams.get('bucket');
+    if (!keysRaw || !tagKey || bucket === null) {
+      return NextResponse.json(
+        { error: 'Parâmetros obrigatórios: keys, tag_key, bucket' },
+        { status: 400 }
+      );
     }
+
     const chartKeys = [...new Set(keysRaw.split(',').map((k) => k.trim()).filter(Boolean))].slice(0, 10);
-    if (chartKeys.length === 0) {
-      return NextResponse.json({ memberCount: 0, distributions: [] });
+    if (chartKeys.length === 0 || !chartKeys.includes(tagKey)) {
+      return NextResponse.json(
+        { error: 'tag_key deve estar incluída em keys' },
+        { status: 400 }
+      );
     }
 
     const filters = parseTagFiltersJson(searchParams.get('filters'));
@@ -39,13 +47,16 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'filters deve ser um objeto JSON válido' }, { status: 400 });
     }
 
-    const memberRows = await queryMany<{ id: string }>(
-      `SELECT id FROM members WHERE group_id = $1 AND is_active = TRUE`,
+    const memberRows = await queryMany<{ id: string; full_name: string; phone: string | null; member_type: string }>(
+      `SELECT id, full_name, phone, member_type::text
+       FROM members
+       WHERE group_id = $1 AND is_active = TRUE
+       ORDER BY full_name ASC`,
       [leader.group_id]
     );
     const allMemberIds = memberRows.map((r) => r.id);
     if (allMemberIds.length === 0) {
-      return NextResponse.json({ memberCount: 0, distributions: chartKeys.map((tagKey) => ({ tagKey, buckets: [] })) });
+      return NextResponse.json({ members: [] });
     }
 
     const filterKeys = Object.keys(filters).filter((k) => filters[k]?.length > 0);
@@ -59,33 +70,29 @@ export async function GET(request: Request) {
     );
 
     const byMember = buildMemberTagMap(tagRows);
-    const filteredMembers = filterMemberIdsByTagFilters(allMemberIds, byMember, filters);
+    const filteredIds = new Set(filterMemberIdsByTagFilters(allMemberIds, byMember, filters));
 
-    const distributions = chartKeys.map((tagKey) => {
-      const bucketMap = new Map<string, number>();
-      let semTag = 0;
-      for (const mid of filteredMembers) {
-        const tags = byMember.get(mid);
-        const v = tags?.get(tagKey);
-        if (v === undefined) {
-          semTag += 1;
-        } else {
-          bucketMap.set(v, (bucketMap.get(v) ?? 0) + 1);
-        }
+    const inBucket = (memberId: string): boolean => {
+      if (!filteredIds.has(memberId)) return false;
+      const tags = byMember.get(memberId);
+      const v = tags?.get(tagKey);
+      if (bucket === TAG_BUCKET_SEM_TAG) {
+        return v === undefined;
       }
-      const buckets: { value: string; count: number }[] = [];
-      if (semTag > 0) buckets.push({ value: TAG_BUCKET_SEM_TAG, count: semTag });
-      const sorted = [...bucketMap.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pt-BR'));
-      for (const [value, count] of sorted) buckets.push({ value, count });
-      return { tagKey, buckets };
-    });
+      return v === bucket;
+    };
 
+    const members = memberRows.filter((m) => inBucket(m.id));
     return NextResponse.json({
-      memberCount: filteredMembers.length,
-      distributions,
+      members: members.map((m) => ({
+        id: m.id,
+        full_name: m.full_name,
+        phone: m.phone,
+        member_type: m.member_type,
+      })),
     });
   } catch (e) {
-    console.error('member-tags/analytics:', e);
+    console.error('member-tags/members:', e);
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 });
   }
 }

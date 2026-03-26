@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type MouseEvent } from 'react';
 import { WhatsAppButton } from './whatsapp-button';
 import { LinkButton } from '@/components/ui/link-button';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
@@ -14,10 +14,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { calculateAge, formatPhone, isTodayBirthday } from '@/lib/utils';
 import { MEMBER_TYPE_LABELS } from '@/lib/constants';
-import { Pencil, Cake, AlertTriangle, CalendarCheck } from 'lucide-react';
+import { Pencil, Cake, AlertTriangle, CalendarCheck, Tags } from 'lucide-react';
 import { DeleteMemberButton } from './delete-member-button';
 import { cn } from '@/lib/utils';
 import { MemberAttendanceStats } from './member-attendance-stats';
+import { MemberTagsDialog } from './member-tags-dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 
 type AttendanceStatus = 'present' | 'absent' | 'at-risk';
 
@@ -35,6 +37,11 @@ interface PessoaCardProps {
   member: Member;
   attendanceStatus?: AttendanceStatus;
   canDelete?: boolean;
+  /** Modo seleção em massa na lista /pessoas */
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (memberId: string) => void;
+  onTagsChanged?: () => void;
 }
 
 const attendanceConfig: Record<
@@ -59,8 +66,17 @@ const attendanceConfig: Record<
   },
 };
 
-export function PessoaCard({ member, attendanceStatus, canDelete }: PessoaCardProps) {
+export function PessoaCard({
+  member,
+  attendanceStatus,
+  canDelete,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+  onTagsChanged,
+}: PessoaCardProps) {
   const [showPresenca, setShowPresenca] = useState(false);
+  const [showTags, setShowTags] = useState(false);
 
   let age: number | null = null;
   if (member.birth_date) {
@@ -77,7 +93,16 @@ export function PessoaCard({ member, attendanceStatus, canDelete }: PessoaCardPr
     <>
     <Card className="overflow-hidden hover:shadow-lg transition-shadow">
       <CardContent className="p-4">
-        <div className="flex items-start justify-between mb-3">
+        <div className="flex items-start justify-between mb-3 gap-2">
+          {selectionMode && (
+            <Checkbox
+              checked={selected}
+              onCheckedChange={() => onToggleSelect?.(member.id)}
+              className="mt-1 shrink-0"
+              aria-label={`Selecionar ${member.full_name}`}
+              onClick={(e: MouseEvent) => e.stopPropagation()}
+            />
+          )}
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold text-lg leading-tight mb-2 truncate">
               {member.full_name}
@@ -131,6 +156,16 @@ export function PessoaCard({ member, attendanceStatus, canDelete }: PessoaCardPr
           <CalendarCheck className="h-4 w-4 shrink-0" />
           Ver presença
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="flex-1 min-w-0"
+          onClick={() => setShowTags(true)}
+        >
+          <Tags className="h-4 w-4 shrink-0" />
+          Tags
+        </Button>
         <LinkButton href={`/pessoas/${member.id}`} variant="outline" size="sm" className="flex-1 min-w-0">
           <Pencil className="h-4 w-4" />
           Editar
@@ -160,6 +195,14 @@ export function PessoaCard({ member, attendanceStatus, canDelete }: PessoaCardPr
         </div>
       </DialogContent>
     </Dialog>
+
+    <MemberTagsDialog
+      open={showTags}
+      onOpenChange={setShowTags}
+      memberId={member.id}
+      memberName={member.full_name}
+      onTagsChanged={onTagsChanged}
+    />
     </>
   );
 }
