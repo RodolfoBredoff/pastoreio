@@ -5,6 +5,7 @@
 
 import { query, queryMany, queryOne } from '@/lib/db/postgres';
 import { sendEmail, buildBirthdayEmailHtml } from '@/lib/email/sender';
+import { sendWhatsAppTemplateMessage } from '@/lib/whatsapp/sender';
 
 const CONSECUTIVE_ABSENCES_THRESHOLD = 2;
 
@@ -94,8 +95,8 @@ export async function checkBirthdaysToday(): Promise<number> {
       [group.id]
     );
 
-    const leader = await queryOne<{ full_name: string; email: string }>(
-      `SELECT full_name, email FROM leaders WHERE group_id = $1 LIMIT 1`,
+    const leader = await queryOne<{ full_name: string; email: string; phone: string | null }>(
+      `SELECT full_name, email, phone FROM leaders WHERE group_id = $1 LIMIT 1`,
       [group.id]
     );
 
@@ -121,13 +122,15 @@ export async function checkBirthdaysToday(): Promise<number> {
         );
         notificationsCreated++;
 
+        const groupName = groupData?.name ?? 'Seu Grupo';
+
         // Enviar e-mail ao líder do grupo
         if (leader?.email) {
           const html = buildBirthdayEmailHtml({
             leaderName: leader.full_name,
             memberName: person.full_name,
             memberPhone: person.phone || null,
-            groupName: groupData?.name ?? 'Seu Grupo',
+            groupName,
           });
 
           await sendEmail({
@@ -135,6 +138,15 @@ export async function checkBirthdaysToday(): Promise<number> {
             subject: `🎂 Aniversário de ${person.full_name} hoje!`,
             html,
             text: `Olá ${leader.full_name}! Hoje é aniversário de ${person.full_name}. Envie uma mensagem de parabéns!`,
+          });
+        }
+
+        // Enviar WhatsApp ao líder do grupo (requer Meta Business Cloud API configurada)
+        if (leader?.phone) {
+          await sendWhatsAppTemplateMessage({
+            toPhone: leader.phone,
+            templateName: process.env.WHATSAPP_TEMPLATE_NAME ?? 'aniversario_lider',
+            variables: [leader.full_name, person.full_name, groupName],
           });
         }
       }

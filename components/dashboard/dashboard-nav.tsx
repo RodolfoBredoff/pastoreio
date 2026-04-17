@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { LinkButton } from '@/components/ui/link-button';
 import { PastoreioLogo } from '@/components/brand/PastoreioLogo';
-import { Home, Users, ClipboardCheck, Calendar, LogOut, TrendingUp, Settings, UserCircle } from 'lucide-react';
+import { Home, Users, ClipboardCheck, Calendar, LogOut, TrendingUp, Settings, UserCircle, Bell } from 'lucide-react';
 import { logout } from '@/app/(dashboard)/actions';
 
 type DashboardNavProps = {
@@ -53,6 +53,10 @@ export function DashboardNav({ groupName, leaderDisplayName, role = 'leader' }: 
             {mounted ? <TrendingUp className="mr-2 h-4 w-4" /> : iconPlaceholder('mr-2 inline-block h-4 w-4')}
             Engajamento
           </LinkButton>
+          <LinkButton href="/alertas" variant="ghost" className="w-full justify-start">
+            {mounted ? <Bell className="mr-2 h-4 w-4" /> : iconPlaceholder('mr-2 inline-block h-4 w-4')}
+            Alertas
+          </LinkButton>
           {!isSecretary && (
             <LinkButton href="/configuracoes" variant="ghost" className="w-full justify-start">
               {mounted ? <Settings className="mr-2 h-4 w-4" /> : iconPlaceholder('mr-2 inline-block h-4 w-4')}
@@ -89,6 +93,7 @@ export function DashboardNav({ groupName, leaderDisplayName, role = 'leader' }: 
             { href: '/chamada', label: 'Chamada', icon: <ClipboardCheck className="h-6 w-6 shrink-0" />, ph: 'h-6 w-6' },
             { href: '/agenda', label: 'Agenda', icon: <Calendar className="h-6 w-6 shrink-0" />, ph: 'h-6 w-6' },
             { href: '/engajamento', label: 'Engaj.', icon: <TrendingUp className="h-6 w-6 shrink-0" />, ph: 'h-6 w-6' },
+            { href: '/alertas', label: 'Alertas', icon: <Bell className="h-6 w-6 shrink-0" />, ph: 'h-6 w-6' },
             ...(!isSecretary ? [{ href: '/configuracoes', label: 'Grupo', icon: <Settings className="h-6 w-6 shrink-0" />, ph: 'h-6 w-6' }] : []),
             { href: '/conta', label: 'Conta', icon: <UserCircle className="h-6 w-6 shrink-0" />, ph: 'h-6 w-6' },
           ].map(({ href, label, icon, ph }) => (

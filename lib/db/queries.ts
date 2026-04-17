@@ -546,6 +546,25 @@ export async function getUnreadNotifications(): Promise<Notification[]> {
 }
 
 /**
+ * Busca todas as notificações do grupo (lidas e não lidas), com limite
+ */
+export async function getAllNotifications(limit = 50): Promise<Notification[]> {
+  const leader = await getCurrentLeader();
+
+  if (!leader?.group_id) {
+    return [];
+  }
+
+  return queryMany<Notification>(
+    `SELECT * FROM notifications
+     WHERE group_id = $1
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [leader.group_id, limit]
+  );
+}
+
+/**
  * Marca notificação como lida
  */
 export async function markNotificationAsRead(notificationId: string): Promise<void> {

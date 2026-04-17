@@ -19,18 +19,30 @@ function memberTypeCondition(memberFilter: MemberFilter): string {
   return '';
 }
 
-/** Limite quando scope=last10 */
-const MEETING_LIMIT_LAST10 = 10;
-/** Limite quando scope=last5 */
-const MEETING_LIMIT_LAST5 = 5;
 /** Limite alto quando scope=all (todos os encontros registrados) */
 const MEETING_LIMIT_ALL = 500;
+
+/**
+ * Converte o parâmetro `scope` em um número de encontros a considerar.
+ * Aceita: "all", "last5", "last10", ou "lastN" para qualquer inteiro N >= 1.
+ * Default: 10.
+ */
+function parseScopeLimit(scopeRaw: string): number {
+  if (scopeRaw === 'all') return MEETING_LIMIT_ALL;
+  const match = scopeRaw.match(/^last(\d+)$/);
+  if (match) {
+    const n = parseInt(match[1], 10);
+    return Number.isFinite(n) && n >= 1 ? Math.min(n, MEETING_LIMIT_ALL) : 10;
+  }
+  return 10;
+}
 
 /**
  * GET /api/members/absent
  * Query params:
  * - mode=consecutive|most_absent|month — critério de faltas (default consecutive)
- * - scope=all|last10|last5 — janela de encontros para most_absent e consecutive (default last10 se omitido)
+ * - scope=all|lastN — janela de encontros para most_absent e consecutive (default last10)
+ *   Exemplos: scope=last5, scope=last10, scope=last7, scope=last20, scope=all
  * - year_month=YYYY-MM — obrigatório se mode=month
  * - meeting_ids=id1,id2 — faltantes em pelo menos um dos encontros (ignora mode)
  * - member_filter=total|participants|visitors
@@ -55,8 +67,6 @@ export async function GET(request: Request) {
       memberFilterParam === 'participants' || memberFilterParam === 'visitors' ? memberFilterParam : 'total';
     const presence = searchParams.get('presence') === 'present' ? 'present' : 'absent';
     const scopeRaw = searchParams.get('scope')?.toLowerCase() ?? '';
-    const scope: 'all' | 'last10' | 'last5' =
-      scopeRaw === 'all' ? 'all' : scopeRaw === 'last5' ? 'last5' : 'last10';
     const yearMonth = searchParams.get('year_month')?.trim() || null;
 
     const meetingIds =
@@ -102,8 +112,7 @@ export async function GET(request: Request) {
       return NextResponse.json(absentByMeeting);
     }
 
-    const meetingLimit =
-      scope === 'all' ? MEETING_LIMIT_ALL : scope === 'last5' ? MEETING_LIMIT_LAST5 : MEETING_LIMIT_LAST10;
+    const meetingLimit = parseScopeLimit(scopeRaw);
 
     if (modeParam === 'most_absent') {
       const mostAbsent = await queryMany<AbsentMember>(
