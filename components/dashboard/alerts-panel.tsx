@@ -23,7 +23,7 @@ function scopeLabel(s: AbsentScope): string {
 
 interface Notification {
   id: string;
-  notification_type: 'absence_alert' | 'birthday';
+  notification_type: 'absence_alert' | 'birthday' | 'visitor_dropoff';
   message: string;
   is_read: boolean;
   created_at: string;

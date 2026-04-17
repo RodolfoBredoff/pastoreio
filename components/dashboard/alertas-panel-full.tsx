@@ -19,7 +19,7 @@ type ScopeMode = 'all' | 'custom';
 
 interface Notification {
   id: string;
-  notification_type: 'absence_alert' | 'birthday';
+  notification_type: 'absence_alert' | 'birthday' | 'visitor_dropoff';
   message: string;
   is_read: boolean;
   created_at: string;
@@ -528,6 +528,8 @@ export function AlertasPanelFull({
                   <div className="mt-0.5">
                     {notification.notification_type === NOTIFICATION_TYPES.ABSENCE_ALERT ? (
                       <AlertCircle className="h-5 w-5 text-red-500" />
+                    ) : notification.notification_type === NOTIFICATION_TYPES.VISITOR_DROPOFF ? (
+                      <UserX className="h-5 w-5 text-orange-500" />
                     ) : (
                       <Cake className="h-5 w-5 text-yellow-500" />
                     )}
