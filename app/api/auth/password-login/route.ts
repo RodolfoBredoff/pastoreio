@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { queryOne } from '@/lib/db/postgres';
 import { createSessionTokenOnly, SESSION_COOKIE_NAME, SESSION_MAX_AGE, getCookieSecure } from '@/lib/auth/session';
 import bcrypt from 'bcryptjs';
+import { rateLimit, getClientIp } from '@/lib/rate-limit';
 
 /**
  * POST /api/auth/password-login
@@ -10,6 +11,20 @@ import bcrypt from 'bcryptjs';
  */
 export async function POST(request: Request) {
   try {
+    // Rate limit: 10 tentativas por IP a cada 15 minutos
+    const ip = getClientIp(request);
+    const rl = rateLimit(`login:${ip}`, 10, 15 * 60 * 1000);
+    if (!rl.allowed) {
+      const retryAfterSec = Math.ceil((rl.resetAt - Date.now()) / 1000);
+      return NextResponse.json(
+        { error: 'Muitas tentativas de login. Aguarde alguns minutos.' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(retryAfterSec) },
+        }
+      );
+    }
+
     const { email, password } = await request.json();
 
     if (!email || !password) {

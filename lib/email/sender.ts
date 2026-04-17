@@ -69,6 +69,62 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
   }
 }
 
+/**
+ * Gera o HTML do e-mail de magic link para acesso sem senha.
+ */
+export function buildMagicLinkEmailHtml(params: {
+  leaderName: string;
+  magicLink: string;
+  expiresInMinutes: number;
+}): string {
+  return `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Arial, sans-serif; background: #f4f4f8; padding: 24px; color: #333; margin: 0;">
+  <div style="max-width: 520px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.10);">
+    <div style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); padding: 28px 32px; text-align: center;">
+      <div style="font-size: 48px; line-height: 1; margin-bottom: 8px;">🔑</div>
+      <h2 style="color: #fff; margin: 0; font-size: 22px; font-weight: 700;">Link de Acesso</h2>
+      <p style="color: #bfdbfe; margin: 8px 0 0; font-size: 14px;">Pequenos Grupos</p>
+    </div>
+    <div style="padding: 32px;">
+      <p style="margin: 0 0 16px; font-size: 15px;">Olá, <strong>${params.leaderName}</strong>!</p>
+      <p style="margin: 0 0 24px; font-size: 15px; color: #444;">
+        Você solicitou um link de acesso rápido ao sistema. Clique no botão abaixo para entrar:
+      </p>
+      <div style="text-align: center; margin-bottom: 24px;">
+        <a href="${params.magicLink}"
+          style="display: inline-block; background: #2563eb; color: #fff; text-decoration: none;
+                 padding: 14px 36px; border-radius: 8px; font-weight: 700; font-size: 16px;
+                 box-shadow: 0 2px 8px rgba(37,99,235,0.35);">
+          Acessar o Sistema
+        </a>
+      </div>
+      <div style="background: #fef9c3; border: 1px solid #fde047; border-radius: 8px; padding: 14px; margin-bottom: 24px;">
+        <p style="margin: 0; font-size: 13px; color: #713f12;">
+          ⚠️ Este link é válido por <strong>${params.expiresInMinutes} minutos</strong> e pode ser usado apenas uma vez.
+          Se você não solicitou este acesso, ignore este e-mail.
+        </p>
+      </div>
+      <p style="font-size: 12px; color: #9ca3af; word-break: break-all;">
+        Link alternativo: <a href="${params.magicLink}" style="color: #2563eb;">${params.magicLink}</a>
+      </p>
+      <hr style="margin: 24px 0; border: none; border-top: 1px solid #eee;">
+      <p style="font-size: 11px; color: #bbb; margin: 0; text-align: center;">
+        Pastoreio — acesso seguro por link<br>
+        Este e-mail foi enviado porque houve uma solicitação de acesso ao sistema.
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+  `.trim();
+}
+
 const BIRTHDAY_EMAIL_MESSAGES = [
   (name: string) => `🎉 Feliz aniversário, ${name}! Que este dia seja repleto de alegria e bênçãos. Que Deus continue abençoando sua vida! 🙏✨`,
   (name: string) => `🎂 Parabéns, ${name}! Hoje é um dia especial para celebrar você. Desejamos muita felicidade e que todos os seus sonhos se realizem! 💙🎈`,

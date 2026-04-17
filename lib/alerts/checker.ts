@@ -226,6 +226,11 @@ export async function checkVisitorDropoff(): Promise<number> {
       [group.id]
     );
 
+    const groupLeader = await queryOne<{ id: string }>(
+      `SELECT id FROM leaders WHERE group_id = $1 LIMIT 1`,
+      [group.id]
+    );
+
     for (const visitor of staleVisitors) {
       const existing = await query(
         `SELECT id FROM notifications
@@ -246,6 +251,15 @@ export async function checkVisitorDropoff(): Promise<number> {
           ]
         );
         alertsCreated++;
+
+        // Notificação push ao líder
+        if (groupLeader?.id) {
+          await sendPushToLeader(groupLeader.id, {
+            title: 'Visitante sem retorno',
+            body: `${visitor.full_name} não aparece há mais de 60 dias.`,
+            url: `/pessoas`,
+          });
+        }
       }
     }
   }

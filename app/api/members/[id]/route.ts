@@ -23,7 +23,7 @@ export async function PUT(
 
     const { id } = await params;
     const data = await request.json();
-    const { full_name, phone, birth_date, member_type, is_active, discipulador_id } = data;
+    const { full_name, phone, birth_date, member_type, is_active, discipulador_id, integration_stage } = data;
 
     const updateData: Record<string, unknown> = {};
     if (full_name !== undefined) updateData.full_name = full_name;
@@ -31,6 +31,17 @@ export async function PUT(
     if (birth_date !== undefined) updateData.birth_date = birth_date || null;
     if (member_type !== undefined) updateData.member_type = member_type;
     if (is_active !== undefined) updateData.is_active = is_active;
+
+    if (integration_stage !== undefined) {
+      const validStages = ['novo_visitante', 'retornou', 'integrando', 'membro'];
+      if (!validStages.includes(integration_stage)) {
+        return NextResponse.json(
+          { error: 'Estágio de integração inválido' },
+          { status: 400 }
+        );
+      }
+      updateData.integration_stage = integration_stage;
+    }
 
     if (discipulador_id !== undefined) {
       if (!canManageDiscipleship(leader.role)) {

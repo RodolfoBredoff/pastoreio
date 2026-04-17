@@ -5,6 +5,7 @@ import { MemberAttendanceStats } from '@/components/pessoas/member-attendance-st
 import { MemberTagsEditor } from '@/components/pessoas/member-tags-editor';
 import { DeleteMemberButton } from '@/components/pessoas/delete-member-button';
 import { ContactLog } from '@/components/pessoas/contact-log';
+import { VisitorStageCard } from '@/components/pessoas/visitor-stage-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { notFound } from 'next/navigation';
 
@@ -69,6 +70,14 @@ export default async function EditarPessoaPage({
       )}
 
       <MemberAttendanceStats memberId={id} />
+
+      {member.member_type === 'visitor' && (
+        <VisitorStageCard
+          memberId={id}
+          memberName={member.full_name}
+          currentStage={member.integration_stage ?? 'novo_visitante'}
+        />
+      )}
 
       <ContactLog memberId={id} memberName={member.full_name} />
 

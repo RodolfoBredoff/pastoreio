@@ -67,10 +67,6 @@ const withPWA = require('next-pwa')({
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
-  eslint: {
-    // Evita falha do build por erros de lint (corrigir com npm run lint)
-    ignoreDuringBuilds: true,
-  },
   experimental: {
     serverActions: {
       bodySizeLimit: '2mb'

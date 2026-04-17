@@ -15,12 +15,15 @@ export async function GET(request: Request) {
   try {
     const cronSecret = process.env.CRON_SECRET;
 
-    if (cronSecret) {
-      const authHeader = request.headers.get('authorization');
-      const token = authHeader?.replace('Bearer ', '');
-      if (token !== cronSecret) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
+    if (!cronSecret) {
+      console.error('[Cron] CRON_SECRET não configurado. Defina a variável de ambiente.');
+      return NextResponse.json({ error: 'Serviço não configurado' }, { status: 503 });
+    }
+
+    const authHeader = request.headers.get('authorization');
+    const token = authHeader?.replace('Bearer ', '');
+    if (!token || token !== cronSecret) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const result = await runAllChecks();

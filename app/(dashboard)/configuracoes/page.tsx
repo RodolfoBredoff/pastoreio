@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LeaderGroupSettingsForm } from '@/components/dashboard/leader-group-settings-form';
 import { SecretarySection } from '@/components/configuracoes/secretary-section';
 import { NotificationSettingsForm } from '@/components/configuracoes/notification-settings-form';
+import Link from 'next/link';
+import { Download } from 'lucide-react';
 
 export default async function ConfiguracoesPage() {
   const leader = await getCurrentLeader();
@@ -93,6 +95,26 @@ export default async function ConfiguracoesPage() {
       />
 
       <SecretarySection initialSecretaries={secretaries} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Exportação de Dados (LGPD)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Exporte os dados do seu grupo em formato CSV. Inclui membros, visitantes, datas de nascimento,
+            telefones e histórico de presença.
+          </p>
+          <Link
+            href="/api/groups/export"
+            download
+            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            <Download className="h-4 w-4" />
+            Exportar dados do grupo (CSV)
+          </Link>
+        </CardContent>
+      </Card>
     </div>
   );
 }
