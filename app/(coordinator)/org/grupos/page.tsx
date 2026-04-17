@@ -17,6 +17,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Group, Plus, Pencil } from 'lucide-react';
+import { GroupsComparisonChart } from '@/components/coordinator/groups-comparison-chart';
 
 const DAY_OPTIONS = [
   { value: 0, label: 'Domingo' },
@@ -129,6 +130,8 @@ export default function CoordinatorGroupsPage() {
         </div>
         <AddGroupDialog onSave={fetchGroups} />
       </div>
+
+      {groups.length > 1 && <GroupsComparisonChart />}
 
       {loading ? (
         <p className="text-muted-foreground">Carregando...</p>

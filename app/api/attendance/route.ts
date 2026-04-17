@@ -2,8 +2,34 @@ import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { saveAttendance, getAttendanceByMeeting, getAttendanceGuestsByMeeting } from '@/lib/db/queries';
-import { queryOne } from '@/lib/db/postgres';
+import { query, queryOne } from '@/lib/db/postgres';
 import { syncEngagementToSheet } from '@/lib/integrations/google-sheets';
+
+/**
+ * Atualiza automaticamente o estágio de integração de visitantes com base no
+ * número de presenças registradas após salvar chamada.
+ */
+async function updateVisitorIntegrationStages(groupId: string): Promise<void> {
+  await query(
+    `UPDATE members
+     SET integration_stage = CASE
+       WHEN (
+         SELECT COUNT(*) FROM attendance a
+         JOIN meetings m ON m.id = a.meeting_id
+         WHERE a.member_id = members.id AND a.is_present = TRUE AND m.group_id = $1
+       ) >= 4 THEN 'integrando'
+       WHEN (
+         SELECT COUNT(*) FROM attendance a
+         JOIN meetings m ON m.id = a.meeting_id
+         WHERE a.member_id = members.id AND a.is_present = TRUE AND m.group_id = $1
+       ) >= 2 THEN 'retornou'
+       ELSE 'novo_visitante'
+     END
+     WHERE group_id = $1 AND member_type = 'visitor' AND is_active = TRUE
+       AND integration_stage != 'membro'`,
+    [groupId]
+  );
+}
 
 /**
  * GET /api/attendance?meeting_id=uuid
@@ -83,6 +109,13 @@ export async function POST(request: Request) {
       groupId: meeting.group_id,
       guests: guestList,
     });
+
+    // Atualizar estágio de integração dos visitantes após salvar presença
+    try {
+      await updateVisitorIntegrationStages(meeting.group_id);
+    } catch (err) {
+      console.error('Erro ao atualizar estágio de visitantes:', err);
+    }
 
     try {
       await syncEngagementToSheet(meeting.group_id, meeting_id);

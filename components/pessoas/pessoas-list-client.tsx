@@ -8,8 +8,29 @@ import { PessoasTagChartsPanel } from '@/components/pessoas/pessoas-tag-charts-p
 import { BulkMemberTagsDialog } from '@/components/pessoas/bulk-member-tags-dialog';
 import { LinkButton } from '@/components/ui/link-button';
 import { Button } from '@/components/ui/button';
-import { UserPlus, Users } from 'lucide-react';
+import { UserPlus, Users, Download } from 'lucide-react';
 import type { Member } from '@/lib/db/queries';
+
+function exportMembersCSV(members: Member[]) {
+  const headers = ['Nome', 'Tipo', 'Telefone', 'Data de Nascimento', 'Ativo'];
+  const rows = members.map((m) => [
+    m.full_name,
+    m.member_type === 'participant' ? 'Participante' : 'Visitante',
+    m.phone || '',
+    m.birth_date ? m.birth_date.split('T')[0] : '',
+    m.is_active ? 'Sim' : 'Não',
+  ]);
+  const csvContent = [headers, ...rows]
+    .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `membros-${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 type ListMode = 'all' | 'absent' | 'engagement';
 type MemberTypeFilter = 'total' | 'participants' | 'visitors';
@@ -134,6 +155,17 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
         <div className="flex flex-wrap gap-2 items-center">
           {members && members.length > 0 && forBroadcast.length > 0 && (
             <BroadcastDialogClient members={forBroadcast} />
+          )}
+          {members && members.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => exportMembersCSV(displayedMembers.length > 0 ? displayedMembers : members)}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Exportar CSV
+            </Button>
           )}
           <LinkButton href="/pessoas/novo" className="w-full sm:w-auto">
             <UserPlus className="mr-2 h-4 w-4 shrink-0" />

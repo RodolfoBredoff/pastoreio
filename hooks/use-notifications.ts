@@ -36,20 +36,26 @@ export function useNotifications() {
           return false;
         }
 
+        const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+        if (!vapidKey) {
+          console.warn('[Push] NEXT_PUBLIC_VAPID_PUBLIC_KEY não configurada');
+          return false;
+        }
+
         // Subscribe to push notifications
         const sub = await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+          applicationServerKey: vapidKey,
         });
 
         setSubscription(sub);
 
-        // TODO: Send subscription to backend
-        // await fetch('/api/notifications/subscribe', {
-        //   method: 'POST',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify(sub),
-        // });
+        // Send subscription to backend
+        await fetch('/api/notifications/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sub),
+        });
 
         return true;
       }
@@ -64,15 +70,16 @@ export function useNotifications() {
   const unsubscribe = async () => {
     try {
       if (subscription) {
+        const endpoint = subscription.endpoint;
         await subscription.unsubscribe();
         setSubscription(null);
         
-        // TODO: Remove subscription from backend
-        // await fetch('/api/notifications/unsubscribe', {
-        //   method: 'POST',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify({ endpoint: subscription.endpoint }),
-        // });
+        // Remove subscription from backend
+        await fetch('/api/notifications/unsubscribe', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint }),
+        });
       }
     } catch (error) {
       console.error('Erro ao cancelar inscrição:', error);

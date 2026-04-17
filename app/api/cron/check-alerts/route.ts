@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { runAllChecks } from '@/lib/alerts/checker';
+import { runAllChecks, checkMeetingReminders, checkWeeklySummary } from '@/lib/alerts/checker';
 
 /**
  * GET /api/cron/check-alerts
@@ -25,10 +25,23 @@ export async function GET(request: Request) {
 
     const result = await runAllChecks();
 
+    // Lembretes pré-encontro (diário)
+    const remindersSent = await checkMeetingReminders();
+
+    // Resumo semanal somente às segundas-feiras
+    const dayOfWeek = new Date().getDay(); // 1 = segunda
+    let weeklySummary = 0;
+    if (dayOfWeek === 1) {
+      weeklySummary = await checkWeeklySummary();
+    }
+
     return NextResponse.json({
       ok: true,
       absenceAlerts: result.absenceAlerts,
       birthdayNotifications: result.birthdayNotifications,
+      visitorDropoffs: result.visitorDropoffs,
+      remindersSent,
+      weeklySummary,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

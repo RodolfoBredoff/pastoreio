@@ -24,6 +24,7 @@ export interface Member {
   birth_date: string | null;
   member_type: 'participant' | 'visitor';
   is_active: boolean;
+  integration_stage: 'novo_visitante' | 'retornou' | 'integrando' | 'membro';
   created_at: string;
   updated_at: string;
   /** ID do membro que discipula este (mesmo grupo). */
@@ -65,7 +66,7 @@ export interface GuestVisitor {
 export interface Notification {
   id: string;
   group_id: string;
-  notification_type: 'absence_alert' | 'birthday';
+  notification_type: 'absence_alert' | 'birthday' | 'visitor_dropoff';
   member_id: string | null;
   message: string;
   is_read: boolean;

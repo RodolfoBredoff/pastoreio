@@ -17,7 +17,7 @@ import {
   DialogFooter,
   DialogClose,
 } from '@/components/ui/dialog';
-import { Calendar as CalendarIcon, Clock, Pencil, Settings, Ban, RotateCcw, PlusCircle, Star, CalendarPlus, Trash2, Users, Link2, ListChecks, List, CalendarDays } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Pencil, Settings, Ban, RotateCcw, PlusCircle, Star, CalendarPlus, Trash2, Users, Link2, ListChecks, List, CalendarDays, CalendarCheck2 } from 'lucide-react';
 import { formatDate, getDayOfWeekName } from '@/lib/utils';
 import { AgendaCalendar } from './agenda-calendar';
 
@@ -228,7 +228,14 @@ function EditMeetingDialog({
           </div>
           <div className="space-y-2">
             <Label htmlFor="meeting-notes">Observações (opcional)</Label>
-            <Input id="meeting-notes" placeholder="Outras anotações..." value={notes} onChange={(e) => setNotes(e.target.value)} />
+            <textarea
+              id="meeting-notes"
+              placeholder="Tema do estudo, avisos, oração do encontro..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+            />
           </div>
 
           {meeting.meeting_type === 'special_event' && meeting.attendance_list_token && (
@@ -458,7 +465,14 @@ function AddMeetingDialog({
               )}
               <div className="space-y-2">
                 <Label htmlFor="add-notes">Observações (opcional)</Label>
-                <Input id="add-notes" placeholder="Detalhes do encontro..." value={notes} onChange={(e) => setNotes(e.target.value)} />
+                <textarea
+                  id="add-notes"
+                  placeholder="Tema do estudo, avisos, oração do encontro..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                />
               </div>
             </div>
             <DialogFooter>
@@ -761,24 +775,35 @@ export function AgendaClient({
             {group.default_meeting_time.substring(0, 5)}
           </p>
         </div>
-        {canEditMeetings && (
-          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-            <Button variant="default" size="sm" onClick={() => setShowAddMeeting(true)} className="flex items-center gap-2">
-              <CalendarPlus className="h-4 w-4" />
-              <span className="hidden sm:inline">Novo Encontro</span>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowBulkCreate(true)} className="flex items-center gap-2">
-              <PlusCircle className="h-4 w-4" />
-              <span className="hidden sm:inline">Gerar em Lote</span>
-            </Button>
-            {canManageSettings && (
-              <Button variant="outline" size="sm" onClick={() => setShowGroupSettings(true)} className="flex items-center gap-2">
-                <Settings className="h-4 w-4" />
-                <span className="hidden sm:inline">Configurações</span>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          <a
+            href="/api/calendar?scope=upcoming"
+            download
+            className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent transition-colors"
+            title="Exportar próximos encontros para Google Calendar, Apple Calendar ou Outlook"
+          >
+            <CalendarCheck2 className="h-4 w-4" />
+            <span className="hidden sm:inline">Calendário</span>
+          </a>
+          {canEditMeetings && (
+            <>
+              <Button variant="default" size="sm" onClick={() => setShowAddMeeting(true)} className="flex items-center gap-2">
+                <CalendarPlus className="h-4 w-4" />
+                <span className="hidden sm:inline">Novo Encontro</span>
               </Button>
-            )}
-          </div>
-        )}
+              <Button variant="outline" size="sm" onClick={() => setShowBulkCreate(true)} className="flex items-center gap-2">
+                <PlusCircle className="h-4 w-4" />
+                <span className="hidden sm:inline">Gerar em Lote</span>
+              </Button>
+              {canManageSettings && (
+                <Button variant="outline" size="sm" onClick={() => setShowGroupSettings(true)} className="flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
+                  <span className="hidden sm:inline">Configurações</span>
+                </Button>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Abas: Lista | Calendário */}

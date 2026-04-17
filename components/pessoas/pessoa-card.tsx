@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { calculateAge, formatPhone, isTodayBirthday } from '@/lib/utils';
-import { MEMBER_TYPE_LABELS } from '@/lib/constants';
+import { MEMBER_TYPE_LABELS, INTEGRATION_STAGE_LABELS, INTEGRATION_STAGE_COLORS } from '@/lib/constants';
 import { Pencil, Cake, AlertTriangle, CalendarCheck, Tags } from 'lucide-react';
 import { DeleteMemberButton } from './delete-member-button';
 import { cn } from '@/lib/utils';
@@ -29,6 +29,7 @@ interface Member {
   phone: string;
   birth_date: string | null;
   member_type: 'participant' | 'visitor';
+  integration_stage?: string | null;
   /** Nomes dos membros que este discipula (label "Discipulador de X, Y"). */
   discipulador_de?: string[] | null;
 }
@@ -114,6 +115,16 @@ export function PessoaCard({
               >
                 {MEMBER_TYPE_LABELS[member.member_type as keyof typeof MEMBER_TYPE_LABELS] ?? member.member_type ?? 'Membro'}
               </Badge>
+              {member.member_type === 'visitor' && member.integration_stage && member.integration_stage !== 'membro' && (
+                <span
+                  className={cn(
+                    'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border',
+                    INTEGRATION_STAGE_COLORS[member.integration_stage] ?? 'bg-slate-100 text-slate-700 border-slate-200'
+                  )}
+                >
+                  {INTEGRATION_STAGE_LABELS[member.integration_stage] ?? member.integration_stage}
+                </span>
+              )}
               {(member.discipulador_de?.length ?? 0) > 0 && (
                 <Badge variant="outline" className="font-normal">
                   Discipulador de {member.discipulador_de!.join(', ')}

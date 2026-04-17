@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus, RotateCcw, Save } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus, RotateCcw, Save, Download } from 'lucide-react';
 import {
   internalCheckKeyMember,
   internalCheckKeyGuest,
@@ -428,6 +428,30 @@ export default function ListaConfirmacaoPage() {
   const labelResultB = internalResultNegative.trim() || 'Marcado (2º)';
   const labelNeither = internalUnmarked.trim() || 'Não marcados';
 
+  const exportAttendanceCSV = () => {
+    const headers = ['Nome', 'Resposta', 'Contato'];
+    const memberRows = members.map((m) => [
+      m.full_name,
+      m.response?.status === 'present' ? 'Presente' : m.response?.status === 'absent' ? 'Ausente' : '—',
+      contactDisplay(m.response),
+    ]);
+    const guestRows = guests.map((g) => [
+      `${g.full_name} (visitante)`,
+      '—',
+      guestRegisteredBy(g),
+    ]);
+    const csvContent = [headers, ...memberRows, ...guestRows]
+      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chamada-${meeting.meeting_date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -445,6 +469,10 @@ export default function ListaConfirmacaoPage() {
             {meeting.location && ` · ${meeting.location}`}
           </p>
         </div>
+        <Button variant="outline" size="sm" onClick={exportAttendanceCSV} className="gap-2 self-start sm:self-auto">
+          <Download className="h-4 w-4" />
+          Exportar CSV
+        </Button>
       </div>
 
       <div className="rounded-lg border bg-card overflow-hidden">

@@ -6,6 +6,7 @@
 import { query, queryMany, queryOne } from '@/lib/db/postgres';
 import { sendEmail, buildBirthdayEmailHtml } from '@/lib/email/sender';
 import { sendWhatsAppTemplateMessage } from '@/lib/whatsapp/sender';
+import { sendPushToLeader } from '@/lib/push/sender';
 
 const CONSECUTIVE_ABSENCES_THRESHOLD = 2;
 
@@ -13,15 +14,20 @@ const CONSECUTIVE_ABSENCES_THRESHOLD = 2;
  * Verifica faltas consecutivas e cria alertas para todos os grupos
  */
 export async function checkConsecutiveAbsences(): Promise<number> {
-  const groups = await queryMany<{ id: string }>(
-    `SELECT id FROM groups`
+  const groups = await queryMany<{ id: string; name: string; absence_whatsapp_enabled: boolean }>(
+    `SELECT id, name, absence_whatsapp_enabled FROM groups`
   );
 
   let alertsCreated = 0;
 
   for (const group of groups) {
-    const members = await queryMany<{ id: string; full_name: string }>(
-      `SELECT id, full_name FROM members 
+    const groupLeader = await queryOne<{ id: string; full_name: string; email: string }>(
+      `SELECT id, full_name, email FROM leaders WHERE group_id = $1 LIMIT 1`,
+      [group.id]
+    );
+
+    const members = await queryMany<{ id: string; full_name: string; phone: string | null }>(
+      `SELECT id, full_name, phone FROM members 
        WHERE group_id = $1 AND is_active = TRUE`,
       [group.id]
     );
@@ -62,6 +68,24 @@ export async function checkConsecutiveAbsences(): Promise<number> {
             ]
           );
           alertsCreated++;
+
+          // Enviar WhatsApp ao membro ausente quando habilitado
+          if (group.absence_whatsapp_enabled && member.phone) {
+            await sendWhatsAppTemplateMessage({
+              toPhone: member.phone,
+              templateName: 'alerta_falta_membro',
+              variables: [member.full_name, group.name],
+            });
+          }
+
+          // Enviar push notification ao líder
+          if (groupLeader?.id) {
+            await sendPushToLeader(groupLeader.id, {
+              title: 'Alerta de Falta',
+              body: `${member.full_name} tem ${consecutiveAbsences} faltas consecutivas.`,
+              url: '/alertas',
+            });
+          }
         }
       }
     }
@@ -149,6 +173,21 @@ export async function checkBirthdaysToday(): Promise<number> {
             variables: [leader.full_name, person.full_name, groupName],
           });
         }
+
+        // Enviar push notification ao líder
+        if (leader) {
+          const leaderRow = await queryOne<{ id: string }>(
+            `SELECT id FROM leaders WHERE email = $1 AND group_id = $2 LIMIT 1`,
+            [leader.email, group.id]
+          );
+          if (leaderRow?.id) {
+            await sendPushToLeader(leaderRow.id, {
+              title: `🎂 Aniversário hoje!`,
+              body: `${person.full_name} faz aniversário hoje. Envie parabéns!`,
+              url: '/alertas',
+            });
+          }
+        }
       }
     }
   }
@@ -157,19 +196,262 @@ export async function checkBirthdaysToday(): Promise<number> {
 }
 
 /**
+ * Detecta visitantes que não aparecem há 2+ encontros sem ter atingido 'membro'.
+ */
+export async function checkVisitorDropoff(): Promise<number> {
+  const groups = await queryMany<{ id: string }>(`SELECT id FROM groups`);
+  let alertsCreated = 0;
+
+  for (const group of groups) {
+    const staleVisitors = await queryMany<{ id: string; full_name: string }>(
+      `SELECT m.id, m.full_name
+       FROM members m
+       WHERE m.group_id = $1
+         AND m.member_type = 'visitor'
+         AND m.is_active = TRUE
+         AND m.integration_stage != 'membro'
+         AND (
+           SELECT COUNT(*) FROM attendance a
+           JOIN meetings mt ON mt.id = a.meeting_id
+           WHERE a.member_id = m.id AND a.is_present = TRUE
+             AND mt.group_id = $1
+             AND mt.meeting_date >= NOW() - INTERVAL '60 days'
+         ) = 0
+         AND (
+           SELECT COUNT(*) FROM meetings mt2
+           WHERE mt2.group_id = $1
+             AND mt2.meeting_date >= NOW() - INTERVAL '60 days'
+             AND mt2.is_cancelled = FALSE
+         ) >= 2`,
+      [group.id]
+    );
+
+    for (const visitor of staleVisitors) {
+      const existing = await query(
+        `SELECT id FROM notifications
+         WHERE group_id = $1 AND member_id = $2
+           AND notification_type = 'visitor_dropoff'
+           AND created_at > NOW() - INTERVAL '14 days'`,
+        [group.id, visitor.id]
+      );
+
+      if (existing.rows.length === 0) {
+        await query(
+          `INSERT INTO notifications (group_id, notification_type, member_id, message)
+           VALUES ($1, 'visitor_dropoff', $2, $3)`,
+          [
+            group.id,
+            visitor.id,
+            `Visitante ${visitor.full_name} não apareceu nos últimos encontros. Considere entrar em contato.`,
+          ]
+        );
+        alertsCreated++;
+      }
+    }
+  }
+
+  return alertsCreated;
+}
+
+/**
+ * Verifica lembretes pré-encontro e envia WhatsApp individual a membros/visitantes.
+ */
+export async function checkMeetingReminders(): Promise<number> {
+  const groups = await queryMany<{
+    id: string;
+    name: string;
+    reminder_enabled: boolean;
+  }>(
+    `SELECT id, name, reminder_enabled FROM groups WHERE reminder_enabled = TRUE`
+  );
+
+  let remindersSent = 0;
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  for (const group of groups) {
+    const meeting = await queryOne<{ id: string; meeting_time: string | null }>(
+      `SELECT id, meeting_time FROM meetings
+       WHERE group_id = $1 AND meeting_date = $2 AND is_cancelled = FALSE
+       LIMIT 1`,
+      [group.id, tomorrowStr]
+    );
+
+    if (!meeting) continue;
+
+    const meetingTime = meeting.meeting_time
+      ? meeting.meeting_time.substring(0, 5)
+      : '19:00';
+
+    const members = await queryMany<{ id: string; full_name: string; phone: string }>(
+      `SELECT id, full_name, phone FROM members
+       WHERE group_id = $1 AND is_active = TRUE AND phone IS NOT NULL AND phone != ''`,
+      [group.id]
+    );
+
+    for (const member of members) {
+      const sent = await sendWhatsAppTemplateMessage({
+        toPhone: member.phone,
+        templateName: 'lembrete_encontro',
+        variables: [member.full_name, meetingTime, group.name],
+      });
+      if (sent) remindersSent++;
+    }
+
+    // Enviar link de grupo para o líder por e-mail
+    const leader = await queryOne<{ full_name: string; email: string; phone: string | null }>(
+      `SELECT full_name, email, phone FROM leaders WHERE group_id = $1 LIMIT 1`,
+      [group.id]
+    );
+
+    if (leader?.email) {
+      const { buildReminderEmailHtml } = await import('@/lib/email/sender');
+      const html = buildReminderEmailHtml({
+        leaderName: leader.full_name,
+        groupName: group.name,
+        meetingDate: tomorrowStr,
+        meetingTime,
+        leaderPhone: leader.phone ?? null,
+        memberCount: members.length,
+      });
+
+      await sendEmail({
+        to: leader.email,
+        subject: `📅 Lembrete: encontro do ${group.name} amanhã`,
+        html,
+        text: `Olá ${leader.full_name}! Lembrete: encontro do ${group.name} amanhã às ${meetingTime}. ${members.length} membros serão notificados.`,
+      });
+    }
+  }
+
+  return remindersSent;
+}
+
+/**
+ * Envia resumo semanal para os líderes (toda segunda-feira).
+ */
+export async function checkWeeklySummary(): Promise<number> {
+  const groups = await queryMany<{
+    id: string;
+    name: string;
+    weekly_summary_enabled: boolean;
+  }>(
+    `SELECT id, name, weekly_summary_enabled FROM groups WHERE weekly_summary_enabled = TRUE`
+  );
+
+  let summariesSent = 0;
+
+  for (const group of groups) {
+    const leader = await queryOne<{ full_name: string; email: string }>(
+      `SELECT full_name, email FROM leaders WHERE group_id = $1 LIMIT 1`,
+      [group.id]
+    );
+
+    if (!leader?.email) continue;
+
+    // Último encontro
+    const lastMeeting = await queryOne<{ id: string; meeting_date: string; meeting_time: string | null }>(
+      `SELECT id, meeting_date, meeting_time FROM meetings
+       WHERE group_id = $1 AND is_cancelled = FALSE
+       ORDER BY meeting_date DESC LIMIT 1`,
+      [group.id]
+    );
+
+    const totalMembers = await queryOne<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM members WHERE group_id = $1 AND is_active = TRUE`,
+      [group.id]
+    );
+
+    let lastMeetingStats: { presentCount: number; totalCount: number } | null = null;
+    if (lastMeeting) {
+      const stats = await queryOne<{ present_count: string; total_count: string }>(
+        `SELECT
+           COUNT(*) FILTER (WHERE a.is_present = TRUE) AS present_count,
+           COUNT(*) AS total_count
+         FROM attendance a WHERE a.meeting_id = $1`,
+        [lastMeeting.id]
+      );
+      if (stats) {
+        lastMeetingStats = {
+          presentCount: parseInt(stats.present_count),
+          totalCount: parseInt(stats.total_count),
+        };
+      }
+    }
+
+    // Aniversários da semana
+    const weekBirthdays = await queryMany<{ full_name: string }>(
+      `SELECT full_name FROM members
+       WHERE group_id = $1 AND is_active = TRUE
+         AND birth_date IS NOT NULL
+         AND EXTRACT(MONTH FROM birth_date::date) = EXTRACT(MONTH FROM NOW())
+         AND EXTRACT(DAY FROM birth_date::date) BETWEEN EXTRACT(DAY FROM NOW()) AND EXTRACT(DAY FROM NOW()) + 7`,
+      [group.id]
+    );
+
+    // Visitantes por estágio
+    const visitorsByStage = await queryMany<{ integration_stage: string; count: string }>(
+      `SELECT integration_stage, COUNT(*) AS count
+       FROM members
+       WHERE group_id = $1 AND member_type = 'visitor' AND is_active = TRUE AND integration_stage != 'membro'
+       GROUP BY integration_stage`,
+      [group.id]
+    );
+
+    // Membros com faltas consecutivas
+    const absentAlerts = await queryMany<{ message: string }>(
+      `SELECT message FROM notifications
+       WHERE group_id = $1 AND notification_type = 'absence_alert'
+         AND created_at > NOW() - INTERVAL '7 days'
+       ORDER BY created_at DESC LIMIT 5`,
+      [group.id]
+    );
+
+    const { buildWeeklySummaryHtml } = await import('@/lib/email/sender');
+    const html = buildWeeklySummaryHtml({
+      leaderName: leader.full_name,
+      groupName: group.name,
+      lastMeeting: lastMeeting
+        ? { date: lastMeeting.meeting_date, ...lastMeetingStats }
+        : null,
+      totalMembers: parseInt(totalMembers?.count ?? '0'),
+      weekBirthdays: weekBirthdays.map((b) => b.full_name),
+      visitorsByStage,
+      absentAlerts: absentAlerts.map((a) => a.message),
+    });
+
+    await sendEmail({
+      to: leader.email,
+      subject: `📊 Resumo Semanal — ${group.name}`,
+      html,
+      text: `Resumo semanal do grupo ${group.name}. Acesse o aplicativo para mais detalhes.`,
+    });
+
+    summariesSent++;
+  }
+
+  return summariesSent;
+}
+
+/**
  * Executa todas as verificações de alertas (para todos os grupos)
  */
 export async function runAllChecks(): Promise<{
   absenceAlerts: number;
   birthdayNotifications: number;
+  visitorDropoffs: number;
 }> {
-  const [absenceAlerts, birthdayNotifications] = await Promise.all([
+  const [absenceAlerts, birthdayNotifications, visitorDropoffs] = await Promise.all([
     checkConsecutiveAbsences(),
     checkBirthdaysToday(),
+    checkVisitorDropoff(),
   ]);
 
   return {
     absenceAlerts,
     birthdayNotifications,
+    visitorDropoffs,
   };
 }

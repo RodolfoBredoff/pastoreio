@@ -4,6 +4,7 @@ import { queryOne, queryMany } from '@/lib/db/postgres';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LeaderGroupSettingsForm } from '@/components/dashboard/leader-group-settings-form';
 import { SecretarySection } from '@/components/configuracoes/secretary-section';
+import { NotificationSettingsForm } from '@/components/configuracoes/notification-settings-form';
 
 export default async function ConfiguracoesPage() {
   const leader = await getCurrentLeader();
@@ -30,8 +31,12 @@ export default async function ConfiguracoesPage() {
       name: string;
       default_meeting_day: number;
       default_meeting_time: string;
+      reminder_enabled: boolean;
+      absence_whatsapp_enabled: boolean;
+      weekly_summary_enabled: boolean;
     }>(
-      `SELECT id, name, default_meeting_day, default_meeting_time 
+      `SELECT id, name, default_meeting_day, default_meeting_time,
+              reminder_enabled, absence_whatsapp_enabled, weekly_summary_enabled
        FROM groups WHERE id = $1`,
       [leader.group_id]
     ),
@@ -79,6 +84,13 @@ export default async function ConfiguracoesPage() {
           />
         </CardContent>
       </Card>
+
+      <NotificationSettingsForm
+        groupId={group.id}
+        initialReminderEnabled={group.reminder_enabled ?? false}
+        initialAbsenceWhatsappEnabled={group.absence_whatsapp_enabled ?? false}
+        initialWeeklySummaryEnabled={group.weekly_summary_enabled ?? true}
+      />
 
       <SecretarySection initialSecretaries={secretaries} />
     </div>

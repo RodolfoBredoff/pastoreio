@@ -25,7 +25,13 @@ export async function PUT(request: Request) {
     }
 
     const data = await request.json();
-    const { default_meeting_day, default_meeting_time } = data;
+    const {
+      default_meeting_day,
+      default_meeting_time,
+      reminder_enabled,
+      absence_whatsapp_enabled,
+      weekly_summary_enabled,
+    } = data;
 
     const updates: string[] = [];
     const values: unknown[] = [];
@@ -44,7 +50,6 @@ export async function PUT(request: Request) {
     }
 
     if (default_meeting_time !== undefined) {
-      // Validar formato HH:MM
       if (!/^\d{2}:\d{2}$/.test(default_meeting_time)) {
         return NextResponse.json(
           { error: 'Horário inválido (use o formato HH:MM)' },
@@ -53,6 +58,21 @@ export async function PUT(request: Request) {
       }
       updates.push(`default_meeting_time = $${paramIndex++}`);
       values.push(default_meeting_time);
+    }
+
+    if (reminder_enabled !== undefined) {
+      updates.push(`reminder_enabled = $${paramIndex++}`);
+      values.push(Boolean(reminder_enabled));
+    }
+
+    if (absence_whatsapp_enabled !== undefined) {
+      updates.push(`absence_whatsapp_enabled = $${paramIndex++}`);
+      values.push(Boolean(absence_whatsapp_enabled));
+    }
+
+    if (weekly_summary_enabled !== undefined) {
+      updates.push(`weekly_summary_enabled = $${paramIndex++}`);
+      values.push(Boolean(weekly_summary_enabled));
     }
 
     if (updates.length === 0) {

@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { UserCircle, MessageCircle, CheckCircle2, AlertCircle, Phone } from 'lucide-react';
+import { UserCircle, MessageCircle, CheckCircle2, AlertCircle, Phone, Bell, BellOff } from 'lucide-react';
+import { useNotifications } from '@/hooks/use-notifications';
 
 interface ProfileFormProps {
   initialName: string;
@@ -52,6 +53,73 @@ function WhatsAppStatus({
         WhatsApp ativo. Você receberá uma mensagem automática no seu celular quando um
         participante do seu grupo fizer aniversário.
       </span>
+    </div>
+  );
+}
+
+function PushNotificationButton() {
+  const { permission, subscription, requestPermission, unsubscribe, isSupported } = useNotifications();
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  if (!isSupported) {
+    return (
+      <div className="flex items-start gap-2 rounded-lg border border-muted bg-muted/40 p-3 text-sm text-muted-foreground">
+        <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+        <span>Notificações push não são suportadas neste navegador.</span>
+      </div>
+    );
+  }
+
+  const isSubscribed = !!subscription || permission === 'granted';
+
+  const handleToggle = async () => {
+    setLoading(true);
+    setMessage('');
+    try {
+      if (isSubscribed) {
+        await unsubscribe();
+        setMessage('Notificações desativadas.');
+      } else {
+        const ok = await requestPermission();
+        if (ok) {
+          setMessage('Notificações ativadas com sucesso!');
+        } else if (permission === 'denied') {
+          setMessage('Permissão negada. Habilite nas configurações do navegador.');
+        }
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      {isSubscribed ? (
+        <div className="flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+          <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-green-600" />
+          <span>Notificações push ativas neste dispositivo/navegador.</span>
+        </div>
+      ) : (
+        <div className="flex items-start gap-2 rounded-lg border border-muted bg-muted/40 p-3 text-sm text-muted-foreground">
+          <Bell className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>Receba alertas de aniversários e faltas diretamente no seu navegador, mesmo sem abrir o app.</span>
+        </div>
+      )}
+      <Button
+        type="button"
+        variant={isSubscribed ? 'outline' : 'default'}
+        size="sm"
+        onClick={handleToggle}
+        disabled={loading}
+        className="gap-2"
+      >
+        {isSubscribed ? <BellOff className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+        {loading ? 'Aguarde...' : isSubscribed ? 'Desativar notificações' : 'Ativar notificações no navegador'}
+      </Button>
+      {message && (
+        <p className="text-xs text-muted-foreground">{message}</p>
+      )}
     </div>
   );
 }
@@ -112,6 +180,15 @@ export function ProfileForm({ initialName, initialPhone, whatsappEnabled }: Prof
             Notificações de WhatsApp
           </div>
           <WhatsAppStatus whatsappEnabled={whatsappEnabled} hasPhone={hasPhone} />
+        </div>
+
+        {/* Notificações push no navegador */}
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+            <Bell className="h-3.5 w-3.5" />
+            Notificações no Navegador (Push)
+          </div>
+          <PushNotificationButton />
         </div>
 
         {/* Formulário */}

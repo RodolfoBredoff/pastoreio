@@ -85,6 +85,177 @@ function buildBirthdayWhatsAppUrl(phone: string, firstName: string): string {
 }
 
 /**
+ * Gera o HTML do e-mail de lembrete pré-encontro para o líder.
+ */
+export function buildReminderEmailHtml(params: {
+  leaderName: string;
+  groupName: string;
+  meetingDate: string;
+  meetingTime: string;
+  leaderPhone: string | null;
+  memberCount: number;
+}): string {
+  const [year, month, day] = params.meetingDate.split('-');
+  const formattedDate = `${day}/${month}/${year}`;
+
+  // Link pré-composto para o líder postar no grupo do WhatsApp
+  const groupMessage = `📅 Lembrando que amanhã, ${formattedDate} às ${params.meetingTime}, temos nosso encontro do ${params.groupName}. Esperamos você! 🙏`;
+  const waGroupUrl = params.leaderPhone
+    ? `https://wa.me/${params.leaderPhone.replace(/\D/g, '')}?text=${encodeURIComponent(groupMessage)}`
+    : null;
+
+  return `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Arial, sans-serif; background: #f4f4f8; padding: 24px; color: #333; margin: 0;">
+  <div style="max-width: 520px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.10);">
+    <div style="background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%); padding: 28px 32px; text-align: center;">
+      <div style="font-size: 48px; line-height: 1; margin-bottom: 8px;">📅</div>
+      <h2 style="color: #fff; margin: 0; font-size: 22px; font-weight: 700;">Lembrete de Encontro</h2>
+    </div>
+    <div style="padding: 32px;">
+      <p style="margin: 0 0 16px; font-size: 15px;">Olá, <strong>${params.leaderName}</strong>!</p>
+      <p style="margin: 0 0 8px; font-size: 16px;">
+        O encontro do <strong>${params.groupName}</strong> está marcado para <strong>amanhã</strong>:
+      </p>
+      <div style="background: #f0f7ff; border-left: 4px solid #2563eb; padding: 16px; border-radius: 4px; margin: 16px 0;">
+        <p style="margin: 0; font-size: 16px; font-weight: 700; color: #1d4ed8;">${formattedDate} às ${params.meetingTime}</p>
+      </div>
+      <p style="margin: 0 0 24px; font-size: 14px; color: #666;">
+        ${params.memberCount} membros foram notificados individualmente por WhatsApp.<br>
+        Clique abaixo para postar o lembrete no grupo do WhatsApp também:
+      </p>
+      ${
+        waGroupUrl
+          ? `<div style="text-align: center; margin-bottom: 8px;">
+              <a href="${waGroupUrl}"
+                style="display: inline-block; background: #25D366; color: #fff; text-decoration: none;
+                       padding: 14px 32px; border-radius: 8px; font-weight: 700; font-size: 15px;
+                       box-shadow: 0 2px 8px rgba(37,211,102,0.35);">
+                💬 Postar no Grupo do WhatsApp
+              </a>
+            </div>
+            <p style="font-size: 12px; color: #aaa; text-align: center; margin: 8px 0 0;">
+              A mensagem já estará preenchida — escolha o grupo e envie!
+            </p>`
+          : `<p style="font-size: 13px; color: #999; font-style: italic; text-align: center;">
+              Cadastre seu número de telefone na conta para receber o link de postagem no grupo.
+            </p>`
+      }
+      <hr style="margin: 28px 0; border: none; border-top: 1px solid #eee;">
+      <p style="font-size: 11px; color: #bbb; margin: 0; text-align: center;">
+        Pastoreio — lembrete automático de encontro<br>
+        Grupo <em>${params.groupName}</em>
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+  `.trim();
+}
+
+/**
+ * Gera o HTML do resumo semanal para o líder.
+ */
+export function buildWeeklySummaryHtml(params: {
+  leaderName: string;
+  groupName: string;
+  lastMeeting: { date: string; presentCount?: number; totalCount?: number } | null;
+  totalMembers: number;
+  weekBirthdays: string[];
+  visitorsByStage: { integration_stage: string; count: string }[];
+  absentAlerts: string[];
+}): string {
+  const stageLabels: Record<string, string> = {
+    novo_visitante: 'Novos Visitantes',
+    retornou: 'Retornaram',
+    integrando: 'Em Integração',
+  };
+
+  const formatDate = (d: string) => {
+    const [y, m, day] = d.split('-');
+    return `${day}/${m}/${y}`;
+  };
+
+  const attendanceSection = params.lastMeeting
+    ? `
+    <div style="background: #f9fafb; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+      <h3 style="margin: 0 0 8px; font-size: 14px; color: #374151; text-transform: uppercase; letter-spacing: 0.5px;">Último Encontro (${formatDate(params.lastMeeting.date)})</h3>
+      ${
+        params.lastMeeting.presentCount !== undefined
+          ? `<p style="margin: 0; font-size: 20px; font-weight: 700; color: #1f2937;">
+              ${params.lastMeeting.presentCount} <span style="font-size: 14px; color: #6b7280; font-weight: 400;">/ ${params.lastMeeting.totalCount} presentes</span>
+             </p>
+             ${params.lastMeeting.totalCount ? `<p style="margin: 4px 0 0; font-size: 13px; color: #6b7280;">Taxa: ${Math.round((params.lastMeeting.presentCount / params.lastMeeting.totalCount) * 100)}%</p>` : ''}`
+          : `<p style="margin: 0; color: #6b7280; font-size: 14px;">Sem dados de presença registrados.</p>`
+      }
+    </div>`
+    : `<p style="color: #6b7280; font-size: 14px;">Nenhum encontro registrado ainda.</p>`;
+
+  const birthdaysSection = params.weekBirthdays.length > 0
+    ? `<div style="background: #fffbeb; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <h3 style="margin: 0 0 8px; font-size: 14px; color: #92400e; text-transform: uppercase; letter-spacing: 0.5px;">🎂 Aniversariantes da Semana</h3>
+        <p style="margin: 0; font-size: 14px; color: #374151;">${params.weekBirthdays.join(', ')}</p>
+       </div>`
+    : '';
+
+  const visitorsSection = params.visitorsByStage.length > 0
+    ? `<div style="background: #f0fdf4; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <h3 style="margin: 0 0 8px; font-size: 14px; color: #166534; text-transform: uppercase; letter-spacing: 0.5px;">👥 Visitantes em Acompanhamento</h3>
+        ${params.visitorsByStage.map(v => `<p style="margin: 0 0 4px; font-size: 14px; color: #374151;">
+          <strong>${stageLabels[v.integration_stage] ?? v.integration_stage}:</strong> ${v.count}
+        </p>`).join('')}
+       </div>`
+    : '';
+
+  const absentsSection = params.absentAlerts.length > 0
+    ? `<div style="background: #fff1f2; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <h3 style="margin: 0 0 8px; font-size: 14px; color: #9f1239; text-transform: uppercase; letter-spacing: 0.5px;">⚠️ Alertas de Faltas</h3>
+        ${params.absentAlerts.map(a => `<p style="margin: 0 0 4px; font-size: 13px; color: #374151;">• ${a}</p>`).join('')}
+       </div>`
+    : '';
+
+  return `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Arial, sans-serif; background: #f4f4f8; padding: 24px; color: #333; margin: 0;">
+  <div style="max-width: 520px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.10);">
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 28px 32px; text-align: center;">
+      <div style="font-size: 48px; line-height: 1; margin-bottom: 8px;">📊</div>
+      <h2 style="color: #fff; margin: 0; font-size: 22px; font-weight: 700;">Resumo Semanal</h2>
+      <p style="color: #94a3b8; margin: 8px 0 0; font-size: 14px;">${params.groupName}</p>
+    </div>
+    <div style="padding: 32px;">
+      <p style="margin: 0 0 24px; font-size: 15px;">Olá, <strong>${params.leaderName}</strong>! Aqui está o resumo da semana do grupo:</p>
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <h3 style="margin: 0 0 4px; font-size: 14px; color: #374151; text-transform: uppercase; letter-spacing: 0.5px;">Total de Membros</h3>
+        <p style="margin: 0; font-size: 24px; font-weight: 700; color: #1f2937;">${params.totalMembers}</p>
+      </div>
+      ${attendanceSection}
+      ${birthdaysSection}
+      ${visitorsSection}
+      ${absentsSection}
+      <hr style="margin: 28px 0; border: none; border-top: 1px solid #eee;">
+      <p style="font-size: 11px; color: #bbb; margin: 0; text-align: center;">
+        Pastoreio — resumo semanal automático<br>
+        Grupo <em>${params.groupName}</em>
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+  `.trim();
+}
+
+/**
  * Gera o HTML do e-mail de aniversário para o líder.
  */
 export function buildBirthdayEmailHtml(params: {

@@ -8,7 +8,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { TrendingUp, TrendingDown, Award, CalendarSearch, Loader2, Users, CheckCircle, XCircle, Star, List, Share2, Link2, UserPlus } from 'lucide-react';
+import { TrendingUp, TrendingDown, Award, CalendarSearch, Loader2, Users, CheckCircle, XCircle, Star, List, Share2, Link2, UserPlus, Printer } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -1087,12 +1087,23 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <div>
-          {groupName && (
-            <p className="text-sm font-medium text-muted-foreground mb-1">Grupo: {groupName}</p>
-          )}
-          <h1 className="text-2xl sm:text-3xl font-bold">Engajamento</h1>
-          <p className="text-muted-foreground mt-1 text-sm">Análise de presença por período ou encontro</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            {groupName && (
+              <p className="text-sm font-medium text-muted-foreground mb-1">Grupo: {groupName}</p>
+            )}
+            <h1 className="text-2xl sm:text-3xl font-bold">Engajamento</h1>
+            <p className="text-muted-foreground mt-1 text-sm">Análise de presença por período ou encontro</p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 gap-2 print:hidden"
+            onClick={() => window.print()}
+          >
+            <Printer className="h-4 w-4" />
+            <span className="hidden sm:inline">Exportar PDF</span>
+          </Button>
         </div>
         <PeriodSelector
           selected={view}
