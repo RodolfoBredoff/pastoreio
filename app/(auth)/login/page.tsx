@@ -1,24 +1,23 @@
 'use client';
 
 import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Mail, Lock, Shield } from 'lucide-react';
+import { Loader2, Lock, Shield } from 'lucide-react';
 
 function LoginForm() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const reason = useMemo(() => searchParams.get('reason'), [searchParams]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [passwordLoggedIn, setPasswordLoggedIn] = useState(false);
-  const [sent, setSent] = useState(false);
-  const [magicLinkUrl, setMagicLinkUrl] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -34,9 +33,7 @@ function LoginForm() {
     try {
       const response = await fetch('/api/auth/password-login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
 
@@ -47,9 +44,8 @@ function LoginForm() {
         return;
       }
 
-      setPasswordLoggedIn(true);
-      // Após login com senha, gerar magic link automaticamente
-      await handleMagicLink();
+      // Sessão criada com sucesso — redirecionar direto para o dashboard
+      router.push('/dashboard');
     } catch (error: unknown) {
       console.error('Login error:', error);
       setLoginError('Erro ao processar solicitação. Tente novamente.');
@@ -58,99 +54,12 @@ function LoginForm() {
     }
   };
 
-  const handleMagicLink = async () => {
-    setLoading(true);
-    setMagicLinkUrl(null);
-    setLoginError(null);
-
-    try {
-      const response = await fetch('/api/auth/magic-link', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        const msg = data.error || data.details || 'Erro ao enviar link de acesso';
-        setLoginError(msg);
-        return;
-      }
-
-      if (data.magicLink) {
-        setMagicLinkUrl(data.magicLink);
-        console.log('🔗 Magic Link (DEV):', data.magicLink);
-      }
-
-      setSent(true);
-    } catch (error: unknown) {
-      console.error('Magic link error:', error);
-      setLoginError('Erro ao gerar link de acesso. Tente novamente.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const copyMagicLink = () => {
-    if (magicLinkUrl) {
-      navigator.clipboard.writeText(magicLinkUrl);
-      alert('Link copiado! Cole no navegador para fazer login.');
-    }
-  };
-
-  if (sent) {
-    return (
-      <Card>
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-green-100 flex items-center justify-center">
-            {mounted ? <Mail className="h-6 w-6 text-green-600" /> : <span className="h-6 w-6" />}
-          </div>
-          <CardTitle>Verifique seu e-mail</CardTitle>
-          <CardDescription>
-            Enviamos um link de acesso para <strong>{email}</strong>
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground text-center mb-4">
-            Clique no link no e-mail para fazer login. O link expira em 1 hora.
-          </p>
-
-          {magicLinkUrl && (
-            <div className="mb-4 p-3 rounded-lg bg-muted border text-center">
-              <p className="text-xs text-muted-foreground mb-2">Use o link abaixo para fazer login (expira em 1 hora):</p>
-              <a
-                href={magicLinkUrl}
-                className="text-sm text-primary underline break-all block mb-2"
-              >
-                {magicLinkUrl}
-              </a>
-              <Button type="button" variant="secondary" size="sm" onClick={copyMagicLink}>
-                Copiar link
-              </Button>
-            </div>
-          )}
-
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => { setSent(false); setMagicLinkUrl(null); }}
-          >
-            Usar outro e-mail
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <Card>
       <CardHeader className="text-center">
         <CardTitle className="text-2xl">Pequenos Grupos</CardTitle>
         <CardDescription>
-          Entre com seu e-mail para receber um link de acesso
+          Entre com e-mail e senha para acessar o sistema
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -174,7 +83,7 @@ function LoginForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              disabled={loading || passwordLoggedIn}
+              disabled={loading}
             />
           </div>
           <div className="space-y-2">
@@ -187,42 +96,31 @@ function LoginForm() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                disabled={loading || passwordLoggedIn}
+                disabled={loading}
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                disabled={loading || passwordLoggedIn}
+                disabled={loading}
               >
                 {showPassword ? '👁️' : '👁️‍🗨️'}
               </button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              É necessário fazer login com senha para gerar o link de acesso.
-            </p>
           </div>
-          {!passwordLoggedIn ? (
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? (
-                <>
-                  {mounted ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <span className="mr-2 inline-block h-4 w-4" />}
-                  Entrando...
-                </>
-              ) : (
-                <>
-                  {mounted ? <Lock className="mr-2 h-4 w-4" /> : <span className="mr-2 inline-block h-4 w-4" />}
-                  Entrar com Senha
-                </>
-              )}
-            </Button>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-2">
-                ✓ Login realizado! Gerando link de acesso...
-              </p>
-            </div>
-          )}
+          <Button type="submit" disabled={loading} className="w-full">
+            {loading ? (
+              <>
+                {mounted ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <span className="mr-2 inline-block h-4 w-4" />}
+                Entrando...
+              </>
+            ) : (
+              <>
+                {mounted ? <Lock className="mr-2 h-4 w-4" /> : <span className="mr-2 inline-block h-4 w-4" />}
+                Entrar
+              </>
+            )}
+          </Button>
         </form>
         <div className="mt-4 pt-4 border-t text-center">
           <Link
