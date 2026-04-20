@@ -1,7 +1,7 @@
 {
-  "name": "pequenos-grupos",
+  "name": "pastoreio",
   "version": "1.1.0",
-  "description": "Sistema de gestão para Pequenos Grupos de Estudo - MVP com Dashboard de Engajamento, Broadcast WhatsApp e Modo Offline",
+  "description": "Pastoreio — gestão de pequenos grupos (PWA): engajamento, lista de presença, funil de visitantes, tags, integrações e modo offline",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -56,6 +56,7 @@
     "typescript": "^5.7.2"
   },
   "keywords": [
+    "pastoreio",
     "pequenos-grupos",
     "gestao",
     "igreja",
@@ -66,6 +67,6 @@
     "postgresql",
     "offline-first"
   ],
-  "author": "Pequenos Grupos Manager",
+  "author": "Pastoreio",
   "license": "MIT"
 }
