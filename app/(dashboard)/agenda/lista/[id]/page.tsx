@@ -11,6 +11,7 @@ import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus, RotateCcw, Save, D
 import {
   internalCheckKeyMember,
   internalCheckKeyGuest,
+  internalCheckKeyPublic,
   normalizeInternalChecks,
   getPair,
   emptyCheckPair,
@@ -53,6 +54,7 @@ interface ListData {
     meeting_time: string | null;
     location: string | null;
     attendance_list_deadline?: string | null;
+    attendance_list_mode?: 'prefilled' | 'open' | null;
     attendance_list_internal_label?: string | null;
     attendance_list_internal_checks?: Record<string, InternalCheckPair>;
     attendance_list_internal_enabled?: boolean;
@@ -424,10 +426,15 @@ export default function ListaConfirmacaoPage() {
   const { meeting, members, guests } = data;
   const publicEntries = data.public_entries ?? [];
 
-  const checklistRowKeys = [
-    ...members.map((m) => internalCheckKeyMember(m.id)),
-    ...guests.map((g) => internalCheckKeyGuest(g.id)),
-  ];
+  // Se modo é "open" (lista vazia) E checklist interno habilitado:
+  // mostrar APENAS public_entries na checklist (não membros/guests)
+  const isOpenMode = meeting.attendance_list_mode === 'open';
+  const checklistRowKeys = isOpenMode
+    ? publicEntries.map((e) => internalCheckKeyPublic(e.id))
+    : [
+        ...members.map((m) => internalCheckKeyMember(m.id)),
+        ...guests.map((g) => internalCheckKeyGuest(g.id)),
+      ];
   let countCheckA = 0;
   let countCheckB = 0;
   let countNeither = 0;
@@ -706,8 +713,10 @@ export default function ListaConfirmacaoPage() {
         <div className="px-4 py-3 border-b bg-muted/50 space-y-1">
           <h2 className="font-medium">Checklist interno</h2>
           <p className="text-xs text-muted-foreground">
-            Opcional. Dois checkboxes por pessoa (participantes e convidados). Nomeie a lista (ex.: Pagamento) e cada
-            checkbox (ex.: Pago e A pagar). Salve para registrar.
+            {isOpenMode 
+              ? 'Opcional. Dois checkboxes por pessoa (autocadastro). Conforme as pessoas se cadastram no link público, elas aparecem aqui automaticamente. Nomeie a lista (ex.: Pagamento) e cada checkbox (ex.: Pago e A pagar). Salve para registrar.'
+              : 'Opcional. Dois checkboxes por pessoa (participantes e convidados). Nomeie a lista (ex.: Pagamento) e cada checkbox (ex.: Pago e A pagar). Salve para registrar.'
+            }
           </p>
         </div>
         <div className="p-4 space-y-4">
@@ -802,65 +811,100 @@ export default function ListaConfirmacaoPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {members.map((m) => {
-                      const rk = internalCheckKeyMember(m.id);
-                      const p = getPair(internalChecks, rk);
-                      return (
-                        <tr key={m.id} className="border-b last:border-0">
-                          <td className="p-3">
-                            <span className="font-medium">{m.full_name}</span>
-                            <span className="block text-xs text-muted-foreground">Participante</span>
-                          </td>
-                          <td className="p-3 text-center">
-                            <Checkbox
-                              checked={p.a}
-                              onCheckedChange={(c) => handleInternalToggle(rk, 'a', c === true)}
-                              disabled={internalSaving}
-                              aria-label={`${headerCheckboxA} — ${m.full_name}`}
-                            />
-                          </td>
-                          <td className="p-3 text-center">
-                            <Checkbox
-                              checked={p.b}
-                              onCheckedChange={(c) => handleInternalToggle(rk, 'b', c === true)}
-                              disabled={internalSaving}
-                              aria-label={`${headerCheckboxB} — ${m.full_name}`}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {guests.map((g) => {
-                      const rk = internalCheckKeyGuest(g.id);
-                      const p = getPair(internalChecks, rk);
-                      return (
-                        <tr key={`g-${g.id}`} className="border-b last:border-0 bg-muted/20">
-                          <td className="p-3">
-                            <span className="font-medium">{g.full_name}</span>
-                            <span className="block text-xs text-muted-foreground">Convidado</span>
-                          </td>
-                          <td className="p-3 text-center">
-                            <Checkbox
-                              checked={p.a}
-                              onCheckedChange={(c) => handleInternalToggle(rk, 'a', c === true)}
-                              disabled={internalSaving}
-                              aria-label={`${headerCheckboxA} — ${g.full_name}`}
-                            />
-                          </td>
-                          <td className="p-3 text-center">
-                            <Checkbox
-                              checked={p.b}
-                              onCheckedChange={(c) => handleInternalToggle(rk, 'b', c === true)}
-                              disabled={internalSaving}
-                              aria-label={`${headerCheckboxB} — ${g.full_name}`}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {isOpenMode ? (
+                      // Modo "lista vazia": mostrar apenas public_entries
+                      publicEntries.map((e) => {
+                        const rk = internalCheckKeyPublic(e.id);
+                        const p = getPair(internalChecks, rk);
+                        return (
+                          <tr key={e.id} className="border-b last:border-0">
+                            <td className="p-3">
+                              <span className="font-medium">{e.full_name}</span>
+                              <span className="block text-xs text-muted-foreground">Autocadastro</span>
+                            </td>
+                            <td className="p-3 text-center">
+                              <Checkbox
+                                checked={p.a}
+                                onCheckedChange={(c) => handleInternalToggle(rk, 'a', c === true)}
+                                disabled={internalSaving}
+                                aria-label={`${headerCheckboxA} — ${e.full_name}`}
+                              />
+                            </td>
+                            <td className="p-3 text-center">
+                              <Checkbox
+                                checked={p.b}
+                                onCheckedChange={(c) => handleInternalToggle(rk, 'b', c === true)}
+                                disabled={internalSaving}
+                                aria-label={`${headerCheckboxB} — ${e.full_name}`}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      // Modo "prefilled": mostrar members + guests (comportamento original)
+                      <>
+                        {members.map((m) => {
+                          const rk = internalCheckKeyMember(m.id);
+                          const p = getPair(internalChecks, rk);
+                          return (
+                            <tr key={m.id} className="border-b last:border-0">
+                              <td className="p-3">
+                                <span className="font-medium">{m.full_name}</span>
+                                <span className="block text-xs text-muted-foreground">Participante</span>
+                              </td>
+                              <td className="p-3 text-center">
+                                <Checkbox
+                                  checked={p.a}
+                                  onCheckedChange={(c) => handleInternalToggle(rk, 'a', c === true)}
+                                  disabled={internalSaving}
+                                  aria-label={`${headerCheckboxA} — ${m.full_name}`}
+                                />
+                              </td>
+                              <td className="p-3 text-center">
+                                <Checkbox
+                                  checked={p.b}
+                                  onCheckedChange={(c) => handleInternalToggle(rk, 'b', c === true)}
+                                  disabled={internalSaving}
+                                  aria-label={`${headerCheckboxB} — ${m.full_name}`}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {guests.map((g) => {
+                          const rk = internalCheckKeyGuest(g.id);
+                          const p = getPair(internalChecks, rk);
+                          return (
+                            <tr key={`g-${g.id}`} className="border-b last:border-0 bg-muted/20">
+                              <td className="p-3">
+                                <span className="font-medium">{g.full_name}</span>
+                                <span className="block text-xs text-muted-foreground">Convidado</span>
+                              </td>
+                              <td className="p-3 text-center">
+                                <Checkbox
+                                  checked={p.a}
+                                  onCheckedChange={(c) => handleInternalToggle(rk, 'a', c === true)}
+                                  disabled={internalSaving}
+                                  aria-label={`${headerCheckboxA} — ${g.full_name}`}
+                                />
+                              </td>
+                              <td className="p-3 text-center">
+                                <Checkbox
+                                  checked={p.b}
+                                  onCheckedChange={(c) => handleInternalToggle(rk, 'b', c === true)}
+                                  disabled={internalSaving}
+                                  aria-label={`${headerCheckboxB} — ${g.full_name}`}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </>
+                    )}
                   </tbody>
                 </table>
-                {members.length === 0 && guests.length === 0 && (
+                {(isOpenMode ? publicEntries.length === 0 : (members.length === 0 && guests.length === 0)) && (
                   <p className="p-4 text-sm text-muted-foreground">Não há linhas para marcar.</p>
                 )}
               </div>

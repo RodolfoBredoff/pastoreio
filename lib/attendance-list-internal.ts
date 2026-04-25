@@ -1,6 +1,7 @@
 /** Prefixos para chaves em attendance_list_internal_checks (JSONB) */
 export const INTERNAL_CHECK_MEMBER_PREFIX = 'm:';
 export const INTERNAL_CHECK_GUEST_PREFIX = 'g:';
+export const INTERNAL_CHECK_PUBLIC_PREFIX = 'p:';
 
 export type InternalCheckPair = { a: boolean; b: boolean };
 
@@ -10,6 +11,10 @@ export function internalCheckKeyMember(memberId: string): string {
 
 export function internalCheckKeyGuest(guestId: string): string {
   return `${INTERNAL_CHECK_GUEST_PREFIX}${guestId}`;
+}
+
+export function internalCheckKeyPublic(publicEntryId: string): string {
+  return `${INTERNAL_CHECK_PUBLIC_PREFIX}${publicEntryId}`;
 }
 
 export function emptyCheckPair(): InternalCheckPair {
@@ -25,7 +30,9 @@ export function normalizeInternalChecks(
   const out: Record<string, InternalCheckPair> = {};
   for (const [k, v] of Object.entries(raw ?? {})) {
     const key =
-      k.startsWith(INTERNAL_CHECK_MEMBER_PREFIX) || k.startsWith(INTERNAL_CHECK_GUEST_PREFIX)
+      k.startsWith(INTERNAL_CHECK_MEMBER_PREFIX) || 
+      k.startsWith(INTERNAL_CHECK_GUEST_PREFIX) ||
+      k.startsWith(INTERNAL_CHECK_PUBLIC_PREFIX)
         ? k
         : internalCheckKeyMember(k);
     if (typeof v === 'boolean') {

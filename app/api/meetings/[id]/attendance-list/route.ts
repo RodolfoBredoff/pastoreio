@@ -67,6 +67,7 @@ export async function GET(
       location: string | null;
       attendance_list_token: string | null;
       attendance_list_deadline: string | null;
+      attendance_list_mode: 'prefilled' | 'open' | null;
       attendance_list_internal_label: string | null;
       attendance_list_internal_checks: Record<string, boolean>;
       attendance_list_internal_enabled: boolean;
@@ -74,7 +75,7 @@ export async function GET(
       attendance_list_internal_result_negative: string | null;
       attendance_list_internal_unmarked_label: string | null;
     }>(
-      `SELECT id, group_id, title, meeting_date, meeting_time, location, attendance_list_token, attendance_list_deadline,
+      `SELECT id, group_id, title, meeting_date, meeting_time, location, attendance_list_token, attendance_list_deadline, attendance_list_mode,
               attendance_list_internal_label,
               COALESCE(attendance_list_internal_checks, '{}'::jsonb) AS attendance_list_internal_checks,
               COALESCE(attendance_list_internal_enabled, FALSE) AS attendance_list_internal_enabled,
@@ -155,6 +156,7 @@ export async function GET(
         meeting_time: meetingRow.meeting_time,
         location: meetingRow.location,
         attendance_list_deadline: meetingRow.attendance_list_deadline,
+        attendance_list_mode: meetingRow.attendance_list_mode,
         attendance_list_internal_label: meetingRow.attendance_list_internal_label,
         attendance_list_internal_checks: checksNorm,
         attendance_list_internal_enabled: meetingRow.attendance_list_internal_enabled ?? false,
