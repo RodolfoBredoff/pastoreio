@@ -85,6 +85,9 @@ export async function POST(
 
     const uploadUrl = await getSignedUrl(getS3Client(), command, { expiresIn: 60 });
     const publicUrl = `${publicBase.replace(/\/$/, '')}/${objectKey}`;
+    // #region agent log
+    fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'presign/route.ts:86',message:'Presign generated',data:{bucket,hasUploadUrl:!!uploadUrl,hasPublicUrl:!!publicUrl,objectKey,region:process.env.AWS_REGION},timestamp:Date.now(),hypothesisId:'UPLOAD'})}).catch(()=>{});
+    // #endregion
 
     return NextResponse.json({ uploadUrl, publicUrl, objectKey });
   } catch (error) {
