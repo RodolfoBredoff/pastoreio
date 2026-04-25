@@ -464,6 +464,9 @@ function AddMeetingDialog({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao criar encontro');
+      // #region agent log
+      fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda-client.tsx:465',message:'Meeting created response',data:{hasSlug:!!data.attendance_list_slug,slug:data.attendance_list_slug,meeting_type:meetingType,generateList:generateAttendanceList,mode:attendanceListMode},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
 
       if (data.attendance_list_slug) {
         const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${data.attendance_list_slug}`;
@@ -845,6 +848,9 @@ export function AgendaClient({
     setMeetings(initialMeetings);
     setLocalPastMeetings(pastMeetings);
     setGroup(initialGroup);
+    // #region agent log
+    fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda-client.tsx:844',message:'Client received meetings',data:{count:initialMeetings.length,firstMeeting:initialMeetings[0]||null,hasSlug:initialMeetings[0]?.attendance_list_slug||null},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
+    // #endregion
   }, [initialMeetings, pastMeetings, initialGroup]);
 
   const refresh = () => { startTransition(() => { router.refresh(); }); };
