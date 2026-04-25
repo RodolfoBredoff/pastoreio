@@ -5,6 +5,21 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 
+function slugify(input: string): string {
+  return input
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)+/g, '')
+    .slice(0, 60);
+}
+
+function shortId(): string {
+  // 4 chars, URL-friendly, enough to avoid casual collisions
+  return Math.random().toString(36).slice(2, 6);
+}
+
 /**
  * GET /api/meetings
  * Lista reuniões do grupo (passadas por padrão) para filtros, ex.: mensagem em grupo por encontro.
@@ -68,6 +83,8 @@ export async function POST(request: Request) {
       location,
       generate_attendance_list,
       attendance_list_deadline,
+      attendance_list_mode,
+      attendance_list_slug,
     } = data as {
       meeting_date: string;
       meeting_time?: string | null;
@@ -77,6 +94,8 @@ export async function POST(request: Request) {
       location?: string | null;
       generate_attendance_list?: boolean;
       attendance_list_deadline?: string | null;
+      attendance_list_mode?: 'prefilled' | 'open';
+      attendance_list_slug?: string | null;
     };
 
     if (!meeting_date) {
@@ -91,6 +110,8 @@ export async function POST(request: Request) {
     const type = meeting_type === 'special_event' ? 'special_event' : 'regular';
     const withList = type === 'special_event' && Boolean(generate_attendance_list);
     const attendanceListToken = withList ? randomUUID() : null;
+    const attendanceListMode: 'prefilled' | 'open' =
+      withList && attendance_list_mode === 'open' ? 'open' : 'prefilled';
     const locationVal = location != null && String(location).trim() !== '' ? String(location).trim() : null;
     let attendanceListDeadlineVal: string | null = null;
 
@@ -105,9 +126,19 @@ export async function POST(request: Request) {
       attendanceListDeadlineVal = `${attendance_list_deadline}T23:59:59.999Z`;
     }
 
+    let attendanceListSlug: string | null = null;
+    if (withList) {
+      const provided = typeof attendance_list_slug === 'string' ? attendance_list_slug.trim() : '';
+      const baseTitle = (title && String(title).trim()) ? String(title).trim() : 'encontro';
+      const base = provided ? slugify(provided) : slugify(baseTitle);
+      const datePart = meeting_date.replaceAll('-', '');
+      const candidateBase = `${base || 'encontro'}-${datePart}`.slice(0, 60);
+      attendanceListSlug = `${candidateBase}-${shortId()}`.replace(/-+/g, '-');
+    }
+
     const result = await query(
-      `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token, attendance_list_deadline)
-       VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9)
+      `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token, attendance_list_deadline, attendance_list_slug, attendance_list_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11)
        ON CONFLICT (group_id, meeting_date) DO NOTHING
        RETURNING *`,
       [
@@ -120,6 +151,8 @@ export async function POST(request: Request) {
         locationVal,
         attendanceListToken,
         attendanceListDeadlineVal,
+        attendanceListSlug,
+        attendanceListMode,
       ]
     );
 

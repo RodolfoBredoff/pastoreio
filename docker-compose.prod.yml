@@ -21,6 +21,13 @@ services:
       - DATABASE_PASSWORD=${DATABASE_PASSWORD}
       - APP_SECRET=${APP_SECRET}
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+      # AWS / S3 (capa do convite via presigned URL)
+      # Defina no .env da EC2 (mesmo diretório do compose).
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - INVITE_COVERS_BUCKET=${INVITE_COVERS_BUCKET}
+      - S3_BUCKET=${S3_BUCKET}
+      - PEQUENOS_GRUPOS_BUCKET=${PEQUENOS_GRUPOS_BUCKET}
+      - INVITE_COVERS_PUBLIC_BASE_URL=${INVITE_COVERS_PUBLIC_BASE_URL}
     depends_on:
       postgres:
         condition: service_healthy

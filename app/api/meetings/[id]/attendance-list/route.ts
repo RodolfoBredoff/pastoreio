@@ -130,6 +130,21 @@ export async function GET(
       [meetingId]
     ).catch(() => []);
 
+    const publicEntries = await queryMany<{
+      id: string;
+      first_name: string;
+      last_name: string;
+      email: string | null;
+      phone: string | null;
+      created_at: string;
+    }>(
+      `SELECT id, first_name, last_name, email, phone, created_at
+       FROM attendance_list_public_entries
+       WHERE meeting_id = $1
+       ORDER BY created_at ASC`,
+      [meetingId]
+    ).catch(() => []);
+
     const checksNorm = normalizeInternalChecks(meetingRow.attendance_list_internal_checks);
 
     return NextResponse.json({
@@ -160,6 +175,15 @@ export async function GET(
         registered_by_email: g.registered_by_email,
         registered_by_phone: g.registered_by_phone,
         registered_by_leader: g.registered_by_leader,
+      })),
+      public_entries: publicEntries.map((e) => ({
+        id: e.id,
+        first_name: e.first_name,
+        last_name: e.last_name,
+        full_name: `${e.first_name} ${e.last_name}`.trim(),
+        email: e.email,
+        phone: e.phone,
+        created_at: e.created_at,
       })),
     });
   } catch (error) {

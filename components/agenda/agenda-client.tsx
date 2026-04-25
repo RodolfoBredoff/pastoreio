@@ -38,6 +38,9 @@ interface Meeting {
   location: string | null;
   attendance_list_token?: string | null;
   attendance_list_deadline?: string | null;
+  attendance_list_slug?: string | null;
+  attendance_list_mode?: 'prefilled' | 'open' | null;
+  invite_cover_image_url?: string | null;
 }
 
 interface MeetingWithCount extends Meeting {
@@ -100,6 +103,9 @@ function EditMeetingDialog({
   );
   const [presenceMap, setPresenceMap] = useState<Record<string, boolean>>({});
   const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const [coverUrl, setCoverUrl] = useState<string>(meeting.invite_cover_image_url ?? '');
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [coverError, setCoverError] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -110,6 +116,8 @@ function EditMeetingDialog({
     setMeetingType(meeting.meeting_type ?? 'regular');
     setLocation(meeting.location ?? '');
     setAttendanceDeadline(meeting.attendance_list_deadline ? toInputDate(meeting.attendance_list_deadline) : '');
+    setCoverUrl(meeting.invite_cover_image_url ?? '');
+    setCoverError('');
 
     if (members.length > 0) {
       setLoadingAttendance(true);
@@ -132,6 +140,64 @@ function EditMeetingDialog({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const uploadCover = async (file: File) => {
+    setCoverError('');
+    setCoverUploading(true);
+    try {
+      const presignRes = await fetch(`/api/meetings/${meeting.id}/invite-cover/presign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contentType: file.type, size: file.size }),
+      });
+      const presignJson = await presignRes.json();
+      if (!presignRes.ok) throw new Error(presignJson.error || 'Erro ao preparar upload');
+
+      const { uploadUrl, publicUrl, objectKey } = presignJson as { uploadUrl: string; publicUrl: string; objectKey: string };
+
+      const putRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+      if (!putRes.ok) throw new Error('Erro ao enviar imagem');
+
+      const saveRes = await fetch(`/api/meetings/${meeting.id}/invite-cover`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publicUrl, objectKey }),
+      });
+      const saveJson = await saveRes.json();
+      if (!saveRes.ok) throw new Error(saveJson.error || 'Erro ao salvar capa');
+
+      setCoverUrl(publicUrl);
+      onSave({ invite_cover_image_url: publicUrl });
+    } catch (e) {
+      setCoverError(e instanceof Error ? e.message : 'Erro ao enviar capa');
+    } finally {
+      setCoverUploading(false);
+    }
+  };
+
+  const removeCover = async () => {
+    setCoverError('');
+    setCoverUploading(true);
+    try {
+      const res = await fetch(`/api/meetings/${meeting.id}/invite-cover`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remove: true }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao remover capa');
+      setCoverUrl('');
+      onSave({ invite_cover_image_url: null });
+    } catch (e) {
+      setCoverError(e instanceof Error ? e.message : 'Erro ao remover capa');
+    } finally {
+      setCoverUploading(false);
+    }
+  };
 
   const togglePresence = (memberId: string) => {
     setPresenceMap((prev) => ({ ...prev, [memberId]: !prev[memberId] }));
@@ -196,6 +262,38 @@ function EditMeetingDialog({
         </DialogHeader>
         <div className="space-y-4 py-2 overflow-y-auto flex-1 pr-1">
           {error && <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">{error}</p>}
+          <div className="space-y-2">
+            <Label>Capa do convite (opcional)</Label>
+            {coverUrl ? (
+              <div className="space-y-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={coverUrl} alt="Capa do convite" className="w-full h-40 object-cover rounded-md border" />
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="outline" disabled={coverUploading} onClick={removeCover}>
+                    {coverUploading ? 'Removendo...' : 'Remover capa'}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  disabled={coverUploading}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void uploadCover(f);
+                    // permitir selecionar o mesmo arquivo novamente
+                    e.currentTarget.value = '';
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  JPG, PNG ou WEBP (até 5MB). A capa aparece no link público.
+                </p>
+              </div>
+            )}
+            {coverError && <p className="text-xs text-destructive">{coverError}</p>}
+          </div>
           <div className="space-y-2">
             <Label htmlFor="edit-type">Tipo de Encontro</Label>
             <select id="edit-type" value={meetingType} onChange={(e) => setMeetingType(e.target.value as 'regular' | 'special_event')}
@@ -335,6 +433,7 @@ function AddMeetingDialog({
   const [location, setLocation] = useState('');
   const [meetingType, setMeetingType] = useState<'regular' | 'special_event'>('regular');
   const [generateAttendanceList, setGenerateAttendanceList] = useState(false);
+  const [attendanceListMode, setAttendanceListMode] = useState<'prefilled' | 'open'>('prefilled');
   const [attendanceDeadline, setAttendanceDeadline] = useState('');
   const [createdListLink, setCreatedListLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -357,6 +456,7 @@ function AddMeetingDialog({
           meeting_type: meetingType,
           location: location.trim() || null,
           generate_attendance_list: meetingType === 'special_event' && generateAttendanceList,
+          attendance_list_mode: meetingType === 'special_event' && generateAttendanceList ? attendanceListMode : undefined,
           attendance_list_deadline: meetingType === 'special_event' && generateAttendanceList && attendanceDeadline
             ? attendanceDeadline
             : null,
@@ -365,12 +465,12 @@ function AddMeetingDialog({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao criar encontro');
 
-      if (data.attendance_list_token) {
-        const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${data.attendance_list_token}`;
+      if (data.attendance_list_slug) {
+        const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${data.attendance_list_slug}`;
         setCreatedListLink(link);
       } else {
         setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
-        setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceDeadline('');
+        setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline('');
         onSave();
         onOpenChange(false);
       }
@@ -383,7 +483,7 @@ function AddMeetingDialog({
 
   const handleCloseAfterList = () => {
     setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
-    setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceDeadline('');
+    setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline('');
     setCreatedListLink(null);
     onSave();
     onOpenChange(false);
@@ -448,18 +548,35 @@ function AddMeetingDialog({
                     </Label>
                   </div>
                   {generateAttendanceList && (
-                    <div className="space-y-2">
-                      <Label htmlFor="add-deadline">Prazo para confirmações pelo link (opcional)</Label>
-                      <Input
-                        id="add-deadline"
-                        type="date"
-                        value={attendanceDeadline}
-                        onChange={(e) => setAttendanceDeadline(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Após esta data, o link segue público com totais agregados, sem expor quem confirmou. Você pode alterar ou estender este prazo depois, na agenda.
-                      </p>
-                    </div>
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="attendance-mode">Tipo de lista pública</Label>
+                        <select
+                          id="attendance-mode"
+                          value={attendanceListMode}
+                          onChange={(e) => setAttendanceListMode(e.target.value as 'prefilled' | 'open')}
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        >
+                          <option value="prefilled">Pré-preenchida (participantes já cadastrados)</option>
+                          <option value="open">Lista vazia (autocadastro)</option>
+                        </select>
+                        <p className="text-xs text-muted-foreground">
+                          A lista pública sempre exibe somente totais. No modo “lista vazia”, as pessoas confirmam inserindo nome, sobrenome e e-mail ou telefone.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="add-deadline">Prazo para confirmações pelo link (opcional)</Label>
+                        <Input
+                          id="add-deadline"
+                          type="date"
+                          value={attendanceDeadline}
+                          onChange={(e) => setAttendanceDeadline(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Após esta data, o link segue público com totais agregados, sem expor quem confirmou. Você pode alterar ou estender este prazo depois, na agenda.
+                        </p>
+                      </div>
+                    </>
                   )}
                 </>
               )}
@@ -893,11 +1010,11 @@ export function AgendaClient({
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2 pt-0.5 border-t">
-                      {meeting.attendance_list_token && (
+                      {meeting.attendance_list_slug && (
                         <>
                           <Button variant="outline" size="sm" className="h-8 text-xs" title="Copiar link da lista de presença"
                             onClick={() => {
-                              const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${meeting.attendance_list_token}`;
+                              const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${meeting.attendance_list_slug}`;
                               navigator.clipboard.writeText(link);
                             }}>
                             <Link2 className="h-3.5 w-3.5 mr-1" />
@@ -996,11 +1113,11 @@ export function AgendaClient({
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2 pt-0.5 border-t">
-                      {meeting.attendance_list_token && (
+                      {meeting.attendance_list_slug && (
                         <>
                           <Button variant="outline" size="sm" className="h-8 text-xs" title="Copiar link da lista de presença"
                             onClick={() => {
-                              const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${meeting.attendance_list_token}`;
+                              const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${meeting.attendance_list_slug}`;
                               navigator.clipboard.writeText(link);
                             }}>
                             <Link2 className="h-3.5 w-3.5 mr-1" />

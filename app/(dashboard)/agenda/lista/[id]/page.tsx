@@ -37,6 +37,14 @@ interface GuestRow {
   registered_by_leader?: boolean;
 }
 
+interface PublicEntryRow {
+  id: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  created_at: string;
+}
+
 interface ListData {
   meeting: {
     id: string;
@@ -54,6 +62,7 @@ interface ListData {
   };
   members: MemberRow[];
   guests: GuestRow[];
+  public_entries?: PublicEntryRow[];
 }
 
 function formatDate(d: string) {
@@ -90,6 +99,12 @@ function guestRegisteredBy(g: GuestRow): string {
   if (g.registered_by_leader) return 'Inclusão pelo líder';
   if (g.registered_by_email) return g.registered_by_email;
   if (g.registered_by_phone) return formatPhone(g.registered_by_phone);
+  return '—';
+}
+
+function publicEntryContactDisplay(e: PublicEntryRow): string {
+  if (e.email) return e.email;
+  if (e.phone) return formatPhone(e.phone);
   return '—';
 }
 
@@ -407,6 +422,7 @@ export default function ListaConfirmacaoPage() {
   }
 
   const { meeting, members, guests } = data;
+  const publicEntries = data.public_entries ?? [];
 
   const checklistRowKeys = [
     ...members.map((m) => internalCheckKeyMember(m.id)),
@@ -440,7 +456,12 @@ export default function ListaConfirmacaoPage() {
       '—',
       guestRegisteredBy(g),
     ]);
-    const csvContent = [headers, ...memberRows, ...guestRows]
+    const publicRows = publicEntries.map((e) => [
+      `${e.full_name} (lista vazia)`,
+      'Presente',
+      publicEntryContactDisplay(e),
+    ]);
+    const csvContent = [headers, ...memberRows, ...guestRows, ...publicRows]
       .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
       .join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -640,6 +661,41 @@ export default function ListaConfirmacaoPage() {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-lg border bg-card overflow-hidden">
+        <div className="px-4 py-3 border-b bg-muted/50">
+          <h2 className="font-medium">Lista vazia (autocadastro)</h2>
+          <p className="text-xs text-muted-foreground">
+            Registros feitos no modo “lista vazia”. Esses dados não aparecem publicamente; só aqui.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          {publicEntries.length === 0 ? (
+            <p className="px-4 py-6 text-sm text-muted-foreground">Nenhum registro ainda.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/30">
+                  <th className="text-left p-3 font-medium">Nome</th>
+                  <th className="text-left p-3 font-medium">E-mail / Telefone</th>
+                  <th className="text-left p-3 font-medium">Quando</th>
+                </tr>
+              </thead>
+              <tbody>
+                {publicEntries.map((e) => (
+                  <tr key={e.id} className="border-b last:border-0">
+                    <td className="p-3">{e.full_name}</td>
+                    <td className="p-3 font-mono text-xs">{publicEntryContactDisplay(e)}</td>
+                    <td className="p-3 text-xs text-muted-foreground">
+                      {new Date(e.created_at).toLocaleString('pt-BR')}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
