@@ -134,9 +134,6 @@ export async function POST(request: Request) {
       const datePart = meeting_date.replaceAll('-', '');
       const candidateBase = `${base || 'encontro'}-${datePart}`.slice(0, 60);
       attendanceListSlug = `${candidateBase}-${shortId()}`.replace(/-+/g, '-');
-      // #region agent log
-      fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'api/meetings/route.ts:129',message:'Generated slug',data:{withList,attendanceListSlug,meeting_type,generate_attendance_list,attendance_list_mode:attendanceListMode},timestamp:Date.now(),hypothesisId:'H1,H4'})}).catch(()=>{});
-      // #endregion
     }
 
     const result = await query(

@@ -53,9 +53,6 @@ export default async function AgendaPage() {
        WHERE table_schema = 'public' AND table_name = 'meetings' AND column_name = 'attendance_list_slug'
      ) as exists`
   ).then((r) => r?.exists === true);
-  // #region agent log
-  fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda/page.tsx:50',message:'Column checks',data:{hasAttendanceSlugColumn,hasAttendanceModeColumn:undefined,hasInviteCoverColumn:undefined},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-  // #endregion
 
   const hasAttendanceModeColumn = await queryOne<{ exists: boolean }>(
     `SELECT EXISTS (
@@ -173,9 +170,6 @@ export default async function AgendaPage() {
     pastMeetingsPromise,
     membersPromise,
   ]);
-  // #region agent log
-  fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda/page.tsx:167',message:'Fetched meetings data',data:{meetingsCount:meetings.length,firstMeeting:meetings[0]||null,hasSlugInFirst:meetings[0]?.attendance_list_slug||null},timestamp:Date.now(),hypothesisId:'H2,H5'})}).catch(()=>{});
-  // #endregion
 
   if (!group) {
     return <div>Configuração do grupo não encontrada.</div>;

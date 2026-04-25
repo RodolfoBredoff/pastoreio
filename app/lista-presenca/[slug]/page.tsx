@@ -203,7 +203,7 @@ export default function ListaPresencaPublicPage() {
             <img
               src={meeting.invite_cover_image_url}
               alt="Capa do convite"
-              className="w-full h-48 object-cover"
+              className="w-full max-h-80 object-contain rounded-md bg-gray-50"
             />
           </div>
         ) : null}

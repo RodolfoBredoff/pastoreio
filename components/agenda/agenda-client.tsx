@@ -145,9 +145,6 @@ function EditMeetingDialog({
     setCoverError('');
     setCoverUploading(true);
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda-client.tsx:144',message:'Starting upload',data:{fileType:file.type,fileSize:file.size,meetingId:meeting.id},timestamp:Date.now(),hypothesisId:'UPLOAD'})}).catch(()=>{});
-      // #endregion
       const presignRes = await fetch(`/api/meetings/${meeting.id}/invite-cover/presign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -157,18 +154,12 @@ function EditMeetingDialog({
       if (!presignRes.ok) throw new Error(presignJson.error || 'Erro ao preparar upload');
 
       const { uploadUrl, publicUrl, objectKey } = presignJson as { uploadUrl: string; publicUrl: string; objectKey: string };
-      // #region agent log
-      fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda-client.tsx:156',message:'Presign received, starting PUT',data:{hasUploadUrl:!!uploadUrl,hasPublicUrl:!!publicUrl,uploadUrlPrefix:uploadUrl?.substring(0,50)},timestamp:Date.now(),hypothesisId:'UPLOAD'})}).catch(()=>{});
-      // #endregion
 
       const putRes = await fetch(uploadUrl, {
         method: 'PUT',
         headers: { 'Content-Type': file.type },
         body: file,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda-client.tsx:163',message:'PUT response',data:{status:putRes.status,ok:putRes.ok},timestamp:Date.now(),hypothesisId:'UPLOAD'})}).catch(()=>{});
-      // #endregion
       if (!putRes.ok) throw new Error('Erro ao enviar imagem');
 
       const saveRes = await fetch(`/api/meetings/${meeting.id}/invite-cover`, {
@@ -181,13 +172,7 @@ function EditMeetingDialog({
 
       setCoverUrl(publicUrl);
       onSave({ invite_cover_image_url: publicUrl });
-      // #region agent log
-      fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda-client.tsx:174',message:'Upload success',data:{publicUrl},timestamp:Date.now(),hypothesisId:'UPLOAD'})}).catch(()=>{});
-      // #endregion
     } catch (e) {
-      // #region agent log
-      fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda-client.tsx:176',message:'Upload error',data:{error:e instanceof Error?e.message:String(e),errorType:e?.constructor?.name},timestamp:Date.now(),hypothesisId:'UPLOAD'})}).catch(()=>{});
-      // #endregion
       setCoverError(e instanceof Error ? e.message : 'Erro ao enviar capa');
     } finally {
       setCoverUploading(false);
@@ -282,7 +267,7 @@ function EditMeetingDialog({
             {coverUrl ? (
               <div className="space-y-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={coverUrl} alt="Capa do convite" className="w-full h-40 object-cover rounded-md border" />
+                <img src={coverUrl} alt="Capa do convite" className="w-full max-h-64 object-contain rounded-md border bg-gray-50" />
                 <div className="flex items-center gap-2">
                   <Button type="button" variant="outline" disabled={coverUploading} onClick={removeCover}>
                     {coverUploading ? 'Removendo...' : 'Remover capa'}
@@ -479,9 +464,6 @@ function AddMeetingDialog({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao criar encontro');
-      // #region agent log
-      fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda-client.tsx:465',message:'Meeting created response',data:{hasSlug:!!data.attendance_list_slug,slug:data.attendance_list_slug,meeting_type:meetingType,generateList:generateAttendanceList,mode:attendanceListMode},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-      // #endregion
 
       if (data.attendance_list_slug) {
         const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/lista-presenca/${data.attendance_list_slug}`;
@@ -863,9 +845,6 @@ export function AgendaClient({
     setMeetings(initialMeetings);
     setLocalPastMeetings(pastMeetings);
     setGroup(initialGroup);
-    // #region agent log
-    fetch('http://127.0.0.1:7855/ingest/9ae56e2b-dd3e-4c99-8d52-723e69ab8fcd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'790123'},body:JSON.stringify({sessionId:'790123',location:'agenda-client.tsx:844',message:'Client received meetings',data:{count:initialMeetings.length,firstMeeting:initialMeetings[0]||null,hasSlug:initialMeetings[0]?.attendance_list_slug||null},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
   }, [initialMeetings, pastMeetings, initialGroup]);
 
   const refresh = () => { startTransition(() => { router.refresh(); }); };
