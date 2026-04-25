@@ -106,6 +106,7 @@ function EditMeetingDialog({
   const [coverUrl, setCoverUrl] = useState<string>(meeting.invite_cover_image_url ?? '');
   const [coverUploading, setCoverUploading] = useState(false);
   const [coverError, setCoverError] = useState('');
+  const [publicEntries, setPublicEntries] = useState<Array<{ id: string; full_name: string }>>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -118,8 +119,44 @@ function EditMeetingDialog({
     setAttendanceDeadline(meeting.attendance_list_deadline ? toInputDate(meeting.attendance_list_deadline) : '');
     setCoverUrl(meeting.invite_cover_image_url ?? '');
     setCoverError('');
+    setPublicEntries([]);
 
-    if (members.length > 0) {
+    // Se o encontro tem lista de presença (modo especial), buscar dados completos incluindo public_entries
+    if (meeting.meeting_type === 'special_event' && meeting.attendance_list_slug) {
+      setLoadingAttendance(true);
+      fetch(`/api/meetings/${meeting.id}/attendance-list`)
+        .then((res) => res.ok ? res.json() : null)
+        .then((data: { 
+          members: Array<{ id: string; full_name: string; response: { status: string } | null }>;
+          public_entries?: Array<{ id: string; full_name: string }>;
+        } | null) => {
+          const map: Record<string, boolean> = {};
+          
+          // Membros regulares
+          for (const member of members) map[member.id] = false;
+          if (data?.members) {
+            for (const m of data.members) {
+              if (m.response?.status === 'present') map[m.id] = true;
+            }
+          }
+
+          // Public entries (lista vazia): adicionar ao mapa
+          const entries = data?.public_entries ?? [];
+          for (const entry of entries) {
+            map[`public_${entry.id}`] = true; // começa marcado por padrão
+          }
+          setPublicEntries(entries);
+          setPresenceMap(map);
+        })
+        .catch(() => {
+          const map: Record<string, boolean> = {};
+          for (const member of members) map[member.id] = false;
+          setPresenceMap(map);
+          setPublicEntries([]);
+        })
+        .finally(() => setLoadingAttendance(false));
+    } else if (members.length > 0) {
+      // Encontro regular: usar API antiga
       setLoadingAttendance(true);
       fetch(`/api/attendance?meeting_id=${meeting.id}`)
         .then((res) => res.ok ? res.json() : [])
@@ -136,7 +173,7 @@ function EditMeetingDialog({
         })
         .finally(() => setLoadingAttendance(false));
     }
-  }, [open, meeting.id]);
+  }, [open, meeting.id, meeting.meeting_type, meeting.attendance_list_slug, members]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -204,6 +241,7 @@ function EditMeetingDialog({
   };
 
   const presentCount = Object.values(presenceMap).filter(Boolean).length;
+  const totalPeople = members.length + publicEntries.length;
 
   const handleSave = async () => {
     if (!date) { setError('A data é obrigatória'); return; }
@@ -226,6 +264,7 @@ function EditMeetingDialog({
       if (!meetingRes.ok) { const d = await meetingRes.json(); throw new Error(d.error || 'Erro ao salvar'); }
 
       if (members.length > 0) {
+        // Salvar apenas membros regulares (não public_entries, pois já estão confirmados)
         const attendanceData = members.map((m) => ({
           member_id: m.id,
           is_present: presenceMap[m.id] ?? false,
@@ -351,7 +390,7 @@ function EditMeetingDialog({
             </div>
           )}
 
-          {members.length > 0 && (
+          {(members.length > 0 || publicEntries.length > 0) && (
             <div className="space-y-3 pt-2 border-t">
               <div className="flex items-center justify-between">
                 <Label className="flex items-center gap-2">
@@ -360,7 +399,7 @@ function EditMeetingDialog({
                 </Label>
                 {!loadingAttendance && (
                   <span className="text-xs text-muted-foreground">
-                    {presentCount} de {members.length} presentes
+                    {presentCount} de {totalPeople} presentes
                   </span>
                 )}
               </div>
@@ -380,6 +419,25 @@ function EditMeetingDialog({
                         onClick={(e) => e.stopPropagation()}
                       />
                       <span className="text-sm">{member.full_name}</span>
+                    </div>
+                  ))}
+                  {publicEntries.length > 0 && members.length > 0 && (
+                    <div className="border-t my-2 pt-2">
+                      <p className="text-xs text-muted-foreground mb-2 px-2">Lista vazia (autocadastro):</p>
+                    </div>
+                  )}
+                  {publicEntries.map((entry) => (
+                    <div
+                      key={`public_${entry.id}`}
+                      className="flex items-center gap-3 p-2 rounded-md hover:bg-accent cursor-pointer"
+                      onClick={() => togglePresence(`public_${entry.id}`)}
+                    >
+                      <Checkbox
+                        checked={presenceMap[`public_${entry.id}`] ?? false}
+                        onCheckedChange={() => togglePresence(`public_${entry.id}`)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span className="text-sm">{entry.full_name}</span>
                     </div>
                   ))}
                 </div>
