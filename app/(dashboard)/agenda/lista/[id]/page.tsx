@@ -53,6 +53,7 @@ interface ListData {
     meeting_date: string;
     meeting_time: string | null;
     location: string | null;
+    notes: string | null;
     attendance_list_deadline?: string | null;
     attendance_list_mode?: 'prefilled' | 'open' | null;
     attendance_list_internal_label?: string | null;
@@ -169,6 +170,11 @@ export default function ListaConfirmacaoPage() {
   const [leaderGuestFirst, setLeaderGuestFirst] = useState('');
   const [leaderGuestLast, setLeaderGuestLast] = useState('');
   const [leaderGuestSaving, setLeaderGuestSaving] = useState(false);
+  const [meetingTitle, setMeetingTitle] = useState('');
+  const [meetingLocation, setMeetingLocation] = useState('');
+  const [meetingNotes, setMeetingNotes] = useState('');
+  const [meetingInfoSaving, setMeetingInfoSaving] = useState(false);
+  const [meetingInfoSaved, setMeetingInfoSaved] = useState(false);
   /** Evita sobrescrever rascunho do checklist ao recarregar só membros/confirmações */
   const checklistDraftDirtyRef = useRef(false);
 
@@ -181,6 +187,9 @@ export default function ListaConfirmacaoPage() {
       })
       .then((d) => {
         setData(d);
+        setMeetingTitle(d.meeting.title ?? '');
+        setMeetingLocation(d.meeting.location ?? '');
+        setMeetingNotes(d.meeting.notes ?? '');
         if (!checklistDraftDirtyRef.current) {
           const s = syncInternalStateFromMeeting(d);
           setInternalLabel(s.label);
@@ -308,6 +317,9 @@ export default function ListaConfirmacaoPage() {
       })
       .then((d) => {
         setData(d);
+        setMeetingTitle(d.meeting.title ?? '');
+        setMeetingLocation(d.meeting.location ?? '');
+        setMeetingNotes(d.meeting.notes ?? '');
         const s = syncInternalStateFromMeeting(d);
         setInternalLabel(s.label);
         setInternalChecks(s.checks);
@@ -319,6 +331,33 @@ export default function ListaConfirmacaoPage() {
       .catch((e) => setError(e instanceof Error ? e.message : 'Erro ao carregar'))
       .finally(() => setLoading(false));
   }, [meetingId]);
+
+  const saveMeetingInfo = async () => {
+    if (!meetingId || !data) return;
+    setMeetingInfoSaving(true);
+    setMeetingInfoSaved(false);
+    setError(null);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: meetingTitle.trim() || null,
+          location: meetingLocation.trim() || null,
+          notes: meetingNotes.trim() || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao salvar');
+      setMeetingInfoSaved(true);
+      setTimeout(() => setMeetingInfoSaved(false), 3000);
+      fetchList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao salvar informações');
+    } finally {
+      setMeetingInfoSaving(false);
+    }
+  };
 
   const checklistDirty = useMemo(() => {
     if (!data) return false;
@@ -515,6 +554,81 @@ export default function ListaConfirmacaoPage() {
           <Download className="h-4 w-4" />
           Exportar CSV
         </Button>
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-destructive bg-destructive/10 px-4 py-3">
+          <p className="text-sm text-destructive">{error}</p>
+        </div>
+      )}
+
+      <div className="rounded-lg border bg-card overflow-hidden">
+        <div className="px-4 py-3 border-b bg-muted/50">
+          <h2 className="font-medium">Informações do Encontro</h2>
+          <p className="text-xs text-muted-foreground">
+            Edite as informações do encontro. As quebras de linha são preservadas nas observações.
+          </p>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="meeting-title">Título (opcional)</Label>
+              <Input
+                id="meeting-title"
+                value={meetingTitle}
+                onChange={(e) => setMeetingTitle(e.target.value)}
+                placeholder="Ex: Estudo sobre fé"
+                disabled={meetingInfoSaving}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="meeting-location">Local (opcional)</Label>
+              <Input
+                id="meeting-location"
+                value={meetingLocation}
+                onChange={(e) => setMeetingLocation(e.target.value)}
+                placeholder="Ex: Casa do João"
+                disabled={meetingInfoSaving}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="meeting-notes">Observações / Informações (opcional)</Label>
+            <textarea
+              id="meeting-notes"
+              value={meetingNotes}
+              onChange={(e) => setMeetingNotes(e.target.value)}
+              placeholder="Tema do estudo, avisos, oração do encontro...&#10;Você pode usar múltiplas linhas aqui."
+              rows={4}
+              disabled={meetingInfoSaving}
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-y whitespace-pre-wrap"
+            />
+            {meetingNotes && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <p className="text-xs text-muted-foreground mb-1">Preview:</p>
+                <p className="whitespace-pre-wrap">{meetingNotes}</p>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              onClick={() => void saveMeetingInfo()}
+              disabled={meetingInfoSaving}
+              className="shrink-0 w-fit"
+            >
+              {meetingInfoSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Save className="h-4 w-4 mr-2" />
+              )}
+              Salvar informações
+            </Button>
+            {meetingInfoSaved && (
+              <span className="text-sm text-green-700 dark:text-green-400">Salvo com sucesso!</span>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Membros - apenas no modo "prefilled" (pré-preenchida) */}
