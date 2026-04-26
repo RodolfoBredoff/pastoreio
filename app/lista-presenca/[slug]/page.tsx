@@ -234,13 +234,13 @@ export default function ListaPresencaPublicPage() {
                 )}
               </span>
             )}
-            {meeting.notes && meeting.notes.trim() && (
-              <span className="flex items-baseline gap-1.5 w-full justify-center">
-                <span className="text-muted-foreground font-medium shrink-0">Informações:</span>
-                <span className="text-sm text-muted-foreground">{meeting.notes.trim()}</span>
-              </span>
-            )}
           </div>
+          {meeting.notes && meeting.notes.trim() && (
+            <div className="mt-3 text-center px-2">
+              <p className="text-xs text-muted-foreground font-medium mb-1">Informações:</p>
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">{meeting.notes.trim()}</p>
+            </div>
+          )}
         </header>
 
         <div className="rounded-lg border bg-card p-4 flex flex-wrap gap-4 justify-center">
