@@ -503,6 +503,8 @@ export default function ListaConfirmacaoPage() {
         </Button>
       </div>
 
+      {/* Membros - apenas no modo "prefilled" (pré-preenchida) */}
+      {!isOpenMode && (
       <div className="rounded-lg border bg-card overflow-hidden">
         <div className="px-4 py-3 border-b bg-muted/50">
           <h2 className="font-medium">Membros</h2>
@@ -588,6 +590,7 @@ export default function ListaConfirmacaoPage() {
           </table>
         </div>
       </div>
+      )}
 
       <div className="rounded-lg border bg-card overflow-hidden">
         <div className="px-4 py-3 border-b bg-muted/50">
