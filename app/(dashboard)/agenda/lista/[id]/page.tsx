@@ -114,7 +114,8 @@ function checksEqualForRows(
   a: Record<string, InternalCheckPair>,
   b: Record<string, InternalCheckPair>,
   memberIds: string[],
-  guestIds: string[]
+  guestIds: string[],
+  publicEntryIds: string[]
 ): boolean {
   for (const id of memberIds) {
     const k = internalCheckKeyMember(id);
@@ -124,6 +125,12 @@ function checksEqualForRows(
   }
   for (const id of guestIds) {
     const k = internalCheckKeyGuest(id);
+    const pa = a[k] ?? emptyCheckPair();
+    const pb = b[k] ?? emptyCheckPair();
+    if (pa.a !== pb.a || pa.b !== pb.b) return false;
+  }
+  for (const id of publicEntryIds) {
+    const k = internalCheckKeyPublic(id);
     const pa = a[k] ?? emptyCheckPair();
     const pb = b[k] ?? emptyCheckPair();
     if (pa.a !== pb.a || pa.b !== pb.b) return false;
@@ -201,6 +208,12 @@ export default function ListaConfirmacaoPage() {
       }
       for (const g of data.guests) {
         const k = internalCheckKeyGuest(g.id);
+        fullChecks[k] = internalChecks[k] ?? emptyCheckPair();
+      }
+      // Incluir public_entries
+      const publicEntries = data.public_entries ?? [];
+      for (const e of publicEntries) {
+        const k = internalCheckKeyPublic(e.id);
         fullChecks[k] = internalChecks[k] ?? emptyCheckPair();
       }
       const res = await fetch(`/api/meetings/${meetingId}/attendance-list`, {
@@ -321,13 +334,14 @@ export default function ListaConfirmacaoPage() {
     const savedChecks = normalizeInternalChecks(m.attendance_list_internal_checks as Record<string, unknown> ?? {});
     const memberIds = data.members.map((x) => x.id);
     const guestIds = data.guests.map((x) => x.id);
+    const publicEntryIds = (data.public_entries ?? []).map((x) => x.id);
     return (
       internalEnabled !== (m.attendance_list_internal_enabled ?? false) ||
       localLabel !== savedLabel ||
       localPos !== savedPos ||
       localNeg !== savedNeg ||
       localUnmarked !== savedUnmarked ||
-      !checksEqualForRows(internalChecks, savedChecks, memberIds, guestIds)
+      !checksEqualForRows(internalChecks, savedChecks, memberIds, guestIds, publicEntryIds)
     );
   }, [
     data,
