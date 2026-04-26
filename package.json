@@ -21,6 +21,7 @@
     "@radix-ui/react-label": "^2.1.0",
     "@radix-ui/react-select": "^2.1.2",
     "@radix-ui/react-slot": "^1.1.0",
+    "@types/uuid": "^10.0.0",
     "@types/web-push": "^3.6.4",
     "autoprefixer": "^10.4.20",
     "bcryptjs": "^2.4.3",
@@ -41,6 +42,7 @@
     "recharts": "^2.13.3",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "uuid": "^14.0.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {

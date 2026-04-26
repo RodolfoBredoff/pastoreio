@@ -7,7 +7,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus, RotateCcw, Save, Download } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus, RotateCcw, Save, Download, Pencil, Trash2 } from 'lucide-react';
 import {
   internalCheckKeyMember,
   internalCheckKeyGuest,
@@ -175,6 +182,24 @@ export default function ListaConfirmacaoPage() {
   const [meetingNotes, setMeetingNotes] = useState('');
   const [meetingInfoSaving, setMeetingInfoSaving] = useState(false);
   const [meetingInfoSaved, setMeetingInfoSaved] = useState(false);
+  
+  // Public entries management
+  const [publicEntryFirst, setPublicEntryFirst] = useState('');
+  const [publicEntryLast, setPublicEntryLast] = useState('');
+  const [publicEntryEmail, setPublicEntryEmail] = useState('');
+  const [publicEntryPhone, setPublicEntryPhone] = useState('');
+  const [publicEntryUsePhone, setPublicEntryUsePhone] = useState(false);
+  const [publicEntrySaving, setPublicEntrySaving] = useState(false);
+  
+  // Edit dialog
+  const [editingEntry, setEditingEntry] = useState<PublicEntryRow | null>(null);
+  const [editEntryFirst, setEditEntryFirst] = useState('');
+  const [editEntryLast, setEditEntryLast] = useState('');
+  const [editEntryEmail, setEditEntryEmail] = useState('');
+  const [editEntryPhone, setEditEntryPhone] = useState('');
+  const [editEntryUsePhone, setEditEntryUsePhone] = useState(false);
+  const [editEntrySaving, setEditEntrySaving] = useState(false);
+  
   /** Evita sobrescrever rascunho do checklist ao recarregar só membros/confirmações */
   const checklistDraftDirtyRef = useRef(false);
 
@@ -299,6 +324,132 @@ export default function ListaConfirmacaoPage() {
       setError(e instanceof Error ? e.message : 'Erro ao adicionar visitante');
     } finally {
       setLeaderGuestSaving(false);
+    }
+  };
+
+  const handleAddPublicEntry = async () => {
+    if (!meetingId) return;
+    const fn = publicEntryFirst.trim();
+    const ln = publicEntryLast.trim();
+    const em = publicEntryEmail.trim();
+    const ph = publicEntryPhone.replace(/\D/g, '');
+    
+    if (!fn || !ln) {
+      setError('Informe nome e sobrenome.');
+      return;
+    }
+    
+    if (publicEntryUsePhone) {
+      if (ph.length < 10) {
+        setError('Informe um telefone válido (mín. 10 dígitos com DDD).');
+        return;
+      }
+    } else {
+      if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+        setError('Informe um e-mail válido.');
+        return;
+      }
+    }
+    
+    setPublicEntrySaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/attendance-list/public-entries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name: fn,
+          last_name: ln,
+          ...(publicEntryUsePhone ? { phone: ph } : { email: em }),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao adicionar');
+      setPublicEntryFirst('');
+      setPublicEntryLast('');
+      setPublicEntryEmail('');
+      setPublicEntryPhone('');
+      fetchList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao adicionar');
+    } finally {
+      setPublicEntrySaving(false);
+    }
+  };
+
+  const handleEditPublicEntry = (entry: PublicEntryRow) => {
+    setEditingEntry(entry);
+    setEditEntryFirst(entry.full_name.split(' ')[0] || '');
+    setEditEntryLast(entry.full_name.split(' ').slice(1).join(' ') || '');
+    setEditEntryEmail(entry.email || '');
+    setEditEntryPhone(entry.phone || '');
+    setEditEntryUsePhone(!!entry.phone && !entry.email);
+  };
+
+  const handleSaveEditEntry = async () => {
+    if (!meetingId || !editingEntry) return;
+    const fn = editEntryFirst.trim();
+    const ln = editEntryLast.trim();
+    const em = editEntryEmail.trim();
+    const ph = editEntryPhone.replace(/\D/g, '');
+    
+    if (!fn || !ln) {
+      setError('Informe nome e sobrenome.');
+      return;
+    }
+    
+    if (editEntryUsePhone) {
+      if (ph.length < 10) {
+        setError('Informe um telefone válido (mín. 10 dígitos com DDD).');
+        return;
+      }
+    } else {
+      if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+        setError('Informe um e-mail válido.');
+        return;
+      }
+    }
+    
+    setEditEntrySaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/attendance-list/public-entries/${editingEntry.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name: fn,
+          last_name: ln,
+          ...(editEntryUsePhone ? { phone: ph, email: null } : { email: em, phone: null }),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao editar');
+      setEditingEntry(null);
+      fetchList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao editar');
+    } finally {
+      setEditEntrySaving(false);
+    }
+  };
+
+  const handleDeletePublicEntry = async (entryId: string) => {
+    if (!meetingId) return;
+    if (!confirm('Remover este registro? Esta ação não pode ser desfeita.')) return;
+    
+    setActionLoading(`entry-${entryId}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/attendance-list/public-entries/${entryId}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao remover');
+      fetchList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao remover');
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -809,9 +960,87 @@ export default function ListaConfirmacaoPage() {
         <div className="px-4 py-3 border-b bg-muted/50">
           <h2 className="font-medium">Lista vazia (autocadastro)</h2>
           <p className="text-xs text-muted-foreground">
-            Registros feitos no modo “lista vazia”. Esses dados não aparecem publicamente; só aqui.
+            Registros feitos no modo "lista vazia". Esses dados não aparecem publicamente; só aqui. 
+            Você pode adicionar, editar ou remover registros manualmente.
           </p>
         </div>
+        
+        <div className="p-4 border-b space-y-3 bg-muted/20">
+          <p className="text-sm font-medium">Adicionar registro manualmente</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="public-entry-first">Nome</Label>
+              <Input
+                id="public-entry-first"
+                value={publicEntryFirst}
+                onChange={(e) => setPublicEntryFirst(e.target.value)}
+                placeholder="Nome"
+                disabled={publicEntrySaving}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="public-entry-last">Sobrenome</Label>
+              <Input
+                id="public-entry-last"
+                value={publicEntryLast}
+                onChange={(e) => setPublicEntryLast(e.target.value)}
+                placeholder="Sobrenome"
+                disabled={publicEntrySaving}
+              />
+            </div>
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="public-entry-use-phone"
+              checked={publicEntryUsePhone}
+              onCheckedChange={(c) => setPublicEntryUsePhone(c === true)}
+              disabled={publicEntrySaving}
+            />
+            <Label htmlFor="public-entry-use-phone" className="text-sm font-normal cursor-pointer">
+              Usar telefone em vez de e-mail
+            </Label>
+          </div>
+          
+          {publicEntryUsePhone ? (
+            <div className="space-y-1">
+              <Label htmlFor="public-entry-phone">Telefone (com DDD)</Label>
+              <Input
+                id="public-entry-phone"
+                type="tel"
+                placeholder="(11) 99999-9999"
+                value={publicEntryPhone}
+                onChange={(e) => setPublicEntryPhone(e.target.value)}
+                disabled={publicEntrySaving}
+                onKeyDown={(e) => e.key === 'Enter' && void handleAddPublicEntry()}
+              />
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <Label htmlFor="public-entry-email">E-mail</Label>
+              <Input
+                id="public-entry-email"
+                type="email"
+                placeholder="exemplo@email.com"
+                value={publicEntryEmail}
+                onChange={(e) => setPublicEntryEmail(e.target.value)}
+                disabled={publicEntrySaving}
+                onKeyDown={(e) => e.key === 'Enter' && void handleAddPublicEntry()}
+              />
+            </div>
+          )}
+          
+          <Button
+            type="button"
+            onClick={() => void handleAddPublicEntry()}
+            disabled={publicEntrySaving}
+            className="shrink-0"
+          >
+            {publicEntrySaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UserPlus className="h-4 w-4 mr-2" />}
+            Adicionar
+          </Button>
+        </div>
+        
         <div className="overflow-x-auto">
           {publicEntries.length === 0 ? (
             <p className="px-4 py-6 text-sm text-muted-foreground">Nenhum registro ainda.</p>
@@ -822,23 +1051,139 @@ export default function ListaConfirmacaoPage() {
                   <th className="text-left p-3 font-medium">Nome</th>
                   <th className="text-left p-3 font-medium">E-mail / Telefone</th>
                   <th className="text-left p-3 font-medium">Quando</th>
+                  <th className="text-left p-3 font-medium">Ações</th>
                 </tr>
               </thead>
               <tbody>
-                {publicEntries.map((e) => (
-                  <tr key={e.id} className="border-b last:border-0">
-                    <td className="p-3">{e.full_name}</td>
-                    <td className="p-3 font-mono text-xs">{publicEntryContactDisplay(e)}</td>
-                    <td className="p-3 text-xs text-muted-foreground">
-                      {new Date(e.created_at).toLocaleString('pt-BR')}
-                    </td>
-                  </tr>
-                ))}
+                {publicEntries.map((e) => {
+                  const entryBusy = actionLoading === `entry-${e.id}`;
+                  return (
+                    <tr key={e.id} className="border-b last:border-0">
+                      <td className="p-3">{e.full_name}</td>
+                      <td className="p-3 font-mono text-xs">{publicEntryContactDisplay(e)}</td>
+                      <td className="p-3 text-xs text-muted-foreground">
+                        {new Date(e.created_at).toLocaleString('pt-BR')}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            disabled={entryBusy}
+                            onClick={() => handleEditPublicEntry(e)}
+                            title="Editar registro"
+                          >
+                            <Pencil className="h-3 w-3 mr-1" />
+                            Editar
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                            disabled={entryBusy}
+                            onClick={() => handleDeletePublicEntry(e.id)}
+                            title="Remover registro"
+                          >
+                            {entryBusy ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <>
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                Remover
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
       </div>
+
+      <Dialog open={!!editingEntry} onOpenChange={(open) => !open && setEditingEntry(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar registro</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="edit-entry-first">Nome</Label>
+                <Input
+                  id="edit-entry-first"
+                  value={editEntryFirst}
+                  onChange={(e) => setEditEntryFirst(e.target.value)}
+                  placeholder="Nome"
+                  disabled={editEntrySaving}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-entry-last">Sobrenome</Label>
+                <Input
+                  id="edit-entry-last"
+                  value={editEntryLast}
+                  onChange={(e) => setEditEntryLast(e.target.value)}
+                  placeholder="Sobrenome"
+                  disabled={editEntrySaving}
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="edit-entry-use-phone"
+                checked={editEntryUsePhone}
+                onCheckedChange={(c) => setEditEntryUsePhone(c === true)}
+                disabled={editEntrySaving}
+              />
+              <Label htmlFor="edit-entry-use-phone" className="text-sm font-normal cursor-pointer">
+                Usar telefone em vez de e-mail
+              </Label>
+            </div>
+            
+            {editEntryUsePhone ? (
+              <div className="space-y-2">
+                <Label htmlFor="edit-entry-phone">Telefone (com DDD)</Label>
+                <Input
+                  id="edit-entry-phone"
+                  type="tel"
+                  placeholder="(11) 99999-9999"
+                  value={editEntryPhone}
+                  onChange={(e) => setEditEntryPhone(e.target.value)}
+                  disabled={editEntrySaving}
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="edit-entry-email">E-mail</Label>
+                <Input
+                  id="edit-entry-email"
+                  type="email"
+                  placeholder="exemplo@email.com"
+                  value={editEntryEmail}
+                  onChange={(e) => setEditEntryEmail(e.target.value)}
+                  disabled={editEntrySaving}
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingEntry(null)} disabled={editEntrySaving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void handleSaveEditEntry()} disabled={editEntrySaving}>
+              {editEntrySaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       <div className="rounded-lg border bg-card overflow-hidden">
         <div className="px-4 py-3 border-b bg-muted/50 space-y-1">
