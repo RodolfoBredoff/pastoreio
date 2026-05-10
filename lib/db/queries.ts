@@ -124,7 +124,7 @@ export async function getMembersByLeaderGroup(): Promise<Member[]> {
   }
 
   return queryMany<Member>(
-    `SELECT m.id, m.group_id, m.full_name, m.phone, m.birth_date, m.member_type, m.is_active, m.created_at, m.updated_at, m.discipulador_id,
+    `SELECT m.id, m.group_id, m.full_name, m.phone, m.birth_date, m.member_type, m.is_active, m.created_at, m.updated_at, m.discipulador_id, m.integration_stage,
             d.full_name AS discipulador_full_name,
             (SELECT COALESCE(array_agg(m2.full_name ORDER BY m2.full_name), ARRAY[]::text[]) FROM members m2 WHERE m2.discipulador_id = m.id AND m2.is_active = TRUE) AS discipulador_de
      FROM members m
@@ -156,7 +156,7 @@ export async function getMemberById(memberId: string): Promise<Member | null> {
   }
 
   return queryOne<Member>(
-    `SELECT m.id, m.group_id, m.full_name, m.phone, m.birth_date, m.member_type, m.is_active, m.created_at, m.updated_at, m.discipulador_id,
+    `SELECT m.id, m.group_id, m.full_name, m.phone, m.birth_date, m.member_type, m.is_active, m.created_at, m.updated_at, m.discipulador_id, m.integration_stage,
             d.full_name AS discipulador_full_name,
             (SELECT COALESCE(array_agg(m2.full_name ORDER BY m2.full_name), ARRAY[]::text[]) FROM members m2 WHERE m2.discipulador_id = m.id AND m2.is_active = TRUE) AS discipulador_de
      FROM members m
