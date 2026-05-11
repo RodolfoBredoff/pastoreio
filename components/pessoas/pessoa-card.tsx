@@ -30,6 +30,7 @@ interface Member {
   birth_date: string | null;
   member_type: 'participant' | 'visitor';
   integration_stage?: string | null;
+  marked_not_returned?: boolean;
   /** Nomes dos membros que este discipula (label "Discipulador de X, Y"). */
   discipulador_de?: string[] | null;
 }
