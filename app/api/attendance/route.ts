@@ -10,6 +10,7 @@ import { syncEngagementToSheet } from '@/lib/integrations/google-sheets';
  * número de presenças registradas após salvar chamada.
  */
 async function updateVisitorIntegrationStages(groupId: string): Promise<void> {
+  // 1. Atualizar estágios baseado em presenças
   await query(
     `UPDATE members
      SET integration_stage = CASE
@@ -27,6 +28,60 @@ async function updateVisitorIntegrationStages(groupId: string): Promise<void> {
      END
      WHERE group_id = $1 AND member_type = 'visitor' AND is_active = TRUE
        AND integration_stage != 'membro'`,
+    [groupId]
+  );
+
+  // 2. Marcar automaticamente como "não retornou" após 3 encontros consecutivos sem presença
+  // Isso marca visitantes em novo_visitante que tiveram 3 encontros recentes sem aparecer
+  await query(
+    `UPDATE members m
+     SET marked_not_returned = TRUE
+     WHERE m.group_id = $1 
+       AND m.member_type = 'visitor' 
+       AND m.is_active = TRUE
+       AND m.integration_stage = 'novo_visitante'
+       AND m.marked_not_returned = FALSE
+       AND (
+         SELECT COUNT(*) 
+         FROM meetings mt
+         WHERE mt.group_id = $1 
+           AND mt.is_cancelled = FALSE
+           AND mt.meeting_date >= (
+             SELECT MIN(mt2.meeting_date)
+             FROM meetings mt2
+             WHERE mt2.group_id = $1 AND mt2.is_cancelled = FALSE
+             ORDER BY mt2.meeting_date DESC
+             LIMIT 3
+           )
+       ) >= 3
+       AND (
+         SELECT COUNT(*) 
+         FROM attendance a
+         JOIN meetings mt ON mt.id = a.meeting_id
+         WHERE a.member_id = m.id 
+           AND a.is_present = TRUE
+           AND mt.group_id = $1
+           AND mt.is_cancelled = FALSE
+           AND mt.meeting_date >= (
+             SELECT MIN(mt2.meeting_date)
+             FROM meetings mt2
+             WHERE mt2.group_id = $1 AND mt2.is_cancelled = FALSE
+             ORDER BY mt2.meeting_date DESC
+             LIMIT 3
+           )
+       ) = 0`,
+    [groupId]
+  );
+
+  // 3. Desmarcar "não retornou" se o visitante voltou a aparecer
+  await query(
+    `UPDATE members m
+     SET marked_not_returned = FALSE
+     WHERE m.group_id = $1 
+       AND m.member_type = 'visitor' 
+       AND m.is_active = TRUE
+       AND m.marked_not_returned = TRUE
+       AND m.integration_stage != 'novo_visitante'`,
     [groupId]
   );
 }

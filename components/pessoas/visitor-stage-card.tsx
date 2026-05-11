@@ -6,20 +6,21 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { UserCheck, ArrowRight, Loader2 } from 'lucide-react';
-import { INTEGRATION_STAGE_LABELS, INTEGRATION_STAGE_COLORS } from '@/lib/constants';
+import { UserCheck, ArrowRight, Loader2, XCircle } from 'lucide-react';
+import { INTEGRATION_STAGE_LABELS, INTEGRATION_STAGE_COLORS, VISITOR_STATUS_COLORS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 
 interface VisitorStageCardProps {
   memberId: string;
   memberName: string;
   currentStage: string;
+  markedNotReturned?: boolean;
 }
 
 const STAGE_ORDER = ['novo_visitante', 'retornou', 'integrando', 'membro'] as const;
 type Stage = typeof STAGE_ORDER[number];
 
-export function VisitorStageCard({ memberId, memberName, currentStage }: VisitorStageCardProps) {
+export function VisitorStageCard({ memberId, memberName, currentStage, markedNotReturned = false }: VisitorStageCardProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +32,7 @@ export function VisitorStageCard({ memberId, memberName, currentStage }: Visitor
     : null;
 
   const isMember = currentStage === 'membro';
+  const isNovoVisitante = currentStage === 'novo_visitante';
 
   async function promote(targetStage: Stage) {
     setLoading(true);
@@ -44,6 +46,27 @@ export function VisitorStageCard({ memberId, memberName, currentStage }: Visitor
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error ?? 'Erro ao atualizar estágio');
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro inesperado');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function toggleNotReturned() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/members/${memberId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marked_not_returned: !markedNotReturned }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? 'Erro ao atualizar marcação');
       }
       router.refresh();
     } catch (err) {
@@ -90,6 +113,37 @@ export function VisitorStageCard({ memberId, memberName, currentStage }: Visitor
 
         {error && (
           <p className="text-sm text-destructive">{error}</p>
+        )}
+
+        {isNovoVisitante && (
+          <div className="space-y-2 border-t pt-3">
+            <div className="flex flex-col sm:flex-row gap-2 items-start">
+              <Button
+                size="sm"
+                variant={markedNotReturned ? "destructive" : "outline"}
+                disabled={loading}
+                className="gap-2"
+                onClick={() => toggleNotReturned()}
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <XCircle className="h-4 w-4" />
+                )}
+                {markedNotReturned ? "Desmarcar Não Retornou" : "Marcar como Não Retornou"}
+              </Button>
+              {markedNotReturned && (
+                <Badge className={cn("text-xs", VISITOR_STATUS_COLORS.not_returned)}>
+                  Não retornou após 3 encontros
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {markedNotReturned 
+                ? "Este visitante foi marcado como não retornou. Desmarque se ele voltar a aparecer."
+                : "Marque se o visitante não compareceu aos últimos encontros e não há expectativa de retorno."}
+            </p>
+          </div>
         )}
 
         {isMember ? (

@@ -43,6 +43,10 @@ export async function PUT(
       updateData.integration_stage = integration_stage;
     }
 
+    if (data.marked_not_returned !== undefined) {
+      updateData.marked_not_returned = data.marked_not_returned;
+    }
+
     if (discipulador_id !== undefined) {
       if (!canManageDiscipleship(leader.role)) {
         return NextResponse.json(

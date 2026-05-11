@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { calculateAge, formatPhone, isTodayBirthday } from '@/lib/utils';
-import { MEMBER_TYPE_LABELS, INTEGRATION_STAGE_LABELS, INTEGRATION_STAGE_COLORS } from '@/lib/constants';
+import { MEMBER_TYPE_LABELS, INTEGRATION_STAGE_LABELS, INTEGRATION_STAGE_COLORS, VISITOR_STATUS_COLORS, VISITOR_STATUS_LABELS } from '@/lib/constants';
 import { Pencil, Cake, AlertTriangle, CalendarCheck, Tags } from 'lucide-react';
 import { DeleteMemberButton } from './delete-member-button';
 import { cn } from '@/lib/utils';
@@ -123,6 +123,16 @@ export function PessoaCard({
                   )}
                 >
                   {INTEGRATION_STAGE_LABELS[member.integration_stage] ?? member.integration_stage}
+                </span>
+              )}
+              {member.member_type === 'visitor' && member.marked_not_returned && (
+                <span
+                  className={cn(
+                    'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border',
+                    VISITOR_STATUS_COLORS.not_returned
+                  )}
+                >
+                  {VISITOR_STATUS_LABELS.not_returned}
                 </span>
               )}
               {(member.discipulador_de?.length ?? 0) > 0 && (

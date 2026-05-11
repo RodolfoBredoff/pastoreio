@@ -41,6 +41,14 @@ export const INTEGRATION_STAGE_COLORS: Record<string, string> = {
   membro: 'bg-green-100 text-green-700 border-green-200',
 };
 
+export const VISITOR_STATUS_LABELS = {
+  not_returned: 'Não Retornou',
+} as const;
+
+export const VISITOR_STATUS_COLORS = {
+  not_returned: 'bg-red-100 text-red-700 border-red-200',
+} as const;
+
 export const DAYS_OF_WEEK = [
   { value: 0, label: 'Domingo' },
   { value: 1, label: 'Segunda-feira' },

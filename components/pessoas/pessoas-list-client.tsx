@@ -6,6 +6,7 @@ import { BroadcastDialogClient } from '@/components/pessoas/broadcast-dialog-cli
 import { PessoasEngagementPanel } from '@/components/pessoas/pessoas-engagement-panel';
 import { PessoasTagChartsPanel } from '@/components/pessoas/pessoas-tag-charts-panel';
 import { BulkMemberTagsDialog } from '@/components/pessoas/bulk-member-tags-dialog';
+import { IntegrationStagesPanel } from '@/components/pessoas/integration-stages-panel';
 import { LinkButton } from '@/components/ui/link-button';
 import { Button } from '@/components/ui/button';
 import { UserPlus, Users, Download } from 'lucide-react';
@@ -32,7 +33,7 @@ function exportMembersCSV(members: Member[]) {
   URL.revokeObjectURL(url);
 }
 
-type ListMode = 'all' | 'absent' | 'engagement';
+type ListMode = 'all' | 'absent' | 'engagement' | 'stages';
 type MemberTypeFilter = 'total' | 'participants' | 'visitors';
 type AbsentMetricMode = 'most_absent' | 'consecutive' | 'month';
 type AbsentWindow = 'all' | 'last5';
@@ -200,6 +201,13 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
             >
               Por engajamento
             </Button>
+            <Button
+              variant={listMode === 'stages' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setListMode('stages')}
+            >
+              Estágios de Integração
+            </Button>
           </div>
           {listMode !== 'engagement' && (
             <div className="flex flex-wrap gap-2 items-center">
@@ -284,6 +292,9 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
           )}
           {listMode === 'engagement' && (
             <PessoasEngagementPanel members={members} onFilteredMembersChange={setEngagementFiltered} />
+          )}
+          {listMode === 'stages' && (
+            <IntegrationStagesPanel />
           )}
           {loadingAbsent && listMode === 'absent' && (
             <p className="text-xs text-muted-foreground">Carregando…</p>

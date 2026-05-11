@@ -76,6 +76,7 @@ export default async function EditarPessoaPage({
           memberId={id}
           memberName={member.full_name}
           currentStage={member.integration_stage ?? 'novo_visitante'}
+          markedNotReturned={member.marked_not_returned}
         />
       )}
 
