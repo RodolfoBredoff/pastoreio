@@ -498,6 +498,8 @@ export async function saveAttendance(
     }
 
     // Inserir visitantes não cadastrados: criar ou reutilizar guest e vincular ao encontro
+    const guestsToConvert: Array<{ id: string; full_name: string; phone: string | null }> = [];
+    
     for (const g of guests) {
       const name = (g.full_name || '').trim();
       if (!name) continue;
@@ -510,6 +512,20 @@ export async function saveAttendance(
       );
       if (existing.rows.length > 0) {
         guestId = existing.rows[0].id;
+        
+        // Verificar quantas vezes este guest já apareceu
+        const appearancesResult = await client.query<{ count: string }>(
+          `SELECT COUNT(DISTINCT meeting_id)::text as count 
+           FROM attendance_guests 
+           WHERE guest_id = $1`,
+          [guestId]
+        );
+        const appearances = parseInt(appearancesResult.rows[0]?.count || '0', 10);
+        
+        // Se já apareceu 1 vez antes (agora é a segunda), marcar para conversão
+        if (appearances >= 1) {
+          guestsToConvert.push({ id: guestId, full_name: name, phone });
+        }
       } else {
         const insert = await client.query(
           `INSERT INTO guest_visitors (group_id, full_name, phone) VALUES ($1, $2, $3) RETURNING id`,
@@ -521,6 +537,38 @@ export async function saveAttendance(
         `INSERT INTO attendance_guests (meeting_id, guest_id) VALUES ($1, $2) ON CONFLICT (meeting_id, guest_id) DO NOTHING`,
         [meetingId, guestId]
       );
+    }
+
+    // Converter automaticamente guests recorrentes em membros com estágio "retornou"
+    for (const guest of guestsToConvert) {
+      // Verificar se já existe um membro com o mesmo nome
+      const existingMember = await client.query(
+        `SELECT id FROM members 
+         WHERE group_id = $1 
+         AND LOWER(TRIM(full_name)) = LOWER($2) 
+         AND is_active = TRUE
+         LIMIT 1`,
+        [groupId, guest.full_name]
+      );
+      
+      // Só converter se ainda não existe membro cadastrado
+      if (existingMember.rows.length === 0) {
+        await client.query(
+          `INSERT INTO members (group_id, full_name, phone, birth_date, member_type, integration_stage)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [groupId, guest.full_name, guest.phone || '', null, 'visitor', 'retornou']
+        );
+        
+        // Remover o guest_visitor já que foi convertido
+        await client.query(
+          `DELETE FROM attendance_guests WHERE guest_id = $1`,
+          [guest.id]
+        );
+        await client.query(
+          `DELETE FROM guest_visitors WHERE id = $1`,
+          [guest.id]
+        );
+      }
     }
   });
 }

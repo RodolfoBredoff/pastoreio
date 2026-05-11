@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useOfflineSync } from '@/hooks/use-offline-sync';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Loader2, Save, WifiOff, UserPlus, UserCheck } from 'lucide-react';
+import { Loader2, Save, WifiOff, UserPlus, UserCheck, Clock } from 'lucide-react';
 
 interface Member {
   id: string;
@@ -22,6 +22,14 @@ export interface GuestItem {
   id?: string;
   full_name: string;
   phone?: string | null;
+}
+
+interface GuestSuggestion {
+  id: string;
+  full_name: string;
+  phone: string | null;
+  appearances: string;
+  last_appearance: string;
 }
 
 interface PresenceChecklistProps {
@@ -53,10 +61,55 @@ export function PresenceChecklist({
   const [guestPhone, setGuestPhone] = useState('');
   const [saving, setSaving] = useState(false);
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<GuestSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   useEffect(() => {
     setGuests(initialGuests);
   }, [initialGuests]);
+
+  const fetchSuggestions = useCallback(async (query: string) => {
+    if (query.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    setLoadingSuggestions(true);
+    try {
+      const res = await fetch(`/api/guests/suggestions?q=${encodeURIComponent(query)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSuggestions(data.suggestions || []);
+        setShowSuggestions(true);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar sugestões:', error);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (guestName) {
+        void fetchSuggestions(guestName);
+      } else {
+        setSuggestions([]);
+        setShowSuggestions(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [guestName, fetchSuggestions]);
+
+  const selectSuggestion = (suggestion: GuestSuggestion) => {
+    setGuestName(suggestion.full_name);
+    setGuestPhone(suggestion.phone || '');
+    setShowSuggestions(false);
+    setSuggestions([]);
+  };
 
   const togglePresence = (memberId: string) => {
     setPresenceMap((prev) => ({ ...prev, [memberId]: !prev[memberId] }));
@@ -179,22 +232,56 @@ export function PresenceChecklist({
           <UserPlus className="h-4 w-4" />
           Visitante não cadastrado
         </p>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Input
-            placeholder="Nome"
-            value={guestName}
-            onChange={(e) => setGuestName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addGuest()}
-          />
-          <Input
-            placeholder="Telefone (opcional)"
-            value={guestPhone}
-            onChange={(e) => setGuestPhone(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addGuest()}
-          />
-          <Button type="button" variant="secondary" onClick={addGuest} disabled={!guestName.trim()}>
-            Adicionar
-          </Button>
+        <div className="relative">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Input
+                placeholder="Nome"
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addGuest()}
+                onFocus={() => guestName.length >= 2 && setShowSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              />
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto">
+                  {suggestions.map((suggestion) => (
+                    <button
+                      key={suggestion.id}
+                      type="button"
+                      className="w-full px-3 py-2 text-left hover:bg-accent transition-colors border-b last:border-0"
+                      onClick={() => selectSuggestion(suggestion)}
+                    >
+                      <p className="font-medium text-sm">{suggestion.full_name}</p>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                        {suggestion.phone && <span>{suggestion.phone}</span>}
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {parseInt(suggestion.appearances)} aparições
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <Input
+              placeholder="Telefone (opcional)"
+              value={guestPhone}
+              onChange={(e) => setGuestPhone(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addGuest()}
+              className="flex-1"
+            />
+            <Button type="button" variant="secondary" onClick={addGuest} disabled={!guestName.trim()}>
+              Adicionar
+            </Button>
+          </div>
+          {loadingSuggestions && guestName.length >= 2 && (
+            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Buscando visitantes anteriores...
+            </p>
+          )}
         </div>
         {guests.length > 0 && (
           <ul className="space-y-2 mt-2">

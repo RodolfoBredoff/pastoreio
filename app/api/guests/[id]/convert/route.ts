@@ -30,9 +30,21 @@ export async function POST(
       return NextResponse.json({ error: 'Visitante de outro grupo' }, { status: 403 });
     }
 
+    // Verificar quantas vezes o guest apareceu
+    const appearancesResult = await query<{ count: string }>(
+      `SELECT COUNT(DISTINCT meeting_id)::text as count 
+       FROM attendance_guests 
+       WHERE guest_id = $1`,
+      [guestId]
+    );
+    const appearances = parseInt(appearancesResult.rows[0]?.count || '0', 10);
+    
+    // Se apareceu 2+ vezes, marcar como "retornou", senão "novo_visitante"
+    const integrationStage = appearances >= 2 ? 'retornou' : 'novo_visitante';
+
     const result = await query(
-      `INSERT INTO members (group_id, full_name, phone, birth_date, member_type)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO members (group_id, full_name, phone, birth_date, member_type, integration_stage)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [
         guest.group_id,
@@ -40,6 +52,7 @@ export async function POST(
         guest.phone ?? '',
         null,
         'visitor',
+        integrationStage,
       ]
     );
 
