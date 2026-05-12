@@ -33,7 +33,7 @@ function exportMembersCSV(members: Member[]) {
   URL.revokeObjectURL(url);
 }
 
-type ListMode = 'all' | 'absent' | 'engagement' | 'stages';
+type ListMode = 'all' | 'absent' | 'engagement' | 'stages' | 'not_participated_year';
 type MemberTypeFilter = 'total' | 'participants' | 'visitors';
 type AbsentMetricMode = 'most_absent' | 'consecutive' | 'month';
 type AbsentWindow = 'all' | 'last5';
@@ -103,7 +103,19 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
   }, [listMode]);
 
   useEffect(() => {
-    if (listMode !== 'absent') return;
+    if (listMode !== 'absent' && listMode !== 'not_participated_year') return;
+    if (listMode === 'not_participated_year') {
+      setLoadingAbsent(true);
+      const currentYear = new Date().getFullYear();
+      fetch(`/api/integration-stages/members?stage=nao_participou_ano`)
+        .then((r) => (r.ok ? r.json() : { members: [] }))
+        .then((data: { members: AbsentRow[] }) => {
+          setAbsentRows(data.members || []);
+        })
+        .catch(() => setAbsentRows([]))
+        .finally(() => setLoadingAbsent(false));
+      return;
+    }
     setLoadingAbsent(true);
     const params = new URLSearchParams({
       presence: 'absent',
@@ -208,8 +220,15 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
             >
               Estágios de Integração
             </Button>
+            <Button
+              variant={listMode === 'not_participated_year' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setListMode('not_participated_year')}
+            >
+              Não Participou Este Ano
+            </Button>
           </div>
-          {listMode !== 'engagement' && (
+          {listMode !== 'engagement' && listMode !== 'stages' && listMode !== 'not_participated_year' && (
             <div className="flex flex-wrap gap-2 items-center">
               <span className="text-xs text-muted-foreground">Tipo:</span>
               <Button

@@ -56,6 +56,31 @@ export async function GET(request: Request) {
       return NextResponse.json({ members, stage: 'nao_retornou' });
     }
 
+    // Se o stage for "nao_participou_ano", buscar todos sem presença no ano vigente
+    if (stage === 'nao_participou_ano') {
+      const currentYear = new Date().getFullYear();
+      const members = await queryMany<MemberByStage>(
+        `SELECT m.id, m.full_name, m.phone, m.integration_stage, m.marked_not_returned, m.created_at::text
+         FROM members m
+         WHERE m.group_id = $1
+           AND m.is_active = TRUE
+           AND NOT EXISTS (
+             SELECT 1
+             FROM attendance a
+             JOIN meetings mt ON mt.id = a.meeting_id
+             WHERE a.member_id = m.id
+               AND a.is_present = TRUE
+               AND mt.group_id = $1
+               AND mt.is_cancelled = FALSE
+               AND EXTRACT(YEAR FROM mt.meeting_date) = $2
+           )
+         ORDER BY m.full_name ASC`,
+        [leader.group_id, currentYear]
+      );
+
+      return NextResponse.json({ members, stage: 'nao_participou_ano' });
+    }
+
     // Validar estágio
     const validStages = ['novo_visitante', 'retornou', 'integrando', 'membro'];
     if (!validStages.includes(stage)) {

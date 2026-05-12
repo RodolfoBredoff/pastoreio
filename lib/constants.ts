@@ -43,10 +43,12 @@ export const INTEGRATION_STAGE_COLORS: Record<string, string> = {
 
 export const VISITOR_STATUS_LABELS = {
   not_returned: 'Não Retornou',
+  not_participated_year: 'Não Participou Este Ano',
 } as const;
 
 export const VISITOR_STATUS_COLORS = {
   not_returned: 'bg-red-100 text-red-700 border-red-200',
+  not_participated_year: 'bg-orange-100 text-orange-700 border-orange-200',
 } as const;
 
 export const DAYS_OF_WEEK = [

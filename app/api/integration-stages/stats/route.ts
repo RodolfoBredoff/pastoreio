@@ -15,18 +15,20 @@ interface FunnelMetrics {
   integrando: number;
   membro: number;
   nao_retornou: number;
+  nao_participou_ano: number;
   taxa_retorno: number;
   taxa_integracao: number;
   taxa_conversao_membro: number;
 }
 
-function calculateFunnelMetrics(stats: StageStatsRow[]): FunnelMetrics {
+function calculateFunnelMetrics(stats: StageStatsRow[], notParticipatedThisYear: number): FunnelMetrics {
   const counts = {
     novo_visitante: 0,
     retornou: 0,
     integrando: 0,
     membro: 0,
     nao_retornou: 0,
+    nao_participou_ano: notParticipatedThisYear,
   };
 
   stats.forEach((row) => {
@@ -102,8 +104,30 @@ export async function GET(request: Request) {
       [leader.group_id]
     );
 
+    // Buscar membros que não participaram no ano vigente
+    const currentYear = new Date().getFullYear();
+    const notParticipatedResult = await queryMany<{ count: string }>(
+      `SELECT COUNT(DISTINCT m.id)::text as count
+       FROM members m
+       WHERE m.group_id = $1
+         AND m.is_active = TRUE
+         AND NOT EXISTS (
+           SELECT 1
+           FROM attendance a
+           JOIN meetings mt ON mt.id = a.meeting_id
+           WHERE a.member_id = m.id
+             AND a.is_present = TRUE
+             AND mt.group_id = $1
+             AND mt.is_cancelled = FALSE
+             AND EXTRACT(YEAR FROM mt.meeting_date) = $2
+         )`,
+      [leader.group_id, currentYear]
+    );
+
+    const notParticipatedThisYear = parseInt(notParticipatedResult[0]?.count || '0', 10);
+
     // Calcular métricas do funil
-    const funnel = calculateFunnelMetrics(stageStats);
+    const funnel = calculateFunnelMetrics(stageStats, notParticipatedThisYear);
 
     // Converter para números para o response
     const stageStatsFormatted = stageStats.map((row) => ({

@@ -36,6 +36,7 @@ interface FunnelMetrics {
   integrando: number;
   membro: number;
   nao_retornou: number;
+  nao_participou_ano: number;
   taxa_retorno: number;
   taxa_integracao: number;
   taxa_conversao_membro: number;
@@ -56,6 +57,7 @@ const STAGE_COLORS: Record<string, string> = {
   integrando: 'hsl(38, 92%, 50%)',
   membro: 'hsl(142, 71%, 45%)',
   nao_retornou: 'hsl(0, 84%, 60%)',
+  nao_participou_ano: 'hsl(25, 95%, 53%)',
 };
 
 interface MemberByStage {
@@ -163,6 +165,11 @@ export function IntegrationStagesPanel() {
       value: stats.funnel.membro,
       stage: 'membro',
     },
+    {
+      name: VISITOR_STATUS_LABELS.not_participated_year,
+      value: stats.funnel.nao_participou_ano,
+      stage: 'nao_participou_ano',
+    },
   ];
 
   // Preparar dados do gráfico de barras vertical (incluindo não retornou)
@@ -178,6 +185,15 @@ export function IntegrationStagesPanel() {
             name: VISITOR_STATUS_LABELS.not_returned,
             value: stats.funnel.nao_retornou,
             stage: 'nao_retornou',
+          },
+        ]
+      : []),
+    ...(stats.funnel.nao_participou_ano > 0
+      ? [
+          {
+            name: VISITOR_STATUS_LABELS.not_participated_year,
+            value: stats.funnel.nao_participou_ano,
+            stage: 'nao_participou_ano',
           },
         ]
       : []),
@@ -293,6 +309,37 @@ export function IntegrationStagesPanel() {
         </Card>
       </div>
 
+      {/* Card de alerta para membros sem participação no ano */}
+      {stats.funnel.nao_participou_ano > 0 && (
+        <Card className="border-orange-200 bg-orange-50">
+          <CardContent className="pt-4">
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-orange-100 p-2">
+                <Users className="h-5 w-5 text-orange-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-orange-900">
+                  {stats.funnel.nao_participou_ano} pessoa{stats.funnel.nao_participou_ano !== 1 ? 's' : ''} sem participação em {new Date().getFullYear()}
+                </h3>
+                <p className="text-sm text-orange-700 mt-1">
+                  {stats.funnel.nao_participou_ano === 1 
+                    ? 'Esta pessoa não tem nenhum registro de presença neste ano.' 
+                    : 'Estas pessoas não têm nenhum registro de presença neste ano.'}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 border-orange-300 text-orange-700 hover:bg-orange-100"
+                  onClick={() => loadMembersByStage('nao_participou_ano')}
+                >
+                  Ver lista completa
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Gráfico de Funil */}
       <Card>
         <CardHeader>
@@ -398,6 +445,8 @@ export function IntegrationStagesPanel() {
               <span>
                 {selectedStage === 'nao_retornou'
                   ? VISITOR_STATUS_LABELS.not_returned
+                  : selectedStage === 'nao_participou_ano'
+                  ? VISITOR_STATUS_LABELS.not_participated_year
                   : selectedStage
                   ? INTEGRATION_STAGE_LABELS[selectedStage]
                   : 'Membros'}
