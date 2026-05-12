@@ -32,7 +32,8 @@ async function updateVisitorIntegrationStages(groupId: string): Promise<void> {
   );
 
   // 2. Marcar automaticamente como "não retornou" após 3 encontros consecutivos sem presença
-  // Isso marca visitantes em novo_visitante que tiveram 3 encontros recentes sem aparecer
+  // REGRA: Só marca se o visitante tem exatamente 1 presença registrada
+  // Se tiver 2+, ele já deve estar em "retornou" pelo passo 1
   await query(
     `UPDATE members m
      SET marked_not_returned = TRUE
@@ -41,19 +42,7 @@ async function updateVisitorIntegrationStages(groupId: string): Promise<void> {
        AND m.is_active = TRUE
        AND m.integration_stage = 'novo_visitante'
        AND m.marked_not_returned = FALSE
-       AND (
-         SELECT COUNT(*) 
-         FROM meetings mt
-         WHERE mt.group_id = $1 
-           AND mt.is_cancelled = FALSE
-           AND mt.meeting_date >= (
-             SELECT MIN(mt2.meeting_date)
-             FROM meetings mt2
-             WHERE mt2.group_id = $1 AND mt2.is_cancelled = FALSE
-             ORDER BY mt2.meeting_date DESC
-             LIMIT 3
-           )
-       ) >= 3
+       -- Verificar que tem exatamente 1 presença (primeira e única aparição)
        AND (
          SELECT COUNT(*) 
          FROM attendance a
@@ -62,14 +51,22 @@ async function updateVisitorIntegrationStages(groupId: string): Promise<void> {
            AND a.is_present = TRUE
            AND mt.group_id = $1
            AND mt.is_cancelled = FALSE
-           AND mt.meeting_date >= (
-             SELECT MIN(mt2.meeting_date)
-             FROM meetings mt2
-             WHERE mt2.group_id = $1 AND mt2.is_cancelled = FALSE
-             ORDER BY mt2.meeting_date DESC
-             LIMIT 3
+       ) = 1
+       -- Verificar que houve pelo menos 3 encontros após essa única presença
+       AND (
+         SELECT COUNT(*) 
+         FROM meetings mt
+         WHERE mt.group_id = $1 
+           AND mt.is_cancelled = FALSE
+           AND mt.meeting_date > (
+             SELECT MAX(mt2.meeting_date)
+             FROM attendance a2
+             JOIN meetings mt2 ON mt2.id = a2.meeting_id
+             WHERE a2.member_id = m.id 
+               AND a2.is_present = TRUE
+               AND mt2.group_id = $1
            )
-       ) = 0`,
+       ) >= 3`,
     [groupId]
   );
 

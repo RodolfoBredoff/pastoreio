@@ -59,16 +59,44 @@ export async function PUT(
       
       // Calcular estágio baseado nas presenças
       let calculatedStage: string;
+      let shouldMarkNotReturned = false;
+      
       if (presences >= 4) {
         calculatedStage = 'integrando';
       } else if (presences >= 2) {
         calculatedStage = 'retornou';
       } else {
         calculatedStage = 'novo_visitante';
+        
+        // Se tem exatamente 1 presença, verificar se já passaram 3+ encontros
+        if (presences === 1) {
+          const meetingsAfterResult = await queryOne<{ count: string }>(
+            `SELECT COUNT(*)::text as count 
+             FROM meetings mt
+             WHERE mt.group_id = $1 
+               AND mt.is_cancelled = FALSE
+               AND mt.meeting_date > (
+                 SELECT MAX(mt2.meeting_date)
+                 FROM attendance a2
+                 JOIN meetings mt2 ON mt2.id = a2.meeting_id
+                 WHERE a2.member_id = $2 
+                   AND a2.is_present = TRUE
+                   AND mt2.group_id = $1
+               )`,
+            [leader.group_id, id]
+          );
+          
+          const meetingsAfter = parseInt(meetingsAfterResult?.count || '0', 10);
+          
+          // Se já passaram 3+ encontros sem ele aparecer, marcar como "não retornou"
+          if (meetingsAfter >= 3) {
+            shouldMarkNotReturned = true;
+          }
+        }
       }
       
       updateData.integration_stage = calculatedStage;
-      updateData.marked_not_returned = false; // Resetar marcação de "não retornou"
+      updateData.marked_not_returned = shouldMarkNotReturned;
     }
 
     if (integration_stage !== undefined) {
