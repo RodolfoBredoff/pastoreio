@@ -202,6 +202,8 @@ export async function updateMember(memberId: string, data: {
   member_type?: 'participant' | 'visitor';
   is_active?: boolean;
   discipulador_id?: string | null;
+  integration_stage?: string;
+  marked_not_returned?: boolean;
 }): Promise<Member | null> {
   const leader = await getCurrentLeader();
   
@@ -242,6 +244,14 @@ export async function updateMember(memberId: string, data: {
   if (data.discipulador_id !== undefined) {
     updates.push(`discipulador_id = $${paramIndex++}`);
     values.push(data.discipulador_id);
+  }
+  if (data.integration_stage !== undefined) {
+    updates.push(`integration_stage = $${paramIndex++}`);
+    values.push(data.integration_stage);
+  }
+  if (data.marked_not_returned !== undefined) {
+    updates.push(`marked_not_returned = $${paramIndex++}`);
+    values.push(data.marked_not_returned);
   }
 
   if (updates.length === 0) {

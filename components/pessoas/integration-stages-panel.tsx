@@ -14,8 +14,15 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, TrendingUp, Users, UserCheck } from 'lucide-react';
+import { Loader2, TrendingUp, Users, UserCheck, X } from 'lucide-react';
 import { INTEGRATION_STAGE_LABELS, VISITOR_STATUS_LABELS } from '@/lib/constants';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { LinkButton } from '@/components/ui/link-button';
 
 interface StageStats {
   stage: string;
@@ -51,10 +58,22 @@ const STAGE_COLORS: Record<string, string> = {
   nao_retornou: 'hsl(0, 84%, 60%)',
 };
 
+interface MemberByStage {
+  id: string;
+  full_name: string;
+  phone: string;
+  integration_stage: string;
+  marked_not_returned: boolean;
+}
+
 export function IntegrationStagesPanel() {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>('all');
   const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [selectedStage, setSelectedStage] = useState<string | null>(null);
+  const [stageMembers, setStageMembers] = useState<MemberByStage[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const loadStats = useCallback(async (selectedPeriod: Period) => {
     setLoading(true);
@@ -75,6 +94,32 @@ export function IntegrationStagesPanel() {
   useEffect(() => {
     void loadStats(period);
   }, [period, loadStats]);
+
+  const loadMembersByStage = useCallback(async (stage: string) => {
+    setLoadingMembers(true);
+    setSelectedStage(stage);
+    setDialogOpen(true);
+    try {
+      const res = await fetch(
+        `/api/integration-stages/members?stage=${stage}&period=${period}`,
+        { cache: 'no-store' }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setStageMembers(data.members || []);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar membros:', error);
+    } finally {
+      setLoadingMembers(false);
+    }
+  }, [period]);
+
+  const handleBarClick = (data: { stage: string }) => {
+    if (data && data.stage) {
+      void loadMembersByStage(data.stage);
+    }
+  };
 
   if (loading) {
     return (
@@ -265,7 +310,13 @@ export function IntegrationStagesPanel() {
               <Tooltip 
                 formatter={(value: number) => [`${value} pessoa${value !== 1 ? 's' : ''}`, '']}
               />
-              <Bar dataKey="value" name="Pessoas" radius={[0, 4, 4, 0]}>
+              <Bar 
+                dataKey="value" 
+                name="Pessoas" 
+                radius={[0, 4, 4, 0]}
+                cursor="pointer"
+                onClick={(data) => handleBarClick(data)}
+              >
                 {funnelData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={STAGE_COLORS[entry.stage] || '#888'} />
                 ))}
@@ -301,7 +352,13 @@ export function IntegrationStagesPanel() {
                 formatter={(value: number) => [`${value} pessoa${value !== 1 ? 's' : ''}`, '']}
               />
               <Legend wrapperStyle={{ paddingTop: '20px' }} />
-              <Bar dataKey="value" name="Pessoas" radius={[4, 4, 0, 0]}>
+              <Bar 
+                dataKey="value" 
+                name="Pessoas" 
+                radius={[4, 4, 0, 0]}
+                cursor="pointer"
+                onClick={(data) => handleBarClick(data)}
+              >
                 {distributionData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={STAGE_COLORS[entry.stage] || '#888'} />
                 ))}
@@ -332,6 +389,71 @@ export function IntegrationStagesPanel() {
           </CardContent>
         </Card>
       )}
+
+      {/* Dialog com lista de membros */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>
+                {selectedStage === 'nao_retornou'
+                  ? VISITOR_STATUS_LABELS.not_returned
+                  : selectedStage
+                  ? INTEGRATION_STAGE_LABELS[selectedStage]
+                  : 'Membros'}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setDialogOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+
+          {loadingMembers ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin" />
+              <span className="ml-2">Carregando...</span>
+            </div>
+          ) : stageMembers.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              Nenhuma pessoa neste estágio
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground mb-4">
+                {stageMembers.length} pessoa{stageMembers.length !== 1 ? 's' : ''} encontrada{stageMembers.length !== 1 ? 's' : ''}
+              </p>
+              <div className="space-y-2">
+                {stageMembers.map((member) => (
+                  <Card key={member.id} className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <p className="font-medium">{member.full_name}</p>
+                        <p className="text-sm text-muted-foreground">{member.phone}</p>
+                        {member.marked_not_returned && (
+                          <span className="inline-block mt-1 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                            Não Retornou
+                          </span>
+                        )}
+                      </div>
+                      <LinkButton
+                        href={`/pessoas/${member.id}`}
+                        variant="outline"
+                        size="sm"
+                      >
+                        Ver detalhes
+                      </LinkButton>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
