@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader, getMemberById, getMemberByIdAndGroup, updateMember } from '@/lib/db/queries';
 import { canDeleteMembers, canManageDiscipleship, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
+import { queryOne } from '@/lib/db/postgres';
 
 /**
  * PUT /api/members/[id]
@@ -25,12 +26,50 @@ export async function PUT(
     const data = await request.json();
     const { full_name, phone, birth_date, member_type, is_active, discipulador_id, integration_stage } = data;
 
+    // Buscar membro atual para verificar se o tipo está mudando
+    const currentMember = await getMemberById(id);
+    if (!currentMember) {
+      return NextResponse.json(
+        { error: 'Membro não encontrado' },
+        { status: 404 }
+      );
+    }
+
     const updateData: Record<string, unknown> = {};
     if (full_name !== undefined) updateData.full_name = full_name;
     if (phone !== undefined) updateData.phone = phone;
     if (birth_date !== undefined) updateData.birth_date = birth_date || null;
     if (member_type !== undefined) updateData.member_type = member_type;
     if (is_active !== undefined) updateData.is_active = is_active;
+
+    // Se está mudando para 'visitor', calcular o integration_stage automaticamente
+    if (member_type === 'visitor' && currentMember.member_type !== 'visitor') {
+      // Contar quantas presenças o membro tem
+      const presencesResult = await queryOne<{ count: string }>(
+        `SELECT COUNT(*)::text as count 
+         FROM attendance a
+         JOIN meetings m ON m.id = a.meeting_id
+         WHERE a.member_id = $1 
+           AND a.is_present = TRUE 
+           AND m.group_id = $2`,
+        [id, leader.group_id]
+      );
+      
+      const presences = parseInt(presencesResult?.count || '0', 10);
+      
+      // Calcular estágio baseado nas presenças
+      let calculatedStage: string;
+      if (presences >= 4) {
+        calculatedStage = 'integrando';
+      } else if (presences >= 2) {
+        calculatedStage = 'retornou';
+      } else {
+        calculatedStage = 'novo_visitante';
+      }
+      
+      updateData.integration_stage = calculatedStage;
+      updateData.marked_not_returned = false; // Resetar marcação de "não retornou"
+    }
 
     if (integration_stage !== undefined) {
       const validStages = ['novo_visitante', 'retornou', 'integrando', 'membro'];
