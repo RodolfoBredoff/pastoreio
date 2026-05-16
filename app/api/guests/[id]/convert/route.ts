@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader, getGuestVisitorById } from '@/lib/db/queries';
-import { query } from '@/lib/db/postgres';
+import { query, transaction } from '@/lib/db/postgres';
 
 /**
  * POST /api/guests/[id]/convert
@@ -30,33 +30,79 @@ export async function POST(
       return NextResponse.json({ error: 'Visitante de outro grupo' }, { status: 403 });
     }
 
-    // Verificar quantas vezes o guest apareceu
-    const appearancesResult = await query<{ count: string }>(
-      `SELECT COUNT(DISTINCT meeting_id)::text as count 
-       FROM attendance_guests 
-       WHERE guest_id = $1`,
-      [guestId]
-    );
-    const appearances = parseInt(appearancesResult.rows[0]?.count || '0', 10);
-    
-    // Se apareceu 2+ vezes, marcar como "retornou", senão "novo_visitante"
-    const integrationStage = appearances >= 2 ? 'retornou' : 'novo_visitante';
+    // Usar transação para garantir que tudo seja feito atomicamente
+    const newMember = await transaction(async (client) => {
+      // Criar o novo membro sempre como 'novo_visitante'
+      // O sistema de estágios automático calculará o estágio correto após a conversão
+      const result = await client.query<{ id: string; full_name: string }>(
+        `INSERT INTO members (group_id, full_name, phone, birth_date, member_type, integration_stage)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
+        [
+          guest.group_id,
+          guest.full_name,
+          guest.phone ?? '',
+          null,
+          'visitor',
+          'novo_visitante',
+        ]
+      );
+      const newMember = result.rows[0];
 
-    const result = await query(
-      `INSERT INTO members (group_id, full_name, phone, birth_date, member_type, integration_stage)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [
-        guest.group_id,
-        guest.full_name,
-        guest.phone ?? '',
-        null,
-        'visitor',
-        integrationStage,
-      ]
-    );
+      // Migrar todos os registros de presença do guest para o novo membro
+      const guestAttendances = await client.query<{ meeting_id: string }>(
+        `SELECT meeting_id FROM attendance_guests WHERE guest_id = $1`,
+        [guestId]
+      );
+      
+      // Criar registros de attendance (is_present=TRUE) para cada encontro
+      for (const att of guestAttendances.rows) {
+        await client.query(
+          `INSERT INTO attendance (meeting_id, member_id, is_present)
+           VALUES ($1, $2, TRUE)
+           ON CONFLICT (meeting_id, member_id) DO UPDATE SET is_present = TRUE`,
+          [att.meeting_id, newMember.id]
+        );
+      }
+      
+      // Remover os registros antigos de guest
+      await client.query(
+        `DELETE FROM attendance_guests WHERE guest_id = $1`,
+        [guestId]
+      );
+      await client.query(
+        `DELETE FROM guest_visitors WHERE id = $1`,
+        [guestId]
+      );
 
-    return NextResponse.json(result.rows[0], { status: 201 });
+      return newMember;
+    });
+
+    // Atualizar os estágios de integração para recalcular baseado nas presenças
+    try {
+      await query(
+        `UPDATE members
+         SET integration_stage = CASE
+           WHEN (
+             SELECT COUNT(*) FROM attendance a
+             JOIN meetings m ON m.id = a.meeting_id
+             WHERE a.member_id = members.id AND a.is_present = TRUE AND m.group_id = $1
+           ) >= 4 THEN 'integrando'
+           WHEN (
+             SELECT COUNT(*) FROM attendance a
+             JOIN meetings m ON m.id = a.meeting_id
+             WHERE a.member_id = members.id AND a.is_present = TRUE AND m.group_id = $1
+           ) >= 2 THEN 'retornou'
+           ELSE 'novo_visitante'
+         END
+         WHERE id = $2 AND member_type = 'visitor' AND integration_stage != 'membro'`,
+        [guest.group_id, newMember.id]
+      );
+    } catch (err) {
+      console.error('Erro ao atualizar estágio de integração:', err);
+    }
+
+    return NextResponse.json(newMember, { status: 201 });
   } catch (error) {
     console.error('Erro ao converter visitante em membro:', error);
     return NextResponse.json(

@@ -69,6 +69,15 @@ export function PresenceChecklist({
     setGuests(initialGuests);
   }, [initialGuests]);
 
+  useEffect(() => {
+    setPresenceMap(
+      attendance.reduce((acc, att) => {
+        acc[att.member_id] = att.is_present;
+        return acc;
+      }, {} as Record<string, boolean>)
+    );
+  }, [attendance]);
+
   const fetchSuggestions = useCallback(async (query: string) => {
     if (query.length < 2) {
       setSuggestions([]);

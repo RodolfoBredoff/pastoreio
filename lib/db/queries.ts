@@ -563,13 +563,35 @@ export async function saveAttendance(
       
       // Só converter se ainda não existe membro cadastrado
       if (existingMember.rows.length === 0) {
-        await client.query(
+        // Criar o novo membro e capturar o ID
+        // Começa sempre como 'novo_visitante' - a função updateVisitorIntegrationStages
+        // que é executada logo após vai calcular o estágio correto baseado nas presenças
+        const newMemberResult = await client.query<{ id: string }>(
           `INSERT INTO members (group_id, full_name, phone, birth_date, member_type, integration_stage)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [groupId, guest.full_name, guest.phone || '', null, 'visitor', 'retornou']
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id`,
+          [groupId, guest.full_name, guest.phone || '', null, 'visitor', 'novo_visitante']
+        );
+        const newMemberId = newMemberResult.rows[0].id;
+        
+        // Migrar todos os registros de presença do guest para o novo membro
+        // Buscar todos os encontros onde o guest estava presente
+        const guestAttendances = await client.query<{ meeting_id: string }>(
+          `SELECT meeting_id FROM attendance_guests WHERE guest_id = $1`,
+          [guest.id]
         );
         
-        // Remover o guest_visitor já que foi convertido
+        // Criar registros de attendance (is_present=TRUE) para cada encontro
+        for (const att of guestAttendances.rows) {
+          await client.query(
+            `INSERT INTO attendance (meeting_id, member_id, is_present)
+             VALUES ($1, $2, TRUE)
+             ON CONFLICT (meeting_id, member_id) DO UPDATE SET is_present = TRUE`,
+            [att.meeting_id, newMemberId]
+          );
+        }
+        
+        // Agora sim remover os registros antigos de guest
         await client.query(
           `DELETE FROM attendance_guests WHERE guest_id = $1`,
           [guest.id]
