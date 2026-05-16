@@ -21,6 +21,7 @@
     "@radix-ui/react-label": "^2.1.0",
     "@radix-ui/react-select": "^2.1.2",
     "@radix-ui/react-slot": "^1.1.0",
+    "@radix-ui/react-tooltip": "^1.2.8",
     "@types/uuid": "^10.0.0",
     "@types/web-push": "^3.6.4",
     "autoprefixer": "^10.4.20",

@@ -8,7 +8,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { TrendingUp, TrendingDown, Award, CalendarSearch, Loader2, Users, CheckCircle, XCircle, Star, List, Share2, Link2, UserPlus, Printer } from 'lucide-react';
+import { TrendingUp, TrendingDown, Award, CalendarSearch, Loader2, Users, CheckCircle, XCircle, Star, List, Share2, Link2, UserPlus, Printer, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,7 @@ import {
   PresenceFilterSelector,
   PeriodSelector,
 } from '@/components/dashboard/engagement-filter-controls';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -107,7 +108,23 @@ function StatsCards({
     <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Taxa Média</CardTitle>
+          <div className="flex items-center gap-1.5">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Taxa Média</CardTitle>
+            <InfoTooltip
+              content={
+                <div>
+                  <p className="font-semibold mb-1">Taxa Média de Presença</p>
+                  <p className="mb-2">Média das taxas de presença de cada período. Indica a tendência geral de participação.</p>
+                  <p className="text-muted-foreground">
+                    {periodData.length > 0
+                      ? `Calculada a partir de ${periodData.length} período${periodData.length !== 1 ? 's' : ''} com ${totalRecords} registro${totalRecords !== 1 ? 's' : ''} totais`
+                      : 'Sem dados suficientes para calcular'}
+                  </p>
+                </div>
+              }
+              side="right"
+            />
+          </div>
           {trend > 0 ? <TrendingUp className="h-4 w-4 text-green-600" /> : trend < 0 ? <TrendingDown className="h-4 w-4 text-red-600" /> : null}
         </CardHeader>
         <CardContent>
@@ -152,7 +169,7 @@ function StatsCards({
   );
 }
 
-function PeriodCharts({ data, periodLabel }: { data: PeriodDataPoint[]; periodLabel: string }) {
+function PeriodCharts({ data, periodLabel, onPeriodClick }: { data: PeriodDataPoint[]; periodLabel: string; onPeriodClick?: (periodData: PeriodDataPoint) => void }) {
   if (data.length === 0) {
     return (
       <div className="text-center py-12 border rounded-lg">
@@ -161,17 +178,54 @@ function PeriodCharts({ data, periodLabel }: { data: PeriodDataPoint[]; periodLa
     );
   }
 
+  const CustomTooltipPresencaRate = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload as PeriodDataPoint;
+      return (
+        <div className="bg-background border rounded-lg p-3 shadow-lg">
+          <p className="font-semibold mb-1">{data.period}</p>
+          <p className="text-sm font-medium text-primary">Taxa: {data.taxa}%</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {data.meetingCount} encontro{data.meetingCount !== 1 ? 's' : ''}
+          </p>
+          <div className="flex gap-3 mt-2 text-xs">
+            <span className="text-green-600 font-medium">✓ {data.presentes} presença{data.presentes !== 1 ? 's' : ''}</span>
+            <span className="text-red-600 font-medium">✗ {data.ausentes} ausência{data.ausentes !== 1 ? 's' : ''}</span>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader><CardTitle className="text-base sm:text-lg">Taxa de Presença — {periodLabel}</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <CardTitle className="text-base sm:text-lg">Taxa de Presença — {periodLabel}</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">Evolução da taxa de participação ao longo do tempo</p>
+            </div>
+            <InfoTooltip
+              content={
+                <div>
+                  <p className="font-semibold mb-1">Como é calculada?</p>
+                  <p className="mb-2">Taxa de Presença = (Presenças ÷ Total de Registros) × 100</p>
+                  <p className="text-muted-foreground">Cada ponto representa um período que pode conter múltiplos encontros.</p>
+                </div>
+              }
+              side="left"
+            />
+          </div>
+        </CardHeader>
         <CardContent className="px-2 sm:px-6">
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="period" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
               <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 10 }} width={40} />
-              <Tooltip formatter={(v: number) => `${v}%`} />
+              <Tooltip content={<CustomTooltipPresencaRate />} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Line type="monotone" dataKey="taxa" stroke="hsl(145, 55%, 30%)" strokeWidth={2} name="Taxa (%)"
                 dot={{ fill: 'hsl(145, 55%, 30%)', r: 3 }} activeDot={{ r: 5 }} />
@@ -180,7 +234,28 @@ function PeriodCharts({ data, periodLabel }: { data: PeriodDataPoint[]; periodLa
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle className="text-base sm:text-lg">Presentes × Ausentes — {periodLabel}</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1">
+              <CardTitle className="text-base sm:text-lg">Presentes × Ausentes — {periodLabel}</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                {onPeriodClick 
+                  ? 'Clique nas barras para ver detalhes dos participantes' 
+                  : 'Comparativo de presenças e ausências por período'}
+              </p>
+            </div>
+            <InfoTooltip
+              content={
+                <div>
+                  <p className="font-semibold mb-1">Como interpretar?</p>
+                  <p className="mb-2">Cada presença ou ausência registrada é contabilizada individualmente por encontro.</p>
+                  <p className="text-muted-foreground">Uma mesma pessoa aparece múltiplas vezes se participou de vários encontros no período.</p>
+                </div>
+              }
+              side="left"
+            />
+          </div>
+        </CardHeader>
         <CardContent className="px-2 sm:px-6">
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
@@ -189,8 +264,22 @@ function PeriodCharts({ data, periodLabel }: { data: PeriodDataPoint[]; periodLa
               <YAxis tick={{ fontSize: 10 }} width={40} />
               <Tooltip />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="presentes" fill="#10b981" name="Presentes" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="ausentes" fill="#ef4444" name="Ausentes" radius={[3, 3, 0, 0]} />
+              <Bar 
+                dataKey="presentes" 
+                fill="#10b981" 
+                name="Presentes" 
+                radius={[3, 3, 0, 0]}
+                onClick={onPeriodClick ? (data) => onPeriodClick(data as PeriodDataPoint) : undefined}
+                cursor={onPeriodClick ? 'pointer' : undefined}
+              />
+              <Bar 
+                dataKey="ausentes" 
+                fill="#ef4444" 
+                name="Ausentes" 
+                radius={[3, 3, 0, 0]}
+                onClick={onPeriodClick ? (data) => onPeriodClick(data as PeriodDataPoint) : undefined}
+                cursor={onPeriodClick ? 'pointer' : undefined}
+              />
             </BarChart>
           </ResponsiveContainer>
         </CardContent>
@@ -464,6 +553,210 @@ function MemberPresenceAbsenceDistribution({
         </DialogContent>
       </Dialog>
     </Card>
+  );
+}
+
+// ─── Dialog de detalhes do período ────────────────────────────────────────────
+
+interface PeriodMemberDetail {
+  id: string;
+  name: string;
+  type: string;
+  presenceCount: number;
+  absenceCount: number;
+}
+
+interface PeriodDetailData {
+  periodLabel: string;
+  periodStart: string;
+  meetingCount: number;
+  meetings: Array<{ id: string; date: string; title: string | null }>;
+  presentMembers: PeriodMemberDetail[];
+  absentMembers: PeriodMemberDetail[];
+  guestCount: number;
+}
+
+function PeriodDetailDialog({
+  open,
+  onOpenChange,
+  periodData,
+  apiSuffix,
+  memberFilter,
+  period,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  periodData: PeriodDataPoint | null;
+  apiSuffix: string;
+  memberFilter: MemberFilter;
+  period: Period;
+}) {
+  const [detail, setDetail] = useState<PeriodDetailData | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open || !periodData) {
+      setDetail(null);
+      return;
+    }
+
+    const fetchDetail = async () => {
+      setLoading(true);
+      try {
+        let url = `/api/engagement/period-detail?period_start=${encodeURIComponent(periodData.periodStart)}&period=${period}&member_filter=${memberFilter}`;
+        if (apiSuffix) url += `&${apiSuffix}`;
+        const res = await fetch(url, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          setDetail(data);
+        }
+      } catch (err) {
+        console.error('Erro ao buscar detalhes do período:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDetail();
+  }, [open, periodData, apiSuffix, memberFilter, period]);
+
+  if (!periodData) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Detalhes do Período: {periodData.period}</DialogTitle>
+        </DialogHeader>
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : detail ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-4">
+              <Card>
+                <CardContent className="pt-6 text-center">
+                  <p className="text-2xl font-bold text-primary">{detail.meetingCount}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Encontro{detail.meetingCount !== 1 ? 's' : ''}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6 text-center">
+                  <p className="text-2xl font-bold text-green-600">{periodData.presentes}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Presença{periodData.presentes !== 1 ? 's' : ''}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6 text-center">
+                  <p className="text-2xl font-bold text-red-600">{periodData.ausentes}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Ausência{periodData.ausentes !== 1 ? 's' : ''}</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {detail.meetings.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">Encontros neste período</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {detail.meetings.map((m) => (
+                      <div key={m.id} className="flex items-center gap-2 py-1 border-b last:border-0 text-xs">
+                        <span className="text-muted-foreground">
+                          {new Date(m.date + 'T12:00:00Z').toLocaleDateString('pt-BR', { 
+                            day: '2-digit', 
+                            month: 'short' 
+                          })}
+                        </span>
+                        <span>{m.title || 'Encontro'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-sm text-green-700">
+                    <CheckCircle className="h-4 w-4" />
+                    Mais Presentes ({detail.presentMembers.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                    {detail.presentMembers.length > 0 ? (
+                      detail.presentMembers.map((m) => (
+                        <div key={m.id} className="flex items-center justify-between py-1.5 border-b last:border-0">
+                          <div className="flex flex-col min-w-0">
+                            <p className="text-sm truncate">{m.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {m.presenceCount} presença{m.presenceCount !== 1 ? 's' : ''}
+                              {m.absenceCount > 0 && ` · ${m.absenceCount} falta${m.absenceCount !== 1 ? 's' : ''}`}
+                            </p>
+                          </div>
+                          <Badge variant="secondary" className="text-xs shrink-0 ml-2">
+                            {m.type === 'participant' ? 'Membro' : 'Visitante'}
+                          </Badge>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Nenhuma presença registrada</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-sm text-red-700">
+                    <XCircle className="h-4 w-4" />
+                    Mais Ausentes ({detail.absentMembers.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                    {detail.absentMembers.length > 0 ? (
+                      detail.absentMembers.map((m) => (
+                        <div key={m.id} className="flex items-center justify-between py-1.5 border-b last:border-0">
+                          <div className="flex flex-col min-w-0">
+                            <p className="text-sm truncate">{m.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {m.absenceCount} falta{m.absenceCount !== 1 ? 's' : ''}
+                              {m.presenceCount > 0 && ` · ${m.presenceCount} presença${m.presenceCount !== 1 ? 's' : ''}`}
+                            </p>
+                          </div>
+                          <Badge variant="secondary" className="text-xs shrink-0 ml-2">
+                            {m.type === 'participant' ? 'Membro' : 'Visitante'}
+                          </Badge>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Nenhuma ausência registrada</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {detail.guestCount > 0 && (
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <p className="text-sm">
+                  <span className="font-medium">{detail.guestCount}</span> visitante{detail.guestCount !== 1 ? 's' : ''} não cadastrado{detail.guestCount !== 1 ? 's' : ''} neste período
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground">Erro ao carregar detalhes</p>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -883,6 +1176,100 @@ function EngagementShareToggle() {
   );
 }
 
+// ─── Card explicativo sobre como interpretar os dados ─────────────────────────
+
+function DataInterpretationGuide() {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-800">
+      <CardHeader>
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center justify-between w-full text-left"
+        >
+          <div className="flex items-center gap-2">
+            <HelpCircle className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            <CardTitle className="text-base text-blue-900 dark:text-blue-100">
+              Como interpretar os dados
+            </CardTitle>
+          </div>
+          {expanded ? (
+            <ChevronUp className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          ) : (
+            <ChevronDown className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          )}
+        </button>
+      </CardHeader>
+      {expanded && (
+        <CardContent className="space-y-4 text-sm">
+          <div>
+            <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
+              Contabilização dos Registros
+            </h4>
+            <p className="text-blue-800 dark:text-blue-200">
+              Cada presença ou ausência é contabilizada <strong>individualmente por encontro</strong>.
+              Se uma pessoa participou de 3 encontros no período, ela aparece 3 vezes nos gráficos como "presente".
+              Da mesma forma, se faltou em 2 encontros, aparece 2 vezes como "ausente".
+            </p>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
+              Filtros de Tipo de Membro
+            </h4>
+            <ul className="list-disc list-inside space-y-1 text-blue-800 dark:text-blue-200">
+              <li>
+                <strong>Total:</strong> Inclui todos os membros (participantes e visitantes) mais visitantes não cadastrados
+              </li>
+              <li>
+                <strong>Participantes:</strong> Apenas membros marcados como "participante" (não inclui visitantes não cadastrados)
+              </li>
+              <li>
+                <strong>Visitantes:</strong> Apenas membros marcados como "visitante" mais visitantes não cadastrados
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
+              Visitantes Não Cadastrados
+            </h4>
+            <p className="text-blue-800 dark:text-blue-200">
+              Visitantes que foram registrados na chamada mas não estão cadastrados como membros são contabilizados apenas como <strong>presenças</strong>.
+              Eles nunca geram registros de ausência, pois não fazem parte da lista oficial de membros.
+            </p>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
+              Taxa de Presença
+            </h4>
+            <p className="text-blue-800 dark:text-blue-200">
+              Calculada como: <strong>(Presenças ÷ Total de Registros) × 100</strong>
+            </p>
+            <p className="text-blue-800 dark:text-blue-200 mt-1">
+              Por exemplo: Se em um período houve 45 presenças e 5 ausências, a taxa será: (45 ÷ 50) × 100 = 90%
+            </p>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
+              Períodos e Encontros
+            </h4>
+            <p className="text-blue-800 dark:text-blue-200">
+              Um período (semanal, mensal, etc.) pode conter <strong>múltiplos encontros</strong>.
+              Os dados são agregados somando todos os registros daquele período.
+              Clique nas barras do gráfico "Presentes × Ausentes" para ver os detalhes de cada período.
+            </p>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 // ─── Gráfico e filtro por discipulador ───────────────────────────────────────
 
 function DiscipleshipCard({ apiSuffix }: { apiSuffix: string }) {
@@ -1015,6 +1402,8 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [selectedPeriodData, setSelectedPeriodData] = useState<PeriodDataPoint | null>(null);
+  const [periodDialogOpen, setPeriodDialogOpen] = useState(false);
 
   useEffect(() => {
     const onVis = () => {
@@ -1084,6 +1473,11 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
   const topAbsent = [...filteredMemberStats].filter((m) => m.absences > 0).sort((a, b) => b.absences - a.absences).slice(0, 5);
   const perfectAttendance = filteredMemberStats.filter((m) => m.presences > 0 && m.absences === 0).map((m) => m.name);
 
+  const handlePeriodClick = (periodData: PeriodDataPoint) => {
+    setSelectedPeriodData(periodData);
+    setPeriodDialogOpen(true);
+  };
+
   return (
     <div className="space-y-6">
       <div className="space-y-3">
@@ -1120,6 +1514,8 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
 
       {!publicToken && !groupId && <EngagementShareToggle />}
 
+      <DataInterpretationGuide />
+
       {view === 'title_group' ? (
         <>
           <TitleGroupView apiSuffix={apiSuffix} memberFilter={memberFilter} presenceFilter={presenceFilter} refreshKey={refreshNonce} />
@@ -1142,10 +1538,18 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
       ) : (
         <>
           <StatsCards periodData={periodData} perfectAttendance={perfectAttendance} memberStats={filteredMemberStats} />
-          <PeriodCharts data={periodData} periodLabel={periodLabel} />
+          <PeriodCharts data={periodData} periodLabel={periodLabel} onPeriodClick={handlePeriodClick} />
           <MemberRankings topPresent={topPresent} topAbsent={topAbsent} perfectAttendance={perfectAttendance} />
           <MemberPresenceAbsenceDistribution stats={filteredMemberStats} groupId={groupId} />
           <DiscipleshipCard apiSuffix={apiSuffix} />
+          <PeriodDetailDialog
+            open={periodDialogOpen}
+            onOpenChange={setPeriodDialogOpen}
+            periodData={selectedPeriodData}
+            apiSuffix={apiSuffix}
+            memberFilter={memberFilter}
+            period={view as Period}
+          />
         </>
       )}
     </div>
