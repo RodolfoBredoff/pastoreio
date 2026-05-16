@@ -75,6 +75,8 @@ export async function GET(request: Request) {
     const mode = searchParams.get('mode');
     const titleGroup = searchParams.get('title_group')?.trim() || null;
     const yearMonth = searchParams.get('year_month')?.trim() || null;
+    const selectedQuarters = searchParams.get('quarters')?.split(',').filter(Boolean) || null;
+    const selectedSemesters = searchParams.get('semesters')?.split(',').filter(Boolean) || null;
     const publicToken = searchParams.get('public_token')?.trim() || null;
     const memberFilterParam = searchParams.get('member_filter');
     const memberFilter: MemberFilter =
@@ -156,6 +158,40 @@ export async function GET(request: Request) {
         [groupId]
       );
       return NextResponse.json({ yearMonths: rows.map((r) => r.year_month) });
+    }
+
+    // ─── Modo: trimestres disponíveis
+    if (mode === 'available_quarters') {
+      const rows = await queryMany<{ quarter: string }>(
+        `SELECT DISTINCT 
+           CONCAT(EXTRACT(YEAR FROM meeting_date)::text, '-Q', 
+                  CEIL(EXTRACT(MONTH FROM meeting_date) / 3.0)::text) as quarter
+         FROM meetings
+         WHERE group_id = $1
+           AND is_cancelled = FALSE
+           AND ${MEETING_ENGAGEMENT_VISIBILITY.replace(/\n/g, ' ')}
+         ORDER BY quarter DESC
+         LIMIT 12`,
+        [groupId]
+      );
+      return NextResponse.json({ quarters: rows.map((r) => r.quarter) });
+    }
+
+    // ─── Modo: semestres disponíveis
+    if (mode === 'available_semesters') {
+      const rows = await queryMany<{ semester: string }>(
+        `SELECT DISTINCT 
+           CONCAT(EXTRACT(YEAR FROM meeting_date)::text, '-S', 
+                  CASE WHEN EXTRACT(MONTH FROM meeting_date) < 7 THEN '1' ELSE '2' END) as semester
+         FROM meetings
+         WHERE group_id = $1
+           AND is_cancelled = FALSE
+           AND ${MEETING_ENGAGEMENT_VISIBILITY.replace(/\n/g, ' ')}
+         ORDER BY semester DESC
+         LIMIT 8`,
+        [groupId]
+      );
+      return NextResponse.json({ semesters: rows.map((r) => r.semester) });
     }
 
     // ─── Modo: lista de títulos agrupados ──────────────────────────────────
@@ -393,6 +429,27 @@ export async function GET(request: Request) {
            END)::date::text`
         : `date_trunc($1, meeting_date)::date::text`;
 
+      // Construir condição de filtro para trimestres selecionados
+      let quarterCond = '';
+      if (effectivePeriod === 'quarterly' && selectedQuarters && selectedQuarters.length > 0) {
+        const quarterConditions = selectedQuarters.map((q) => {
+          const [year, quarter] = q.split('-Q');
+          return `(EXTRACT(YEAR FROM meeting_date) = ${parseInt(year)} AND CEIL(EXTRACT(MONTH FROM meeting_date) / 3.0) = ${parseInt(quarter)})`;
+        }).join(' OR ');
+        quarterCond = ` AND (${quarterConditions})`;
+      }
+
+      // Construir condição de filtro para semestres selecionados
+      let semesterCond = '';
+      if (effectivePeriod === 'semiannual' && selectedSemesters && selectedSemesters.length > 0) {
+        const semesterConditions = selectedSemesters.map((s) => {
+          const [year, semester] = s.split('-S');
+          const monthCheck = semester === '1' ? 'EXTRACT(MONTH FROM meeting_date) < 7' : 'EXTRACT(MONTH FROM meeting_date) >= 7';
+          return `(EXTRACT(YEAR FROM meeting_date) = ${parseInt(year)} AND ${monthCheck})`;
+        }).join(' OR ');
+        semesterCond = ` AND (${semesterConditions})`;
+      }
+
       const titleCond = titleFilter
         ? (effectivePeriod === 'semiannual' ? ` AND title ILIKE $3` : ` AND title ILIKE $4`)
         : '';
@@ -407,14 +464,14 @@ export async function GET(request: Request) {
            WHERE group_id = $1 AND is_cancelled = FALSE
              AND ${vis}
              AND meeting_date >= (CURRENT_DATE - $2::interval)
-             AND meeting_date <= CURRENT_DATE${titleCond}
+             AND meeting_date <= CURRENT_DATE${titleCond}${semesterCond}
            ORDER BY meeting_date ASC`
         : `SELECT id, meeting_date, title, meeting_type, ${periodStartExpr} as period_start
            FROM meetings 
            WHERE group_id = $2 AND is_cancelled = FALSE
              AND ${vis}
              AND meeting_date >= (CURRENT_DATE - $3::interval)
-             AND meeting_date <= CURRENT_DATE${titleCond}
+             AND meeting_date <= CURRENT_DATE${titleCond}${quarterCond}
            ORDER BY meeting_date ASC`;
 
       meetings = await queryMany<{

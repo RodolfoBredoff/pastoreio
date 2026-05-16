@@ -96,16 +96,17 @@ interface DiscipleshipStats {
 // ─── Componentes internos ─────────────────────────────────────────────────────
 
 function StatsCards({
-  periodData, perfectAttendance, memberStats,
-}: { periodData: PeriodDataPoint[]; perfectAttendance: string[]; memberStats: MemberStat[] }) {
+  periodData, perfectAttendance, memberStats, presenceFilter,
+}: { periodData: PeriodDataPoint[]; perfectAttendance: string[]; memberStats: MemberStat[]; presenceFilter?: PresenceFilter }) {
   const avgRate = periodData.length > 0
     ? (periodData.reduce((s, d) => s + d.taxa, 0) / periodData.length).toFixed(1) : '0';
   const trend = periodData.length >= 2
     ? periodData[periodData.length - 1].taxa - periodData[periodData.length - 2].taxa : 0;
-  const totalRecords = periodData.reduce((s, d) => s + d.presentes + d.ausentes, 0);
+  const totalPresences = periodData.reduce((s, d) => s + d.presentes, 0);
+  const totalAbsences = periodData.reduce((s, d) => s + d.ausentes, 0);
 
   return (
-    <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <div className="flex items-center gap-1.5">
@@ -115,11 +116,11 @@ function StatsCards({
                 <div>
                   <p className="font-semibold mb-1">Taxa Média de Presença</p>
                   <p className="mb-2">Média das taxas de presença de cada período. Indica a tendência geral de participação.</p>
-                  <p className="text-muted-foreground">
-                    {periodData.length > 0
-                      ? `Calculada a partir de ${periodData.length} período${periodData.length !== 1 ? 's' : ''} com ${totalRecords} registro${totalRecords !== 1 ? 's' : ''} totais`
-                      : 'Sem dados suficientes para calcular'}
-                  </p>
+                      <p className="text-muted-foreground">
+                        {periodData.length > 0
+                          ? `Calculada a partir de ${periodData.length} período${periodData.length !== 1 ? 's' : ''} com ${totalPresences + totalAbsences} registro${(totalPresences + totalAbsences) !== 1 ? 's' : ''} totais`
+                          : 'Sem dados suficientes para calcular'}
+                      </p>
                 </div>
               }
               side="right"
@@ -148,28 +149,61 @@ function StatsCards({
       </Card>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Membros</CardTitle>
+          <div className="flex items-center gap-1.5">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Membros Ativos</CardTitle>
+            <InfoTooltip
+              content={
+                <div>
+                  <p className="font-semibold mb-1">Membros com Registros</p>
+                  <p className="mb-2">
+                    Conta apenas membros cadastrados (participantes e visitantes cadastrados) que têm ao menos um registro de presença ou ausência no período.
+                  </p>
+                  <p className="text-muted-foreground text-xs">
+                    Visitantes não cadastrados são contabilizados separadamente nos gráficos quando o filtro "Total" ou "Visitantes" está ativo.
+                  </p>
+                </div>
+              }
+              side="right"
+            />
+          </div>
           <Users className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
           <p className="text-3xl font-bold">{memberStats.length}</p>
-          <p className="text-xs text-muted-foreground mt-1">com registros no período</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {presenceFilter === 'all' 
+              ? 'com registros no período'
+              : presenceFilter === 'absent'
+                ? 'com pelo menos uma falta'
+                : 'com pelo menos uma presença'}
+          </p>
         </CardContent>
       </Card>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Registros</CardTitle>
+          <CardTitle className="text-sm font-medium text-muted-foreground">Total de Presenças</CardTitle>
+          <CheckCircle className="h-4 w-4 text-green-600" />
         </CardHeader>
         <CardContent>
-          <p className="text-3xl font-bold">{totalRecords}</p>
-          <p className="text-xs text-muted-foreground mt-1">presenças registradas</p>
+          <p className="text-3xl font-bold text-green-600">{totalPresences}</p>
+          <p className="text-xs text-muted-foreground mt-1">registros de presença</p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Total de Ausências</CardTitle>
+          <XCircle className="h-4 w-4 text-red-600" />
+        </CardHeader>
+        <CardContent>
+          <p className="text-3xl font-bold text-red-600">{totalAbsences}</p>
+          <p className="text-xs text-muted-foreground mt-1">registros de falta</p>
         </CardContent>
       </Card>
     </div>
   );
 }
 
-function PeriodCharts({ data, periodLabel, onPeriodClick }: { data: PeriodDataPoint[]; periodLabel: string; onPeriodClick?: (periodData: PeriodDataPoint) => void }) {
+function PeriodCharts({ data, periodLabel, onPeriodClick, presenceFilter }: { data: PeriodDataPoint[]; periodLabel: string; onPeriodClick?: (periodData: PeriodDataPoint) => void; presenceFilter?: PresenceFilter }) {
   if (data.length === 0) {
     return (
       <div className="text-center py-12 border rounded-lg">
@@ -237,7 +271,14 @@ function PeriodCharts({ data, periodLabel, onPeriodClick }: { data: PeriodDataPo
         <CardHeader>
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1">
-              <CardTitle className="text-base sm:text-lg">Presentes × Ausentes — {periodLabel}</CardTitle>
+              <div className="flex items-center gap-2 flex-wrap">
+                <CardTitle className="text-base sm:text-lg">Presentes × Ausentes — {periodLabel}</CardTitle>
+                {presenceFilter && presenceFilter !== 'all' && (
+                  <Badge variant="outline" className="text-xs">
+                    Filtrado: {presenceFilter === 'absent' ? 'Faltantes' : 'Presentes'}
+                  </Badge>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground mt-1">
                 {onPeriodClick 
                   ? 'Clique nas barras para ver detalhes dos participantes' 
@@ -1256,6 +1297,24 @@ function DataInterpretationGuide() {
 
           <div>
             <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
+              Membros Inativos e Histórico
+            </h4>
+            <p className="text-blue-800 dark:text-blue-200">
+              Membros excluídos (marcados como inativos) <strong>mantêm seus registros históricos</strong> de presença e ausência.
+              Isso garante que os dados passados não sejam perdidos e as estatísticas permaneçam corretas.
+            </p>
+            <p className="text-blue-800 dark:text-blue-200 mt-2">
+              Se você excluir um membro, ele:
+            </p>
+            <ul className="list-disc list-inside space-y-1 text-blue-800 dark:text-blue-200 text-xs mt-1 ml-2">
+              <li>Não aparecerá mais na lista de membros ativos</li>
+              <li>Ainda será contabilizado nos gráficos de engajamento histórico</li>
+              <li>Seus registros de presença/ausência permanecerão intactos</li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
               Períodos e Encontros
             </h4>
             <p className="text-blue-800 dark:text-blue-200">
@@ -1396,6 +1455,10 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
   const [titleFilter, setTitleFilter] = useState('');
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [selectedQuarters, setSelectedQuarters] = useState<string[]>([]);
+  const [availableQuarters, setAvailableQuarters] = useState<string[]>([]);
+  const [selectedSemesters, setSelectedSemesters] = useState<string[]>([]);
+  const [availableSemesters, setAvailableSemesters] = useState<string[]>([]);
   const [periodData, setPeriodData] = useState<PeriodDataPoint[]>([]);
   const [memberStats, setMemberStats] = useState<MemberStat[]>([]);
   const [meetingList, setMeetingList] = useState<MeetingItem[]>([]);
@@ -1421,13 +1484,25 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
       .then((d) => setGroupName(d.groupName ?? null));
   }, [publicToken, apiSuffix, refreshNonce]);
 
-  const fetchPeriodData = useCallback(async (period: Period, title?: string, yearMonth?: string) => {
+  const fetchPeriodData = useCallback(async (
+    period: Period, 
+    title?: string, 
+    yearMonth?: string, 
+    quarters?: string[], 
+    semesters?: string[]
+  ) => {
     setLoading(true);
     try {
       let url = `/api/engagement?period=${period}&member_filter=${memberFilter}`;
       if (apiSuffix) url += `&${apiSuffix}`;
       if (title?.trim()) url += `&title_filter=${encodeURIComponent(title.trim())}`;
       if (period === 'monthly' && yearMonth) url += `&year_month=${encodeURIComponent(yearMonth)}`;
+      if (period === 'quarterly' && quarters && quarters.length > 0) {
+        url += `&quarters=${quarters.join(',')}`;
+      }
+      if (period === 'semiannual' && semesters && semesters.length > 0) {
+        url += `&semesters=${semesters.join(',')}`;
+      }
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
@@ -1444,6 +1519,16 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
       fetch(url, { cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : { yearMonths: [] }))
         .then((d) => setAvailableMonths(d.yearMonths ?? []));
+    } else if (view === 'quarterly') {
+      const url = apiSuffix ? `/api/engagement?mode=available_quarters&${apiSuffix}` : '/api/engagement?mode=available_quarters';
+      fetch(url, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : { quarters: [] }))
+        .then((d) => setAvailableQuarters(d.quarters ?? []));
+    } else if (view === 'semiannual') {
+      const url = apiSuffix ? `/api/engagement?mode=available_semesters&${apiSuffix}` : '/api/engagement?mode=available_semesters';
+      fetch(url, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : { semesters: [] }))
+        .then((d) => setAvailableSemesters(d.semesters ?? []));
     }
   }, [view, apiSuffix, refreshNonce]);
 
@@ -1456,11 +1541,13 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
   useEffect(() => {
     if (view !== 'meeting' && view !== 'title_group') {
       const yearMonth = view === 'monthly' && selectedMonth ? selectedMonth : undefined;
-      fetchPeriodData(view as Period, debouncedTitle, yearMonth);
+      const quarters = view === 'quarterly' && selectedQuarters.length > 0 ? selectedQuarters : undefined;
+      const semesters = view === 'semiannual' && selectedSemesters.length > 0 ? selectedSemesters : undefined;
+      fetchPeriodData(view as Period, debouncedTitle, yearMonth, quarters, semesters);
     } else if (view === 'meeting') {
       fetchPeriodData('monthly', debouncedTitle);
     }
-  }, [view, selectedMonth, fetchPeriodData, debouncedTitle, refreshNonce]);
+  }, [view, selectedMonth, selectedQuarters, selectedSemesters, fetchPeriodData, debouncedTitle, refreshNonce]);
 
   const periodLabel = PERIOD_OPTIONS.find((o) => o.value === view)?.label ?? '';
   const filteredMemberStats =
@@ -1507,10 +1594,52 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
           monthFilter={selectedMonth}
           onMonthFilterChange={setSelectedMonth}
           availableMonths={availableMonths.length > 0 ? availableMonths : undefined}
+          quarterFilter={selectedQuarters}
+          onQuarterFilterChange={setSelectedQuarters}
+          availableQuarters={availableQuarters.length > 0 ? availableQuarters : undefined}
+          semesterFilter={selectedSemesters}
+          onSemesterFilterChange={setSelectedSemesters}
+          availableSemesters={availableSemesters.length > 0 ? availableSemesters : undefined}
         />
         <MemberFilterSelector value={memberFilter} onChange={setMemberFilter} />
         <PresenceFilterSelector value={presenceFilter} onChange={setPresenceFilter} />
       </div>
+
+      {presenceFilter !== 'all' && (
+        <div className={`rounded-lg border p-3 ${
+          presenceFilter === 'absent' 
+            ? 'border-red-200 bg-red-50 dark:bg-red-950/20' 
+            : 'border-green-200 bg-green-50 dark:bg-green-950/20'
+        }`}>
+          <div className="flex items-center gap-2">
+            {presenceFilter === 'absent' ? (
+              <XCircle className="h-5 w-5 text-red-600 shrink-0" />
+            ) : (
+              <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
+            )}
+            <div>
+              <p className={`text-sm font-semibold ${
+                presenceFilter === 'absent' 
+                  ? 'text-red-900 dark:text-red-100' 
+                  : 'text-green-900 dark:text-green-100'
+              }`}>
+                {presenceFilter === 'absent' 
+                  ? 'Visualizando apenas membros com faltas' 
+                  : 'Visualizando apenas membros presentes'}
+              </p>
+              <p className={`text-xs ${
+                presenceFilter === 'absent' 
+                  ? 'text-red-800 dark:text-red-200' 
+                  : 'text-green-800 dark:text-green-200'
+              }`}>
+                {presenceFilter === 'absent'
+                  ? 'Os gráficos mostram dados filtrados. Membros com 100% de presença estão ocultos.'
+                  : 'Os gráficos mostram dados filtrados. Membros com apenas faltas estão ocultos.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!publicToken && !groupId && <EngagementShareToggle />}
 
@@ -1537,8 +1666,8 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
         </>
       ) : (
         <>
-          <StatsCards periodData={periodData} perfectAttendance={perfectAttendance} memberStats={filteredMemberStats} />
-          <PeriodCharts data={periodData} periodLabel={periodLabel} onPeriodClick={handlePeriodClick} />
+          <StatsCards periodData={periodData} perfectAttendance={perfectAttendance} memberStats={filteredMemberStats} presenceFilter={presenceFilter} />
+          <PeriodCharts data={periodData} periodLabel={periodLabel} onPeriodClick={handlePeriodClick} presenceFilter={presenceFilter} />
           <MemberRankings topPresent={topPresent} topAbsent={topAbsent} perfectAttendance={perfectAttendance} />
           <MemberPresenceAbsenceDistribution stats={filteredMemberStats} groupId={groupId} />
           <DiscipleshipCard apiSuffix={apiSuffix} />

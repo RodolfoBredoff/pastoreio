@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { CalendarSearch, List } from 'lucide-react';
+import { MultiSelect, type MultiSelectOption } from '@/components/ui/multi-select';
 
 export type Period = 'weekly' | 'monthly' | 'quarterly' | 'semiannual' | 'yearly';
 
@@ -27,6 +28,20 @@ export const PRESENCE_FILTER_OPTIONS: { value: PresenceFilter; label: string }[]
   { value: 'absent', label: 'Faltantes' },
   { value: 'present', label: 'Presentes' },
 ];
+
+// Função auxiliar para formatar label de trimestre
+export function formatQuarterLabel(quarter: string): string {
+  const [year, q] = quarter.split('-Q');
+  const shortYear = year.slice(-2);
+  return `T${q}/${shortYear}`;
+}
+
+// Função auxiliar para formatar label de semestre
+export function formatSemesterLabel(semester: string): string {
+  const [year, s] = semester.split('-S');
+  const shortYear = year.slice(-2);
+  return `S${s}/${shortYear}`;
+}
 
 export function MemberFilterSelector({
   value,
@@ -84,6 +99,12 @@ export function PeriodSelector({
   monthFilter,
   onMonthFilterChange,
   availableMonths,
+  quarterFilter,
+  onQuarterFilterChange,
+  availableQuarters,
+  semesterFilter,
+  onSemesterFilterChange,
+  availableSemesters,
 }: {
   selected: Period | 'meeting' | 'title_group';
   onChange: (v: Period | 'meeting' | 'title_group') => void;
@@ -92,6 +113,12 @@ export function PeriodSelector({
   monthFilter?: string;
   onMonthFilterChange?: (v: string) => void;
   availableMonths?: string[];
+  quarterFilter?: string[];
+  onQuarterFilterChange?: (v: string[]) => void;
+  availableQuarters?: string[];
+  semesterFilter?: string[];
+  onSemesterFilterChange?: (v: string[]) => void;
+  availableSemesters?: string[];
 }) {
   return (
     <div className="space-y-2">
@@ -140,6 +167,38 @@ export function PeriodSelector({
               );
             })}
           </select>
+        </div>
+      )}
+      {selected === 'quarterly' && onQuarterFilterChange && availableQuarters && availableQuarters.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-muted-foreground">Trimestres:</span>
+          <div className="min-w-[200px]">
+            <MultiSelect
+              options={availableQuarters.map((q) => ({
+                value: q,
+                label: formatQuarterLabel(q),
+              }))}
+              selected={quarterFilter ?? []}
+              onChange={onQuarterFilterChange}
+              placeholder="Todos (últimos 4 trimestres)"
+            />
+          </div>
+        </div>
+      )}
+      {selected === 'semiannual' && onSemesterFilterChange && availableSemesters && availableSemesters.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-muted-foreground">Semestres:</span>
+          <div className="min-w-[200px]">
+            <MultiSelect
+              options={availableSemesters.map((s) => ({
+                value: s,
+                label: formatSemesterLabel(s),
+              }))}
+              selected={semesterFilter ?? []}
+              onChange={onSemesterFilterChange}
+              placeholder="Todos (últimos 4 semestres)"
+            />
+          </div>
         </div>
       )}
       {onTitleFilterChange && selected !== 'meeting' && selected !== 'title_group' && (
