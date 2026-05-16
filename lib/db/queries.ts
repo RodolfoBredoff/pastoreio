@@ -591,6 +591,27 @@ export async function saveAttendance(
           );
         }
         
+        // Atualizar o estágio de integração baseado nas presenças
+        // Isso precisa acontecer DENTRO da transação, após migrar as presenças
+        await client.query(
+          `UPDATE members
+           SET integration_stage = CASE
+             WHEN (
+               SELECT COUNT(*) FROM attendance a
+               JOIN meetings m ON m.id = a.meeting_id
+               WHERE a.member_id = $1 AND a.is_present = TRUE AND m.group_id = $2
+             ) >= 4 THEN 'integrando'
+             WHEN (
+               SELECT COUNT(*) FROM attendance a
+               JOIN meetings m ON m.id = a.meeting_id
+               WHERE a.member_id = $1 AND a.is_present = TRUE AND m.group_id = $2
+             ) >= 2 THEN 'retornou'
+             ELSE 'novo_visitante'
+           END
+           WHERE id = $1 AND member_type = 'visitor' AND integration_stage != 'membro'`,
+          [newMemberId, groupId]
+        );
+        
         // Agora sim remover os registros antigos de guest
         await client.query(
           `DELETE FROM attendance_guests WHERE guest_id = $1`,
