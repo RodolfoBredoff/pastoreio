@@ -4,8 +4,9 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { queryMany } from '@/lib/db/postgres';
 import {
   buildMemberTagMap,
-  filterMemberIdsByTagFilters,
+  filterMemberIdsByTagFiltersWithMode,
   parseTagFiltersJson,
+  concatenateTagValues,
   TAG_BUCKET_SEM_TAG,
 } from '@/lib/member-tags-filter';
 
@@ -47,6 +48,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'filters deve ser um objeto JSON válido' }, { status: 400 });
     }
 
+    const mode = (searchParams.get('mode')?.toUpperCase() === 'OR' ? 'OR' : 'AND') as 'AND' | 'OR';
+
     const memberRows = await queryMany<{ id: string; full_name: string; phone: string | null; member_type: string }>(
       `SELECT id, full_name, phone, member_type::text
        FROM members
@@ -70,16 +73,21 @@ export async function GET(request: Request) {
     );
 
     const byMember = buildMemberTagMap(tagRows);
-    const filteredIds = new Set(filterMemberIdsByTagFilters(allMemberIds, byMember, filters));
+    const filteredIds = new Set(filterMemberIdsByTagFiltersWithMode(allMemberIds, byMember, filters, mode));
 
     const inBucket = (memberId: string): boolean => {
       if (!filteredIds.has(memberId)) return false;
       const tags = byMember.get(memberId);
-      const v = tags?.get(tagKey);
+      const values = tags?.get(tagKey);
       if (bucket === TAG_BUCKET_SEM_TAG) {
-        return v === undefined;
+        return !values || values.length === 0;
       }
-      return v === bucket;
+      // For multiple values, the bucket is the concatenated string
+      if (values && values.length > 0) {
+        const concatenated = concatenateTagValues(values);
+        return concatenated === bucket;
+      }
+      return false;
     };
 
     const members = memberRows.filter((m) => inBucket(m.id));

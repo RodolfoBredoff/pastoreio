@@ -172,6 +172,7 @@ export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChart
       params.set('tag_key', tagKey);
       params.set('bucket', bucket);
       if (membersQuery.filtersJson) params.set('filters', membersQuery.filtersJson);
+      params.set('mode', membersQuery.mode);
       const res = await fetch(`/api/member-tags/members?${params.toString()}`, { cache: 'no-store' });
       const data = res.ok ? await res.json() : { members: [] };
       setBucketMembers(Array.isArray(data.members) ? data.members : []);
