@@ -55,11 +55,11 @@ export async function GET(request: Request) {
 }
 
 /**
- * PUT /api/member-tags
- * Body: { member_id: string, tag_key: string, tag_value?: string }
- * Cria ou atualiza uma tag (uma chave por membro).
+ * POST /api/member-tags
+ * Body: { member_id: string, tag_key: string, tag_value: string }
+ * Adiciona um valor a uma tag (permite múltiplos valores para a mesma chave).
  */
-export async function PUT(request: Request) {
+export async function POST(request: Request) {
   try {
     await requireAuth();
     const leader = await getCurrentLeader();
@@ -81,8 +81,60 @@ export async function PUT(request: Request) {
     const row = await queryOne<{ id: string; tag_key: string; tag_value: string; updated_at: string }>(
       `INSERT INTO member_tags (member_id, tag_key, tag_value, updated_at)
        VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (member_id, tag_key)
-       DO UPDATE SET tag_value = EXCLUDED.tag_value, updated_at = NOW()
+       ON CONFLICT (member_id, tag_key, tag_value) DO NOTHING
+       RETURNING id, tag_key, tag_value, updated_at::text`,
+      [memberId, tagKey, tagValue]
+    );
+    
+    if (!row) {
+      // Valor já existe, retornar o existente
+      const existing = await queryOne<{ id: string; tag_key: string; tag_value: string; updated_at: string }>(
+        `SELECT id, tag_key, tag_value, updated_at::text
+         FROM member_tags
+         WHERE member_id = $1 AND tag_key = $2 AND tag_value = $3`,
+        [memberId, tagKey, tagValue]
+      );
+      return NextResponse.json({ tag: existing, message: 'Valor já existe' });
+    }
+    
+    return NextResponse.json({ tag: row });
+  } catch (e) {
+    console.error('member-tags POST:', e);
+    return NextResponse.json({ error: 'Erro ao adicionar tag' }, { status: 500 });
+  }
+}
+
+/**
+ * PUT /api/member-tags
+ * Body: { member_id: string, tag_key: string, tag_value?: string }
+ * Remove todos os valores da chave e define um único valor (compatibilidade).
+ */
+export async function PUT(request: Request) {
+  try {
+    await requireAuth();
+    const leader = await getCurrentLeader();
+    if (!leader?.group_id) {
+      return NextResponse.json({ error: 'Líder não vinculado a um grupo' }, { status: 400 });
+    }
+    const body = await request.json();
+    const memberId = typeof body.member_id === 'string' ? body.member_id.trim() : '';
+    const tagKey = normalizeKey(body.tag_key);
+    const tagValue = normalizeValue(body.tag_value);
+    if (!memberId || !tagKey) {
+      return NextResponse.json({ error: 'member_id e tag_key válidos são obrigatórios' }, { status: 400 });
+    }
+    const member = await getMemberByIdAndGroup(memberId, leader.group_id);
+    if (!member) {
+      return NextResponse.json({ error: 'Membro não encontrado' }, { status: 404 });
+    }
+
+    // Remove todos os valores existentes desta chave para este membro
+    await query(`DELETE FROM member_tags WHERE member_id = $1 AND tag_key = $2`, [memberId, tagKey]);
+    
+    // Insere o novo valor único
+    const row = await queryOne<{ id: string; tag_key: string; tag_value: string; updated_at: string }>(
+      `INSERT INTO member_tags (member_id, tag_key, tag_value, updated_at)
+       VALUES ($1, $2, $3, NOW())
        RETURNING id, tag_key, tag_value, updated_at::text`,
       [memberId, tagKey, tagValue]
     );
@@ -95,7 +147,9 @@ export async function PUT(request: Request) {
 
 /**
  * DELETE /api/member-tags
- * Body: { member_id: string, tag_key: string }
+ * Body: { member_id: string, tag_key: string, tag_value?: string }
+ * Se tag_value for fornecido: remove apenas aquele valor específico
+ * Se tag_value não for fornecido: remove todos os valores da chave
  */
 export async function DELETE(request: Request) {
   try {
@@ -115,7 +169,18 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Membro não encontrado' }, { status: 404 });
     }
 
-    await query(`DELETE FROM member_tags WHERE member_id = $1 AND tag_key = $2`, [memberId, tagKey]);
+    // Se tag_value for fornecido, remove apenas aquele valor
+    // Caso contrário, remove todos os valores da chave
+    if (body.tag_value !== undefined && body.tag_value !== null) {
+      const tagValue = normalizeValue(body.tag_value);
+      await query(
+        `DELETE FROM member_tags WHERE member_id = $1 AND tag_key = $2 AND tag_value = $3`, 
+        [memberId, tagKey, tagValue]
+      );
+    } else {
+      await query(`DELETE FROM member_tags WHERE member_id = $1 AND tag_key = $2`, [memberId, tagKey]);
+    }
+    
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error('member-tags DELETE:', e);

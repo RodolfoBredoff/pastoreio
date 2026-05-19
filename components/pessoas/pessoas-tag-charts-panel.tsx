@@ -43,12 +43,13 @@ export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChart
   const [customKeyInput, setCustomKeyInput] = useState('');
   const [valuesByKey, setValuesByKey] = useState<Record<string, string[]>>({});
   const [filters, setFilters] = useState<Record<string, string[]>>({});
+  const [filterMode, setFilterMode] = useState<'AND' | 'OR'>('AND');
   const [distributions, setDistributions] = useState<Distribution[]>([]);
   const [memberCount, setMemberCount] = useState<number | null>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [loadingValues, setLoadingValues] = useState(false);
   const [loadingChart, setLoadingChart] = useState(false);
-  const [membersQuery, setMembersQuery] = useState<{ keysCsv: string; filtersJson: string } | null>(null);
+  const [membersQuery, setMembersQuery] = useState<{ keysCsv: string; filtersJson: string; mode: 'AND' | 'OR' } | null>(null);
   const [bucketDialogOpen, setBucketDialogOpen] = useState(false);
   const [bucketLoading, setBucketLoading] = useState(false);
   const [bucketTitle, setBucketTitle] = useState('');
@@ -135,8 +136,9 @@ export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChart
         Object.keys(filterPayload).length > 0
           ? `&filters=${encodeURIComponent(JSON.stringify(filterPayload))}`
           : '';
+      const modeQs = `&mode=${filterMode}`;
       const res = await fetch(
-        `/api/member-tags/analytics?keys=${encodeURIComponent(keysParam)}${filtersQs}`,
+        `/api/member-tags/analytics?keys=${encodeURIComponent(keysParam)}${filtersQs}${modeQs}`,
         { cache: 'no-store' }
       );
       const data = res.ok ? await res.json() : { distributions: [], memberCount: 0 };
@@ -145,6 +147,7 @@ export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChart
       setMembersQuery({
         keysCsv: keysParam,
         filtersJson: Object.keys(filterPayload).length > 0 ? JSON.stringify(filterPayload) : '',
+        mode: filterMode,
       });
     } finally {
       setLoadingChart(false);
@@ -279,7 +282,45 @@ export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChart
 
         {chartKeys.length > 0 && (
           <div className="space-y-3 rounded-md border p-3 bg-muted/20">
-            <p className="text-sm font-medium">Filtro por valores (opcional)</p>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium">Filtro por valores (opcional)</p>
+              {Object.keys(filters).some(k => filters[k]?.length > 0) && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">Modo:</span>
+                  <div className="inline-flex rounded-md border bg-background">
+                    <button
+                      type="button"
+                      className={`px-2 py-1 text-xs font-medium transition-colors rounded-l ${
+                        filterMode === 'AND' 
+                          ? 'bg-primary text-primary-foreground' 
+                          : 'hover:bg-muted'
+                      }`}
+                      onClick={() => setFilterMode('AND')}
+                    >
+                      E (AND)
+                    </button>
+                    <button
+                      type="button"
+                      className={`px-2 py-1 text-xs font-medium transition-colors rounded-r border-l ${
+                        filterMode === 'OR' 
+                          ? 'bg-primary text-primary-foreground' 
+                          : 'hover:bg-muted'
+                      }`}
+                      onClick={() => setFilterMode('OR')}
+                    >
+                      OU (OR)
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            {Object.keys(filters).some(k => filters[k]?.length > 0) && (
+              <p className="text-xs text-muted-foreground">
+                {filterMode === 'AND' 
+                  ? 'Mostrar apenas pessoas que têm TODAS as tags selecionadas' 
+                  : 'Mostrar pessoas que têm PELO MENOS UMA das tags selecionadas'}
+              </p>
+            )}
             {loadingValues ? (
               <p className="text-xs text-muted-foreground flex items-center gap-1">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carregando valores…

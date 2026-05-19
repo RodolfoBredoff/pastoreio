@@ -4,15 +4,18 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { queryMany } from '@/lib/db/postgres';
 import {
   buildMemberTagMap,
-  filterMemberIdsByTagFilters,
+  filterMemberIdsByTagFiltersWithMode,
   parseTagFiltersJson,
+  concatenateTagValues,
   TAG_BUCKET_SEM_TAG,
 } from '@/lib/member-tags-filter';
 
 /**
- * GET /api/member-tags/analytics?keys=a,b,c&filters={"chave":["v1"]}
- * Para cada chave em `keys`, histograma de valores entre membros ativos do grupo
- * que satisfazem todos os filtros (AND por chave: valor da tag deve estar na lista).
+ * GET /api/member-tags/analytics?keys=a,b,c&filters={"chave":["v1"]}&mode=AND
+ * Para cada chave em `keys`, histograma de valores entre membros ativos do grupo.
+ * @param keys - Chaves de tags para criar histogramas
+ * @param filters - Filtros a aplicar (formato JSON)
+ * @param mode - 'AND' (padrão) ou 'OR' para combinar filtros
  */
 export async function GET(request: Request) {
   try {
@@ -39,6 +42,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'filters deve ser um objeto JSON válido' }, { status: 400 });
     }
 
+    const mode = (searchParams.get('mode')?.toUpperCase() === 'OR' ? 'OR' : 'AND') as 'AND' | 'OR';
+
     const memberRows = await queryMany<{ id: string }>(
       `SELECT id FROM members WHERE group_id = $1 AND is_active = TRUE`,
       [leader.group_id]
@@ -59,18 +64,20 @@ export async function GET(request: Request) {
     );
 
     const byMember = buildMemberTagMap(tagRows);
-    const filteredMembers = filterMemberIdsByTagFilters(allMemberIds, byMember, filters);
+    const filteredMembers = filterMemberIdsByTagFiltersWithMode(allMemberIds, byMember, filters, mode);
 
     const distributions = chartKeys.map((tagKey) => {
       const bucketMap = new Map<string, number>();
       let semTag = 0;
       for (const mid of filteredMembers) {
         const tags = byMember.get(mid);
-        const v = tags?.get(tagKey);
-        if (v === undefined) {
+        const values = tags?.get(tagKey);
+        if (!values || values.length === 0) {
           semTag += 1;
         } else {
-          bucketMap.set(v, (bucketMap.get(v) ?? 0) + 1);
+          // Concatenar múltiplos valores para exibição como um único bucket
+          const concatenated = concatenateTagValues(values);
+          bucketMap.set(concatenated, (bucketMap.get(concatenated) ?? 0) + 1);
         }
       }
       const buckets: { value: string; count: number }[] = [];

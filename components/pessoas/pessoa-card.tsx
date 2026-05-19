@@ -29,6 +29,7 @@ interface Member {
   phone: string;
   birth_date: string | null;
   member_type: 'participant' | 'visitor';
+  is_active: boolean;
   integration_stage?: string | null;
   marked_not_returned?: boolean;
   /** Nomes dos membros que este discipula (label "Discipulador de X, Y"). */
@@ -93,7 +94,10 @@ export function PessoaCard({
 
   return (
     <>
-    <Card className="overflow-hidden hover:shadow-lg transition-shadow">
+    <Card className={cn(
+      "overflow-hidden hover:shadow-lg transition-shadow",
+      !member.is_active && "opacity-60 bg-muted/30"
+    )}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between mb-3 gap-2">
           {selectionMode && (
@@ -106,10 +110,17 @@ export function PessoaCard({
             />
           )}
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-lg leading-tight mb-2 truncate">
-              {member.full_name}
-              {isBirthday && <Cake className="inline-block ml-2 h-4 w-4 text-amber-500" />}
-            </h3>
+            <div className="flex items-center gap-2 flex-wrap mb-2">
+              <h3 className="font-semibold text-lg leading-tight truncate">
+                {member.full_name}
+                {isBirthday && <Cake className="inline-block ml-2 h-4 w-4 text-amber-500" />}
+              </h3>
+              {!member.is_active && (
+                <Badge variant="secondary" className="text-xs shrink-0">
+                  Inativo
+                </Badge>
+              )}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge
                 variant={member.member_type === 'participant' ? 'default' : 'secondary'}

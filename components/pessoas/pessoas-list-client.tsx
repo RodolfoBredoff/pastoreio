@@ -60,6 +60,7 @@ function filterByMemberType(members: Member[], memberTypeFilter: MemberTypeFilte
 export function PessoasListClient({ members, canDelete }: PessoasListClientProps) {
   const [listMode, setListMode] = useState<ListMode>('all');
   const [memberTypeFilter, setMemberTypeFilter] = useState<MemberTypeFilter>('total');
+  const [showInactive, setShowInactive] = useState(false);
   const [absentMetricMode, setAbsentMetricMode] = useState<AbsentMetricMode>('most_absent');
   const [absentYearMonth, setAbsentYearMonth] = useState(() => {
     const d = new Date();
@@ -190,6 +191,17 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
       {members && members.length > 0 && (
         <div className="space-y-3 rounded-lg border p-4 bg-muted/20">
           <p className="text-sm font-medium">Filtrar lista</p>
+          <div className="flex flex-wrap gap-2 items-center">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              <span className="text-xs">Mostrar inativos</span>
+            </label>
+          </div>
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs text-muted-foreground">Modo:</span>
             <Button

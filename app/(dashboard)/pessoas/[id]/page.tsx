@@ -4,6 +4,7 @@ import { PessoaForm } from '@/components/pessoas/pessoa-form';
 import { MemberAttendanceStats } from '@/components/pessoas/member-attendance-stats';
 import { MemberTagsEditor } from '@/components/pessoas/member-tags-editor';
 import { DeleteMemberButton } from '@/components/pessoas/delete-member-button';
+import { ToggleMemberStatusButton } from '@/components/pessoas/toggle-member-status-button';
 import { ContactLog } from '@/components/pessoas/contact-log';
 import { VisitorStageCard } from '@/components/pessoas/visitor-stage-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,11 +41,18 @@ export default async function EditarPessoaPage({
           <h1 className="text-2xl sm:text-3xl font-bold mb-2">Editar Pessoa</h1>
           <p className="text-muted-foreground">{member.full_name}</p>
         </div>
-        <DeleteMemberButton
-          memberId={id}
-          memberName={member.full_name}
-          canDelete={canDelete}
-        />
+        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
+          <ToggleMemberStatusButton
+            memberId={id}
+            memberName={member.full_name}
+            isActive={member.is_active}
+          />
+          <DeleteMemberButton
+            memberId={id}
+            memberName={member.full_name}
+            canDelete={canDelete}
+          />
+        </div>
       </div>
 
       {(member.discipulador_full_name || (member.discipulador_de?.length ?? 0) > 0) && (
