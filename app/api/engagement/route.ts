@@ -54,6 +54,115 @@ function formatPeriodLabel(dateStr: string, period: Period): string {
   }
 }
 
+interface MeetingRow {
+  id: string;
+  meeting_date: string;
+  title: string | null;
+  meeting_type: string;
+  period_start: string;
+}
+
+interface AttendanceRow {
+  meeting_id: string;
+  member_id: string;
+  member_name: string;
+  member_type: string;
+  is_present: boolean;
+}
+
+interface PeriodDataRow {
+  period: string;
+  periodStart: string;
+  presentes: number;
+  ausentes: number;
+  meetingCount: number;
+  taxa: number;
+}
+
+function getMeetingPeriodStart(meetingDate: string, agg: Period): string {
+  const date = new Date(meetingDate + 'T12:00:00Z');
+  switch (agg) {
+    case 'weekly': {
+      const day = date.getUTCDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      const monday = new Date(date);
+      monday.setUTCDate(date.getUTCDate() + diff);
+      return monday.toISOString().slice(0, 10);
+    }
+    case 'monthly':
+      return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-01`;
+    case 'quarterly': {
+      const quarterMonth = Math.floor(date.getUTCMonth() / 3) * 3;
+      return `${date.getUTCFullYear()}-${String(quarterMonth + 1).padStart(2, '0')}-01`;
+    }
+    case 'semiannual':
+      return date.getUTCMonth() < 6
+        ? `${date.getUTCFullYear()}-01-01`
+        : `${date.getUTCFullYear()}-07-01`;
+    case 'yearly':
+      return `${date.getUTCFullYear()}-01-01`;
+  }
+}
+
+function buildPeriodData(
+  meetings: MeetingRow[],
+  attendanceByType: AttendanceRow[],
+  guestCountByMeeting: Map<string, number>,
+  includeGuestsInPeriod: boolean,
+  aggPeriod: Period,
+  useMeetingPeriodStart = false,
+): PeriodDataRow[] {
+  const periodMap = new Map<string, { presentes: number; ausentes: number; meetingCount: number }>();
+
+  for (const meeting of meetings) {
+    const key = useMeetingPeriodStart
+      ? getMeetingPeriodStart(meeting.meeting_date, aggPeriod)
+      : meeting.period_start;
+    if (!periodMap.has(key)) {
+      periodMap.set(key, { presentes: 0, ausentes: 0, meetingCount: 0 });
+    }
+    periodMap.get(key)!.meetingCount++;
+
+    const meetingAtt = attendanceByType.filter((a) => a.meeting_id === meeting.id);
+    for (const att of meetingAtt) {
+      if (att.is_present) {
+        periodMap.get(key)!.presentes++;
+      } else {
+        periodMap.get(key)!.ausentes++;
+      }
+    }
+    if (includeGuestsInPeriod) {
+      periodMap.get(key)!.presentes += guestCountByMeeting.get(meeting.id) ?? 0;
+    }
+  }
+
+  return Array.from(periodMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([periodStart, data]) => ({
+      period: formatPeriodLabel(periodStart, aggPeriod),
+      periodStart,
+      presentes: data.presentes,
+      ausentes: data.ausentes,
+      meetingCount: data.meetingCount,
+      taxa: data.presentes + data.ausentes > 0
+        ? Math.round((data.presentes / (data.presentes + data.ausentes)) * 100)
+        : 0,
+    }));
+}
+
+function getBreakdownGranularity(
+  effectivePeriod: Period,
+  yearMonth: string | null,
+  selectedQuarters: string[] | null,
+  selectedSemesters: string[] | null,
+): Period | null {
+  if (effectivePeriod === 'monthly' && yearMonth) return 'weekly';
+  if (effectivePeriod === 'quarterly' && selectedQuarters && selectedQuarters.length > 0) return 'monthly';
+  if (effectivePeriod === 'semiannual' && selectedSemesters && selectedSemesters.length > 0) return 'monthly';
+  if (effectivePeriod === 'yearly') return 'monthly';
+  return null;
+}
+
 /**
  * GET /api/engagement
  *
@@ -483,11 +592,35 @@ export async function GET(request: Request) {
       }>(meetingsQuery, queryParams as string[]);
     }
 
+    const emptySummary = {
+      totalPresentes: 0,
+      totalAusentes: 0,
+      taxaGeral: 0,
+      meetingCount: 0,
+      inactiveMemberCount: 0,
+      periodAvgRate: 0,
+    };
+
     if (meetings.length === 0) {
+      const memberCounts = groupId
+        ? await queryOne<{ inactive: number }>(
+            `SELECT COUNT(*)::int AS inactive FROM members WHERE group_id = $1 AND is_active = FALSE`,
+            [groupId],
+          )
+        : null;
+
       return NextResponse.json({
         mode: 'period',
         period: effectivePeriod,
         periodData: [],
+        breakdownData: [],
+        chartData: [],
+        breakdownGranularity: null,
+        chartGranularity: effectivePeriod,
+        summary: {
+          ...emptySummary,
+          inactiveMemberCount: memberCounts?.inactive ?? 0,
+        },
         memberStats: [],
         meetingList: [],
       });
@@ -496,7 +629,7 @@ export async function GET(request: Request) {
     const meetingIds = meetings.map((m) => m.id);
 
     // Buscar todas as presenças (membros) e contagem de visitantes por encontro
-    const [attendance, guestCounts] = await Promise.all([
+    const [attendance, guestCounts, memberCounts] = await Promise.all([
       queryMany<{
         meeting_id: string;
         member_id: string;
@@ -519,6 +652,10 @@ export async function GET(request: Request) {
         `SELECT meeting_id, COUNT(*)::int as cnt FROM attendance_guests WHERE meeting_id = ANY($1::uuid[]) GROUP BY meeting_id`,
         [meetingIds]
       ),
+      queryOne<{ inactive: number }>(
+        `SELECT COUNT(*)::int AS inactive FROM members WHERE group_id = $1 AND is_active = FALSE`,
+        [groupId],
+      ),
     ]);
 
     const guestCountByMeeting = new Map(guestCounts.map((r) => [r.meeting_id, r.cnt]));
@@ -531,43 +668,51 @@ export async function GET(request: Request) {
           ? attendance.filter((a) => a.member_type === 'visitor')
           : attendance;
 
-    // Agrupar por período
-    const periodMap = new Map<string, { presentes: number; ausentes: number; meetingCount: number }>();
+    const periodData = buildPeriodData(
+      meetings,
+      attendanceByType,
+      guestCountByMeeting,
+      includeGuestsInPeriod,
+      effectivePeriod,
+    );
 
-    for (const meeting of meetings) {
-      const key = meeting.period_start;
-      if (!periodMap.has(key)) {
-        periodMap.set(key, { presentes: 0, ausentes: 0, meetingCount: 0 });
-      }
-      periodMap.get(key)!.meetingCount++;
+    const breakdownGranularity = getBreakdownGranularity(
+      effectivePeriod,
+      yearMonth,
+      selectedQuarters,
+      selectedSemesters,
+    );
 
-      const meetingAtt = attendanceByType.filter((a) => a.meeting_id === meeting.id);
-      for (const att of meetingAtt) {
-        if (att.is_present) {
-          periodMap.get(key)!.presentes++;
-        } else {
-          periodMap.get(key)!.ausentes++;
-        }
-      }
-      if (includeGuestsInPeriod) {
-        const guestsInMeeting = guestCountByMeeting.get(meeting.id) ?? 0;
-        periodMap.get(key)!.presentes += guestsInMeeting;
-      }
-    }
+    const breakdownData = breakdownGranularity
+      ? buildPeriodData(
+          meetings,
+          attendanceByType,
+          guestCountByMeeting,
+          includeGuestsInPeriod,
+          breakdownGranularity,
+          true,
+        )
+      : periodData;
 
-    // Construir array de dados por período, ordenado
-    const periodData = Array.from(periodMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([periodStart, data]) => ({
-        period: formatPeriodLabel(periodStart, effectivePeriod),
-        periodStart,
-        presentes: data.presentes,
-        ausentes: data.ausentes,
-        meetingCount: data.meetingCount,
-        taxa: data.presentes + data.ausentes > 0
-          ? Math.round((data.presentes / (data.presentes + data.ausentes)) * 100)
-          : 0,
-      }));
+    const chartGranularity = breakdownGranularity ?? effectivePeriod;
+    const chartData = breakdownGranularity ? breakdownData : periodData;
+
+    const totalPresentes = periodData.reduce((s, d) => s + d.presentes, 0);
+    const totalAusentes = periodData.reduce((s, d) => s + d.ausentes, 0);
+    const totalRecords = totalPresentes + totalAusentes;
+    const meetingCount = periodData.reduce((s, d) => s + d.meetingCount, 0);
+    const periodAvgRate = periodData.length > 0
+      ? Math.round(periodData.reduce((s, d) => s + d.taxa, 0) / periodData.length)
+      : 0;
+
+    const summary = {
+      totalPresentes,
+      totalAusentes,
+      taxaGeral: totalRecords > 0 ? Math.round((totalPresentes / totalRecords) * 100) : 0,
+      meetingCount,
+      inactiveMemberCount: memberCounts?.inactive ?? 0,
+      periodAvgRate,
+    };
 
     // Estatísticas por membro (todo o período), já filtrado por tipo
     const memberMap = new Map<string, { name: string; type: string; presences: number; absences: number }>();
@@ -612,6 +757,11 @@ export async function GET(request: Request) {
       mode: 'period',
       period: effectivePeriod,
       periodData,
+      breakdownData,
+      chartData,
+      breakdownGranularity,
+      chartGranularity,
+      summary,
       memberStats,
       meetingList,
     });
