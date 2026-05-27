@@ -4,9 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PessoaCard } from '@/components/pessoas/pessoa-card';
 import { BroadcastDialogClient } from '@/components/pessoas/broadcast-dialog-client';
 import { PessoasEngagementPanel } from '@/components/pessoas/pessoas-engagement-panel';
-import { PessoasTagChartsPanel } from '@/components/pessoas/pessoas-tag-charts-panel';
+import {
+  PessoasTagChartsPanel,
+  type TagListFilterState,
+} from '@/components/pessoas/pessoas-tag-charts-panel';
 import { BulkMemberTagsDialog } from '@/components/pessoas/bulk-member-tags-dialog';
-import { IntegrationStagesPanel } from '@/components/pessoas/integration-stages-panel';
+import {
+  IntegrationStagesPanel,
+  type StageListFilterState,
+} from '@/components/pessoas/integration-stages-panel';
 import { LinkButton } from '@/components/ui/link-button';
 import { Button } from '@/components/ui/button';
 import { UserPlus, Users, Download } from 'lucide-react';
@@ -57,6 +63,16 @@ function filterByMemberType(members: Member[], memberTypeFilter: MemberTypeFilte
   return members;
 }
 
+function intersectByIds(members: Member[], ids: Set<string> | null): Member[] {
+  if (!ids) return members;
+  return members.filter((m) => ids.has(m.id));
+}
+
+function applyActiveFilter(members: Member[], showInactive: boolean): Member[] {
+  if (showInactive) return members;
+  return members.filter((m) => m.is_active);
+}
+
 export function PessoasListClient({ members, canDelete }: PessoasListClientProps) {
   const [listMode, setListMode] = useState<ListMode>('all');
   const [memberTypeFilter, setMemberTypeFilter] = useState<MemberTypeFilter>('total');
@@ -74,8 +90,18 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
+  const [tagListFilter, setTagListFilter] = useState<TagListFilterState | null>(null);
+  const [stageListFilter, setStageListFilter] = useState<StageListFilterState | null>(null);
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
+  const tagListFilterIds = useMemo(
+    () => (tagListFilter ? new Set(tagListFilter.memberIds) : null),
+    [tagListFilter]
+  );
+  const stageListFilterIds = useMemo(
+    () => (stageListFilter ? new Set(stageListFilter.memberIds) : null),
+    [stageListFilter]
+  );
 
   const bumpTags = useCallback(() => setTagsEpoch((n) => n + 1), []);
 
@@ -101,6 +127,10 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
       setSelectionMode(false);
       setSelectedIds(new Set());
     }
+  }, [listMode]);
+
+  useEffect(() => {
+    if (listMode !== 'stages') setStageListFilter(null);
   }, [listMode]);
 
   useEffect(() => {
@@ -140,7 +170,7 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
       .finally(() => setLoadingAbsent(false));
   }, [listMode, memberTypeFilter, absentMetricMode, absentYearMonth, absentWindow]);
 
-  const displayedMembers = useMemo(() => {
+  const baseMembers = useMemo(() => {
     if (listMode === 'all') {
       return filterByMemberType(members, memberTypeFilter).sort((a, b) =>
         a.full_name.localeCompare(b.full_name, 'pt-BR')
@@ -149,13 +179,35 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
     if (listMode === 'engagement') {
       return engagementMembers;
     }
+    if (listMode === 'stages') {
+      const visitors = members
+        .filter((m) => m.member_type === 'visitor')
+        .sort((a, b) => a.full_name.localeCompare(b.full_name, 'pt-BR'));
+      if (stageListFilterIds) {
+        return visitors.filter((m) => stageListFilterIds.has(m.id));
+      }
+      return visitors;
+    }
     return absentRows
       .map((row) => memberById.get(row.id))
       .filter((m): m is Member => !!m);
-  }, [listMode, members, memberTypeFilter, absentRows, engagementMembers, memberById]);
+  }, [
+    listMode,
+    members,
+    memberTypeFilter,
+    absentRows,
+    engagementMembers,
+    memberById,
+    stageListFilterIds,
+  ]);
 
-  const forBroadcast =
-    displayedMembers.length > 0 ? displayedMembers : listMode === 'all' ? members : [];
+  const displayedMembers = useMemo(() => {
+    let list = applyActiveFilter(baseMembers, showInactive);
+    list = intersectByIds(list, tagListFilterIds);
+    return list;
+  }, [baseMembers, showInactive, tagListFilterIds]);
+
+  const forBroadcast = displayedMembers;
 
   return (
     <div className="space-y-6 w-full min-w-0">
@@ -325,7 +377,7 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
             <PessoasEngagementPanel members={members} onFilteredMembersChange={setEngagementFiltered} />
           )}
           {listMode === 'stages' && (
-            <IntegrationStagesPanel />
+            <IntegrationStagesPanel onListFilterChange={setStageListFilter} />
           )}
           {loadingAbsent && listMode === 'absent' && (
             <p className="text-xs text-muted-foreground">Carregando…</p>
@@ -334,7 +386,38 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
       )}
 
       {members && members.length > 0 && (
-        <PessoasTagChartsPanel tagsRefreshSignal={tagsEpoch} />
+        <PessoasTagChartsPanel
+          tagsRefreshSignal={tagsEpoch}
+          onListFilterChange={setTagListFilter}
+        />
+      )}
+
+      {(tagListFilter || stageListFilter) && (
+        <div className="flex flex-wrap gap-2 items-center rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">Filtro ativo na listagem:</span>
+          {tagListFilter && (
+            <span className="font-medium">
+              {tagListFilter.label} ({tagListFilter.memberIds.length})
+            </span>
+          )}
+          {stageListFilter && (
+            <span className="font-medium">
+              {stageListFilter.label} ({stageListFilter.memberIds.length})
+            </span>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => {
+              setTagListFilter(null);
+              setStageListFilter(null);
+            }}
+          >
+            Limpar filtros do gráfico
+          </Button>
+        </div>
       )}
 
       {listMode === 'all' && members.length > 0 && (

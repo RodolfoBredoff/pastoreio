@@ -68,7 +68,16 @@ interface MemberByStage {
   marked_not_returned: boolean;
 }
 
-export function IntegrationStagesPanel() {
+export interface StageListFilterState {
+  memberIds: string[];
+  label: string;
+}
+
+interface IntegrationStagesPanelProps {
+  onListFilterChange?: (filter: StageListFilterState | null) => void;
+}
+
+export function IntegrationStagesPanel({ onListFilterChange }: IntegrationStagesPanelProps) {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>('all');
   const [stats, setStats] = useState<StatsResponse | null>(null);
@@ -95,7 +104,8 @@ export function IntegrationStagesPanel() {
 
   useEffect(() => {
     void loadStats(period);
-  }, [period, loadStats]);
+    onListFilterChange?.(null);
+  }, [period, loadStats, onListFilterChange]);
 
   const loadMembersByStage = useCallback(async (stage: string) => {
     setLoadingMembers(true);
@@ -108,14 +118,25 @@ export function IntegrationStagesPanel() {
       );
       if (res.ok) {
         const data = await res.json();
-        setStageMembers(data.members || []);
+        const list = data.members || [];
+        setStageMembers(list);
+        const stageLabel =
+          stage === 'nao_retornou'
+            ? VISITOR_STATUS_LABELS.not_returned
+            : stage === 'nao_participou_ano'
+              ? VISITOR_STATUS_LABELS.not_participated_year
+              : INTEGRATION_STAGE_LABELS[stage] ?? stage;
+        onListFilterChange?.({
+          memberIds: list.map((m: MemberByStage) => m.id),
+          label: `Estágio: ${stageLabel}`,
+        });
       }
     } catch (error) {
       console.error('Erro ao buscar membros:', error);
     } finally {
       setLoadingMembers(false);
     }
-  }, [period]);
+  }, [period, onListFilterChange]);
 
   const handleBarClick = (data: { stage: string }) => {
     if (data && data.stage) {
@@ -378,7 +399,7 @@ export function IntegrationStagesPanel() {
         <CardHeader>
           <CardTitle className="text-lg">Distribuição por Estágio</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Quantidade de pessoas em cada estágio
+            Quantidade de pessoas em cada estágio — clique em uma barra para filtrar a listagem abaixo
             {stats.funnel.nao_retornou > 0 && ' (incluindo visitantes que não retornaram)'}
           </p>
         </CardHeader>

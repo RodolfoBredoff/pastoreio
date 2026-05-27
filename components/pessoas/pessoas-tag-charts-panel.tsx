@@ -32,12 +32,22 @@ interface Distribution {
   buckets: { value: string; count: number }[];
 }
 
+export interface TagListFilterState {
+  memberIds: string[];
+  label: string;
+}
+
 interface PessoasTagChartsPanelProps {
   /** Incrementar para recarregar chaves do grupo (ex.: após salvar tags na lista). */
   tagsRefreshSignal?: number;
+  /** Atualiza a listagem e o envio em grupo com os IDs filtrados; null limpa o filtro. */
+  onListFilterChange?: (filter: TagListFilterState | null) => void;
 }
 
-export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChartsPanelProps) {
+export function PessoasTagChartsPanel({
+  tagsRefreshSignal = 0,
+  onListFilterChange,
+}: PessoasTagChartsPanelProps) {
   const [existingKeys, setExistingKeys] = useState<string[]>([]);
   const [chartKeys, setChartKeys] = useState<string[]>([]);
   const [customKeyInput, setCustomKeyInput] = useState('');
@@ -123,6 +133,7 @@ export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChart
     if (chartKeys.length === 0) {
       setDistributions([]);
       setMemberCount(null);
+      onListFilterChange?.(null);
       return;
     }
     setLoadingChart(true);
@@ -144,15 +155,65 @@ export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChart
       const data = res.ok ? await res.json() : { distributions: [], memberCount: 0 };
       setDistributions(Array.isArray(data.distributions) ? data.distributions : []);
       setMemberCount(typeof data.memberCount === 'number' ? data.memberCount : 0);
-      setMembersQuery({
+      const query = {
         keysCsv: keysParam,
         filtersJson: Object.keys(filterPayload).length > 0 ? JSON.stringify(filterPayload) : '',
         mode: filterMode,
-      });
+      };
+      setMembersQuery(query);
+      if (Object.keys(filterPayload).length > 0) {
+        void applyListFilter(query);
+      } else {
+        onListFilterChange?.(null);
+      }
     } finally {
       setLoadingChart(false);
     }
   };
+
+  const fetchFilteredMemberIds = useCallback(
+    async (
+      query: { keysCsv: string; filtersJson: string; mode: 'AND' | 'OR' },
+      bucket?: { tagKey: string; bucket: string }
+    ): Promise<{ ids: string[]; label: string }> => {
+      const params = new URLSearchParams();
+      params.set('keys', query.keysCsv);
+      if (query.filtersJson) params.set('filters', query.filtersJson);
+      params.set('mode', query.mode);
+      if (bucket) {
+        params.set('tag_key', bucket.tagKey);
+        params.set('bucket', bucket.bucket);
+      }
+      const res = await fetch(`/api/member-tags/members?${params.toString()}`, { cache: 'no-store' });
+      const data = res.ok ? await res.json() : { members: [] };
+      const list = Array.isArray(data.members) ? data.members : [];
+      const ids = list.map((m: { id: string }) => m.id);
+      if (bucket) {
+        const bucketLabel =
+          bucket.bucket === TAG_BUCKET_SEM_TAG
+            ? 'sem esta tag'
+            : bucket.bucket === ''
+              ? '(valor vazio)'
+              : bucket.bucket;
+        return { ids, label: `Tag ${bucket.tagKey}: ${bucketLabel}` };
+      }
+      const modeLabel = query.mode === 'AND' ? 'todas as tags' : 'pelo menos uma tag';
+      return { ids, label: `Filtro de tags (${modeLabel})` };
+    },
+    []
+  );
+
+  const applyListFilter = useCallback(
+    async (
+      query: { keysCsv: string; filtersJson: string; mode: 'AND' | 'OR' },
+      bucket?: { tagKey: string; bucket: string }
+    ) => {
+      if (!onListFilterChange) return;
+      const { ids, label } = await fetchFilteredMemberIds(query, bucket);
+      onListFilterChange(ids.length > 0 ? { memberIds: ids, label } : null);
+    },
+    [fetchFilteredMemberIds, onListFilterChange]
+  );
 
   const openBucketMembers = async (tagKey: string, bucket: string) => {
     if (!membersQuery) return;
@@ -175,7 +236,9 @@ export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChart
       params.set('mode', membersQuery.mode);
       const res = await fetch(`/api/member-tags/members?${params.toString()}`, { cache: 'no-store' });
       const data = res.ok ? await res.json() : { members: [] };
-      setBucketMembers(Array.isArray(data.members) ? data.members : []);
+      const list = Array.isArray(data.members) ? data.members : [];
+      setBucketMembers(list);
+      void applyListFilter(membersQuery, { tagKey, bucket });
     } finally {
       setBucketLoading(false);
     }
@@ -192,7 +255,7 @@ export function PessoasTagChartsPanel({ tagsRefreshSignal = 0 }: PessoasTagChart
         <p className="text-sm text-muted-foreground font-normal">
           Escolha uma ou mais chaves para ver quantas pessoas há em cada valor. Use o filtro por valores para
           cruzar tags (somente quem atende a todos os filtros entra nos gráficos). Depois de atualizar os gráficos,
-          clique em uma barra para ver a lista de cadastros daquele valor.
+          clique em uma barra para filtrar a listagem abaixo e ver os cadastros daquele valor.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -11,10 +11,9 @@ import {
 } from '@/lib/member-tags-filter';
 
 /**
- * GET /api/member-tags/members?keys=a,b&filters={}&tag_key=X&bucket=Y
- * Membros ativos do grupo que passam pelos filtros de tag e caem no bucket da chave `tag_key`:
- * - bucket = "(sem tag)" → não possuem essa chave
- * - caso contrário → valor exato da tag (string vazia permitida)
+ * GET /api/member-tags/members?keys=a,b&filters={}&mode=AND
+ * Membros ativos que passam pelos filtros de tag.
+ * Com tag_key e bucket: restringe ao valor do gráfico (bucket "(sem tag)" = sem essa chave).
  */
 export async function GET(request: Request) {
   try {
@@ -28,15 +27,28 @@ export async function GET(request: Request) {
     const keysRaw = searchParams.get('keys')?.trim();
     const tagKey = searchParams.get('tag_key')?.trim();
     const bucket = searchParams.get('bucket');
-    if (!keysRaw || !tagKey || bucket === null) {
+    const hasBucketFilter = searchParams.has('tag_key') && searchParams.has('bucket');
+
+    if (!keysRaw) {
       return NextResponse.json(
-        { error: 'Parâmetros obrigatórios: keys, tag_key, bucket' },
+        { error: 'Parâmetro obrigatório: keys' },
         { status: 400 }
       );
     }
 
     const chartKeys = [...new Set(keysRaw.split(',').map((k) => k.trim()).filter(Boolean))].slice(0, 10);
-    if (chartKeys.length === 0 || !chartKeys.includes(tagKey)) {
+    if (chartKeys.length === 0) {
+      return NextResponse.json({ members: [] });
+    }
+
+    if (hasBucketFilter && (!tagKey || bucket === null)) {
+      return NextResponse.json(
+        { error: 'tag_key e bucket são obrigatórios para filtrar por valor do gráfico' },
+        { status: 400 }
+      );
+    }
+
+    if (hasBucketFilter && !chartKeys.includes(tagKey!)) {
       return NextResponse.json(
         { error: 'tag_key deve estar incluída em keys' },
         { status: 400 }
@@ -75,22 +87,24 @@ export async function GET(request: Request) {
     const byMember = buildMemberTagMap(tagRows);
     const filteredIds = new Set(filterMemberIdsByTagFiltersWithMode(allMemberIds, byMember, filters, mode));
 
-    const inBucket = (memberId: string): boolean => {
-      if (!filteredIds.has(memberId)) return false;
-      const tags = byMember.get(memberId);
-      const values = tags?.get(tagKey);
-      if (bucket === TAG_BUCKET_SEM_TAG) {
-        return !values || values.length === 0;
-      }
-      // For multiple values, the bucket is the concatenated string
-      if (values && values.length > 0) {
-        const concatenated = concatenateTagValues(values);
-        return concatenated === bucket;
-      }
-      return false;
-    };
+    let members = memberRows.filter((m) => filteredIds.has(m.id));
 
-    const members = memberRows.filter((m) => inBucket(m.id));
+    if (hasBucketFilter) {
+      const inBucket = (memberId: string): boolean => {
+        if (!filteredIds.has(memberId)) return false;
+        const tags = byMember.get(memberId);
+        const values = tags?.get(tagKey!);
+        if (bucket === TAG_BUCKET_SEM_TAG) {
+          return !values || values.length === 0;
+        }
+        if (values && values.length > 0) {
+          const concatenated = concatenateTagValues(values);
+          return concatenated === bucket;
+        }
+        return false;
+      };
+      members = members.filter((m) => inBucket(m.id));
+    }
     return NextResponse.json({
       members: members.map((m) => ({
         id: m.id,
