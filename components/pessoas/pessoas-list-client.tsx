@@ -92,6 +92,8 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [tagListFilter, setTagListFilter] = useState<TagListFilterState | null>(null);
   const [stageListFilter, setStageListFilter] = useState<StageListFilterState | null>(null);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [broadcastPreSelectedIds, setBroadcastPreSelectedIds] = useState<string[]>([]);
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
   const tagListFilterIds = useMemo(
@@ -104,6 +106,11 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
   );
 
   const bumpTags = useCallback(() => setTagsEpoch((n) => n + 1), []);
+
+  const handleRequestBroadcast = useCallback((memberIds: string[]) => {
+    setBroadcastPreSelectedIds(memberIds);
+    setBroadcastOpen(true);
+  }, []);
 
   const toggleMemberSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -222,6 +229,15 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
           {members && members.length > 0 && forBroadcast.length > 0 && (
             <BroadcastDialogClient members={forBroadcast} />
           )}
+          <BroadcastDialogClient
+            members={members}
+            open={broadcastOpen}
+            onOpenChange={(v) => {
+              setBroadcastOpen(v);
+              if (!v) setBroadcastPreSelectedIds([]);
+            }}
+            preSelectedIds={broadcastPreSelectedIds}
+          />
           {members && members.length > 0 && (
             <Button
               variant="outline"
@@ -377,7 +393,10 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
             <PessoasEngagementPanel members={members} onFilteredMembersChange={setEngagementFiltered} />
           )}
           {listMode === 'stages' && (
-            <IntegrationStagesPanel onListFilterChange={setStageListFilter} />
+            <IntegrationStagesPanel
+              onListFilterChange={setStageListFilter}
+              onRequestBroadcast={handleRequestBroadcast}
+            />
           )}
           {loadingAbsent && listMode === 'absent' && (
             <p className="text-xs text-muted-foreground">Carregando…</p>
@@ -389,6 +408,7 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
         <PessoasTagChartsPanel
           tagsRefreshSignal={tagsEpoch}
           onListFilterChange={setTagListFilter}
+          onRequestBroadcast={handleRequestBroadcast}
         />
       )}
 

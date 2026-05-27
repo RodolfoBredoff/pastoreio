@@ -14,6 +14,20 @@ const BroadcastDialogInner = dynamic(
   { ssr: false }
 );
 
-export function BroadcastDialogClient({ members }: { members: Member[] }) {
-  return <BroadcastDialogInner members={members} />;
+interface BroadcastDialogClientProps {
+  members: Member[];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  preSelectedIds?: string[];
+}
+
+export function BroadcastDialogClient({ members, open, onOpenChange, preSelectedIds }: BroadcastDialogClientProps) {
+  return (
+    <BroadcastDialogInner
+      members={members}
+      open={open}
+      onOpenChange={onOpenChange}
+      preSelectedIds={preSelectedIds}
+    />
+  );
 }

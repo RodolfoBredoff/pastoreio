@@ -66,10 +66,19 @@ interface AbsentMemberItem {
 
 interface BroadcastDialogProps {
   members: Member[];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** IDs to pre-select when the dialog opens (e.g. from a chart filter). */
+  preSelectedIds?: string[];
 }
 
-export function BroadcastDialog({ members }: BroadcastDialogProps) {
-  const [open, setOpen] = useState(false);
+export function BroadcastDialog({ members, open: openProp, onOpenChange, preSelectedIds }: BroadcastDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = openProp !== undefined ? openProp : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (onOpenChange) onOpenChange(v);
+    else setInternalOpen(v);
+  };
   const [message, setMessage] = useState('Olá! Tudo bem?');
   const [filter, setFilter] = useState<'all' | 'participant' | 'visitor' | 'absent'>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -149,6 +158,11 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
   // para não sobrescrever quando o usuário marcar/desmarcar pessoas nos Faltantes.
   useEffect(() => {
     if (!open) return;
+    // If pre-selected IDs were provided (e.g. from chart filter), use them directly
+    if (preSelectedIds && preSelectedIds.length > 0) {
+      setSelectedIds(new Set(preSelectedIds));
+      return;
+    }
     const withPhone =
       filter === 'absent'
         ? absentMembers.filter((m) => m.phone).map((m) => m.id)
@@ -162,7 +176,7 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
     }
     prevFilterRef.current = filter;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- só reagir a open/filter; baseList/absentMembers usados no momento do clique
-  }, [open, filter]);
+  }, [open, filter, preSelectedIds]);
 
   // Quando estiver em Faltantes e a lista de ausentes acabar de carregar, preencher seleção só se ainda estiver vazia.
   useEffect(() => {
@@ -232,12 +246,14 @@ export function BroadcastDialog({ members }: BroadcastDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" className="w-full sm:w-auto">
-          <MessageCircle className="mr-2 h-4 w-4" />
-          Mensagem em Grupo
-        </Button>
-      </DialogTrigger>
+      {openProp === undefined && (
+        <DialogTrigger asChild>
+          <Button variant="outline" className="w-full sm:w-auto">
+            <MessageCircle className="mr-2 h-4 w-4" />
+            Mensagem em Grupo
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[525px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Enviar Mensagem via WhatsApp</DialogTitle>
