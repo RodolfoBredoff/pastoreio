@@ -18,14 +18,22 @@ import { Button } from '@/components/ui/button';
 import { UserPlus, Users, Download } from 'lucide-react';
 import type { Member } from '@/lib/db/queries';
 
+function formatDeactivatedAt(value: string | null | undefined): string {
+  if (!value) return '';
+  const d = value.split('T')[0];
+  const [y, m, day] = d.split('-');
+  return day && m && y ? `${day}/${m}/${y}` : '';
+}
+
 function exportMembersCSV(members: Member[]) {
-  const headers = ['Nome', 'Tipo', 'Telefone', 'Data de Nascimento', 'Ativo'];
+  const headers = ['Nome', 'Tipo', 'Telefone', 'Data de Nascimento', 'Ativo', 'Inativado em'];
   const rows = members.map((m) => [
     m.full_name,
     m.member_type === 'participant' ? 'Participante' : 'Visitante',
     m.phone || '',
     m.birth_date ? m.birth_date.split('T')[0] : '',
     m.is_active ? 'Sim' : 'Não',
+    formatDeactivatedAt(m.deactivated_at),
   ]);
   const csvContent = [headers, ...rows]
     .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
@@ -68,15 +76,9 @@ function intersectByIds(members: Member[], ids: Set<string> | null): Member[] {
   return members.filter((m) => ids.has(m.id));
 }
 
-function applyActiveFilter(members: Member[], showInactive: boolean): Member[] {
-  if (showInactive) return members;
-  return members.filter((m) => m.is_active);
-}
-
 export function PessoasListClient({ members, canDelete }: PessoasListClientProps) {
   const [listMode, setListMode] = useState<ListMode>('all');
   const [memberTypeFilter, setMemberTypeFilter] = useState<MemberTypeFilter>('total');
-  const [showInactive, setShowInactive] = useState(false);
   const [absentMetricMode, setAbsentMetricMode] = useState<AbsentMetricMode>('most_absent');
   const [absentYearMonth, setAbsentYearMonth] = useState(() => {
     const d = new Date();
@@ -209,10 +211,8 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
   ]);
 
   const displayedMembers = useMemo(() => {
-    let list = applyActiveFilter(baseMembers, showInactive);
-    list = intersectByIds(list, tagListFilterIds);
-    return list;
-  }, [baseMembers, showInactive, tagListFilterIds]);
+    return intersectByIds(baseMembers, tagListFilterIds);
+  }, [baseMembers, tagListFilterIds]);
 
   const forBroadcast = displayedMembers;
 
@@ -259,17 +259,6 @@ export function PessoasListClient({ members, canDelete }: PessoasListClientProps
       {members && members.length > 0 && (
         <div className="space-y-3 rounded-lg border p-4 bg-muted/20">
           <p className="text-sm font-medium">Filtrar lista</p>
-          <div className="flex flex-wrap gap-2 items-center">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showInactive}
-                onChange={(e) => setShowInactive(e.target.checked)}
-                className="rounded border-gray-300"
-              />
-              <span className="text-xs">Mostrar inativos</span>
-            </label>
-          </div>
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs text-muted-foreground">Modo:</span>
             <Button

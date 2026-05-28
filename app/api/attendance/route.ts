@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { saveAttendance, getAttendanceByMeeting, getAttendanceGuestsByMeeting } from '@/lib/db/queries';
-import { query, queryOne } from '@/lib/db/postgres';
+import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import { syncEngagementToSheet } from '@/lib/integrations/google-sheets';
 
 /**
@@ -157,7 +157,20 @@ export async function POST(request: Request) {
         }))
       : [];
 
-    await saveAttendance(meeting_id, attendance, {
+    const payload = attendance as Array<{ member_id: string; is_present: boolean }>;
+    const memberIds = payload.map((a) => a.member_id).filter(Boolean);
+    let filteredAttendance = payload;
+    if (memberIds.length > 0) {
+      const activeRows = await queryMany<{ id: string }>(
+        `SELECT id FROM members
+         WHERE id = ANY($1::uuid[]) AND group_id = $2 AND is_active = TRUE`,
+        [memberIds, meeting.group_id]
+      );
+      const activeIds = new Set(activeRows.map((r) => r.id));
+      filteredAttendance = payload.filter((a) => activeIds.has(a.member_id));
+    }
+
+    await saveAttendance(meeting_id, filteredAttendance, {
       groupId: meeting.group_id,
       guests: guestList,
     });

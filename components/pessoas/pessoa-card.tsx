@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { calculateAge, formatPhone, isTodayBirthday } from '@/lib/utils';
+import { calculateAge, formatDate, formatPhone, isTodayBirthday } from '@/lib/utils';
 import { MEMBER_TYPE_LABELS, INTEGRATION_STAGE_LABELS, INTEGRATION_STAGE_COLORS, VISITOR_STATUS_COLORS, VISITOR_STATUS_LABELS } from '@/lib/constants';
 import { Pencil, Cake, AlertTriangle, CalendarCheck, Tags } from 'lucide-react';
 import { DeleteMemberButton } from './delete-member-button';
@@ -30,6 +30,7 @@ interface Member {
   birth_date: string | null;
   member_type: 'participant' | 'visitor';
   is_active: boolean;
+  deactivated_at?: string | null;
   integration_stage?: string | null;
   marked_not_returned?: boolean;
   /** Nomes dos membros que este discipula (label "Discipulador de X, Y"). */
@@ -118,6 +119,9 @@ export function PessoaCard({
               {!member.is_active && (
                 <Badge variant="secondary" className="text-xs shrink-0">
                   Inativo
+                  {member.deactivated_at
+                    ? ` desde ${formatDate(member.deactivated_at)}`
+                    : ''}
                 </Badge>
               )}
             </div>

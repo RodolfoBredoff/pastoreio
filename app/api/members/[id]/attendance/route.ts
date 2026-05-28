@@ -43,7 +43,7 @@ export async function GET(
     }
 
     const member = await queryOne<{ id: string; group_id: string }>(
-      `SELECT id, group_id FROM members WHERE id = $1 AND is_active = TRUE`,
+      `SELECT id, group_id FROM members WHERE id = $1`,
       [memberId]
     );
     if (!member || member.group_id !== groupId) {

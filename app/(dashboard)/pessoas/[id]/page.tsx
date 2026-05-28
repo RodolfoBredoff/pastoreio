@@ -8,6 +8,8 @@ import { ToggleMemberStatusButton } from '@/components/pessoas/toggle-member-sta
 import { ContactLog } from '@/components/pessoas/contact-log';
 import { VisitorStageCard } from '@/components/pessoas/visitor-stage-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { formatDate } from '@/lib/utils';
 import { notFound } from 'next/navigation';
 
 export default async function EditarPessoaPage({
@@ -54,6 +56,21 @@ export default async function EditarPessoaPage({
           />
         </div>
       </div>
+
+      {!member.is_active && (
+        <Card className="border-muted bg-muted/30">
+          <CardContent className="pt-6 flex flex-wrap items-center gap-2 text-sm">
+            <Badge variant="secondary">Inativo</Badge>
+            {member.deactivated_at ? (
+              <span className="text-muted-foreground">
+                Inativado em {formatDate(member.deactivated_at)}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">Sem data de inativação registrada</span>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {(member.discipulador_full_name || (member.discipulador_de?.length ?? 0) > 0) && (
         <Card>

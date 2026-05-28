@@ -24,6 +24,7 @@ export interface Member {
   birth_date: string | null;
   member_type: 'participant' | 'visitor';
   is_active: boolean;
+  deactivated_at?: string | null;
   integration_stage: 'novo_visitante' | 'retornou' | 'integrando' | 'membro';
   marked_not_returned?: boolean;
   created_at: string;
@@ -137,6 +138,28 @@ export async function getMembersByLeaderGroup(): Promise<Member[]> {
 }
 
 /**
+ * Busca todos os membros do grupo (ativos e inativos) — usado na página Pessoas.
+ */
+export async function getAllMembersByLeaderGroup(): Promise<Member[]> {
+  const leader = await getCurrentLeader();
+
+  if (!leader?.group_id) {
+    return [];
+  }
+
+  return queryMany<Member>(
+    `SELECT m.id, m.group_id, m.full_name, m.phone, m.birth_date, m.member_type, m.is_active, m.deactivated_at, m.created_at, m.updated_at, m.discipulador_id, m.integration_stage, m.marked_not_returned,
+            d.full_name AS discipulador_full_name,
+            (SELECT COALESCE(array_agg(m2.full_name ORDER BY m2.full_name), ARRAY[]::text[]) FROM members m2 WHERE m2.discipulador_id = m.id AND m2.is_active = TRUE) AS discipulador_de
+     FROM members m
+     LEFT JOIN members d ON d.id = m.discipulador_id
+     WHERE m.group_id = $1
+     ORDER BY m.is_active DESC, m.full_name ASC`,
+    [leader.group_id]
+  );
+}
+
+/**
  * Busca membro por ID e grupo (para validação em API; não usa sessão).
  */
 export async function getMemberByIdAndGroup(memberId: string, groupId: string): Promise<Member | null> {
@@ -157,7 +180,7 @@ export async function getMemberById(memberId: string): Promise<Member | null> {
   }
 
   return queryOne<Member>(
-    `SELECT m.id, m.group_id, m.full_name, m.phone, m.birth_date, m.member_type, m.is_active, m.created_at, m.updated_at, m.discipulador_id, m.integration_stage, m.marked_not_returned,
+    `SELECT m.id, m.group_id, m.full_name, m.phone, m.birth_date, m.member_type, m.is_active, m.deactivated_at, m.created_at, m.updated_at, m.discipulador_id, m.integration_stage, m.marked_not_returned,
             d.full_name AS discipulador_full_name,
             (SELECT COALESCE(array_agg(m2.full_name ORDER BY m2.full_name), ARRAY[]::text[]) FROM members m2 WHERE m2.discipulador_id = m.id AND m2.is_active = TRUE) AS discipulador_de
      FROM members m
@@ -240,6 +263,11 @@ export async function updateMember(memberId: string, data: {
   if (data.is_active !== undefined) {
     updates.push(`is_active = $${paramIndex++}`);
     values.push(data.is_active);
+    if (data.is_active) {
+      updates.push(`deactivated_at = NULL`);
+    } else {
+      updates.push(`deactivated_at = NOW()`);
+    }
   }
   if (data.discipulador_id !== undefined) {
     updates.push(`discipulador_id = $${paramIndex++}`);
@@ -483,11 +511,14 @@ export async function saveAttendance(
       eligibleMemberIds = new Set(elig.rows.map((r) => r.id));
     }
 
-    // Remover presenças existentes (membros)
-    await client.query(
-      `DELETE FROM attendance WHERE meeting_id = $1`,
-      [meetingId]
-    );
+    // Remover presenças só dos membros enviados no payload (preserva histórico de inativos)
+    const memberIds = attendance.map((a) => a.member_id);
+    if (memberIds.length > 0) {
+      await client.query(
+        `DELETE FROM attendance WHERE meeting_id = $1 AND member_id = ANY($2::uuid[])`,
+        [meetingId, memberIds]
+      );
+    }
 
     // Remover visitantes do encontro
     await client.query(

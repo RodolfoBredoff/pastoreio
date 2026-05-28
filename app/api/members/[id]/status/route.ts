@@ -32,9 +32,12 @@ export async function POST(
       return NextResponse.json({ error: 'Membro não encontrado' }, { status: 404 });
     }
 
-    // Atualizar status is_active
     await query(
-      `UPDATE members SET is_active = $1, updated_at = NOW() WHERE id = $2`,
+      `UPDATE members
+       SET is_active = $1,
+           deactivated_at = CASE WHEN $1 THEN NULL ELSE NOW() END,
+           updated_at = NOW()
+       WHERE id = $2`,
       [active, memberId]
     );
 
@@ -62,7 +65,7 @@ export async function POST(
       member: updatedMember,
       message: active
         ? 'Membro reativado com sucesso'
-        : 'Membro marcado como inativo. Não aparecerá mais nas chamadas, mas o histórico foi preservado.',
+        : 'Membro marcado como inativo. Continua na lista de Pessoas, mas não aparecerá nas chamadas. O histórico de presença foi preservado.',
     });
   } catch (error) {
     console.error('Erro ao alternar status do membro:', error);

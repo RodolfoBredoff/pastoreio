@@ -93,8 +93,9 @@ export function ToggleMemberStatusButton({
                     Tem certeza que deseja marcar <strong>{memberName}</strong> como inativo?
                   </p>
                   <p className="text-sm border-l-4 border-yellow-500 pl-3 py-2 bg-yellow-50 dark:bg-yellow-950/20">
-                    Esta pessoa <strong>não aparecerá mais nas chamadas</strong> de presença, 
-                    mas todo o histórico de presenças passadas será preservado.
+                    Esta pessoa <strong>permanece na lista de Pessoas</strong> com status inativo,
+                    mas <strong>não aparecerá nas chamadas</strong> de presença nem contará faltas futuras.
+                    Todo o histórico de presenças passadas será preservado.
                   </p>
                 </>
               ) : (
