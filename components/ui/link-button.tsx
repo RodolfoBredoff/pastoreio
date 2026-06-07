@@ -13,13 +13,17 @@ type LinkButtonProps = Omit<ButtonProps, 'onClick'> & {
  * quando usamos <Link><Button> em uma Server Component.
  */
 export function LinkButton({ href, children, className, variant, size, ...rest }: LinkButtonProps) {
-  const linkClass = className?.includes('w-full')
-    ? 'block w-full sm:w-auto'
-    : className?.includes('flex-1')
-      ? 'block flex-1 min-w-0'
-      : className != null
-        ? 'inline-block shrink-0'
-        : 'inline-block w-full sm:w-auto';
+  const shrinkOnly =
+    className != null &&
+    className.includes('shrink-0') &&
+    !className.includes('w-full') &&
+    !className.includes('flex-1');
+
+  const linkClass = shrinkOnly
+    ? 'inline-block shrink-0'
+    : className != null
+      ? 'block w-full'
+      : 'inline-block w-full sm:w-auto';
 
   return (
     <Link href={href} className={linkClass}>
