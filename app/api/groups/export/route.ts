@@ -47,7 +47,7 @@ export async function GET() {
          COUNT(a.id) AS total_meetings
        FROM members m
        LEFT JOIN attendance a ON a.member_id = m.id
-       WHERE m.group_id = $1
+       WHERE m.group_id = $1 AND m.excluded_at IS NULL
        GROUP BY m.id
        ORDER BY m.member_type ASC, m.full_name ASC`,
       [groupId]

@@ -53,6 +53,7 @@ export default async function EditarPessoaPage({
             memberId={id}
             memberName={member.full_name}
             canDelete={canDelete}
+            isActive={member.is_active}
           />
         </div>
       </div>

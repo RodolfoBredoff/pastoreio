@@ -18,6 +18,7 @@ interface DeleteMemberButtonProps {
   memberId: string;
   memberName: string;
   canDelete: boolean;
+  isActive?: boolean;
   variant?: 'button' | 'icon';
   className?: string;
 }
@@ -26,6 +27,7 @@ export function DeleteMemberButton({
   memberId,
   memberName,
   canDelete,
+  isActive = true,
   variant = 'button',
   className,
 }: DeleteMemberButtonProps) {
@@ -63,7 +65,7 @@ export function DeleteMemberButton({
           size="icon"
           className={className}
           onClick={() => setOpen(true)}
-          aria-label="Excluir pessoa"
+          aria-label={isActive ? 'Excluir pessoa' : 'Remover da lista'}
         >
           <Trash2 className="h-4 w-4 text-destructive" />
         </Button>
@@ -75,17 +77,29 @@ export function DeleteMemberButton({
           onClick={() => setOpen(true)}
         >
           <Trash2 className="h-4 w-4 mr-2" />
-          Excluir pessoa
+          {isActive ? 'Excluir pessoa' : 'Remover da lista'}
         </Button>
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Excluir pessoa do grupo?</DialogTitle>
+            <DialogTitle>
+              {isActive ? 'Excluir pessoa do grupo?' : 'Remover da lista de Pessoas?'}
+            </DialogTitle>
             <DialogDescription>
-              Excluir {memberName}? Ela deixará de aparecer na lista do grupo. Esta ação pode ser revertida
-              posteriormente reativando a pessoa.
+              {isActive ? (
+                <>
+                  Marcar <strong>{memberName}</strong> como inativa? Ela permanecerá na lista de Pessoas com
+                  status inativo, mas não aparecerá nas chamadas. O histórico de presenças será preservado e
+                  você poderá reativá-la depois.
+                </>
+              ) : (
+                <>
+                  Remover <strong>{memberName}</strong> da lista de Pessoas? Ela deixará de aparecer nesta
+                  lista, mas o histórico de presenças e demais registros serão preservados.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -93,7 +107,7 @@ export function DeleteMemberButton({
               Cancelar
             </Button>
             <Button type="button" variant="destructive" onClick={handleDelete} disabled={loading}>
-              {loading ? 'Excluindo…' : 'Excluir'}
+              {loading ? 'Processando…' : isActive ? 'Marcar como inativa' : 'Remover da lista'}
             </Button>
           </DialogFooter>
         </DialogContent>

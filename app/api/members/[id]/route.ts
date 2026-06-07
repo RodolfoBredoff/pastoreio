@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
-import { getCurrentLeader, getMemberById, getMemberByIdAndGroup, updateMember } from '@/lib/db/queries';
+import { getCurrentLeader, getMemberById, getMemberByIdAndGroup, updateMember, deleteMember } from '@/lib/db/queries';
 import { canDeleteMembers, canManageDiscipleship, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { queryOne } from '@/lib/db/postgres';
 
@@ -167,7 +167,10 @@ export async function PUT(
 
 /**
  * DELETE /api/members/[id]
- * Remove um membro (soft delete). Apenas líder e coordenador podem excluir.
+ * Remove um membro da lista de Pessoas.
+ * - Ativo: marca como inativo (permanece visível na lista).
+ * - Inativo: remove da lista preservando histórico.
+ * Apenas líder e coordenador podem excluir.
  */
 export async function DELETE(
   request: Request,
@@ -192,16 +195,23 @@ export async function DELETE(
     }
 
     const { id } = await params;
-    const success = await updateMember(id, { is_active: false });
+    const result = await deleteMember(id);
 
-    if (!success) {
+    if (!result) {
       return NextResponse.json(
         { error: 'Membro não encontrado' },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      action: result,
+      message:
+        result === 'excluded'
+          ? 'Pessoa removida da lista de Pessoas. O histórico foi preservado.'
+          : 'Pessoa marcada como inativa. Ela permanece na lista de Pessoas.',
+    });
   } catch (error) {
     console.error('Erro ao remover membro:', error);
     return NextResponse.json(

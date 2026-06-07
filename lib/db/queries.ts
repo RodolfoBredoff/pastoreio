@@ -25,6 +25,7 @@ export interface Member {
   member_type: 'participant' | 'visitor';
   is_active: boolean;
   deactivated_at?: string | null;
+  excluded_at?: string | null;
   integration_stage: 'novo_visitante' | 'retornou' | 'integrando' | 'membro';
   marked_not_returned?: boolean;
   created_at: string;
@@ -131,7 +132,7 @@ export async function getMembersByLeaderGroup(): Promise<Member[]> {
             (SELECT COALESCE(array_agg(m2.full_name ORDER BY m2.full_name), ARRAY[]::text[]) FROM members m2 WHERE m2.discipulador_id = m.id AND m2.is_active = TRUE) AS discipulador_de
      FROM members m
      LEFT JOIN members d ON d.id = m.discipulador_id
-     WHERE m.group_id = $1 AND m.is_active = TRUE
+     WHERE m.group_id = $1 AND m.is_active = TRUE AND m.excluded_at IS NULL
      ORDER BY m.full_name ASC`,
     [leader.group_id]
   );
@@ -153,7 +154,7 @@ export async function getAllMembersByLeaderGroup(): Promise<Member[]> {
             (SELECT COALESCE(array_agg(m2.full_name ORDER BY m2.full_name), ARRAY[]::text[]) FROM members m2 WHERE m2.discipulador_id = m.id AND m2.is_active = TRUE) AS discipulador_de
      FROM members m
      LEFT JOIN members d ON d.id = m.discipulador_id
-     WHERE m.group_id = $1
+     WHERE m.group_id = $1 AND m.excluded_at IS NULL
      ORDER BY m.is_active DESC, m.full_name ASC`,
     [leader.group_id]
   );
@@ -164,7 +165,7 @@ export async function getAllMembersByLeaderGroup(): Promise<Member[]> {
  */
 export async function getMemberByIdAndGroup(memberId: string, groupId: string): Promise<Member | null> {
   return queryOne<Member>(
-    `SELECT * FROM members WHERE id = $1 AND group_id = $2`,
+    `SELECT * FROM members WHERE id = $1 AND group_id = $2 AND excluded_at IS NULL`,
     [memberId, groupId]
   );
 }
@@ -185,7 +186,7 @@ export async function getMemberById(memberId: string): Promise<Member | null> {
             (SELECT COALESCE(array_agg(m2.full_name ORDER BY m2.full_name), ARRAY[]::text[]) FROM members m2 WHERE m2.discipulador_id = m.id AND m2.is_active = TRUE) AS discipulador_de
      FROM members m
      LEFT JOIN members d ON d.id = m.discipulador_id
-     WHERE m.id = $1 AND m.group_id = $2`,
+     WHERE m.id = $1 AND m.group_id = $2 AND m.excluded_at IS NULL`,
     [memberId, leader.group_id]
   );
 }
@@ -299,11 +300,35 @@ export async function updateMember(memberId: string, data: {
 }
 
 /**
- * Remove um membro (soft delete)
+ * Remove um membro da lista de Pessoas.
+ * - Ativo: marca como inativo (permanece na lista).
+ * - Inativo: exclui da lista preservando histórico.
  */
-export async function deleteMember(memberId: string): Promise<boolean> {
-  const member = await updateMember(memberId, { is_active: false });
-  return member !== null;
+export async function deleteMember(memberId: string): Promise<'deactivated' | 'excluded' | null> {
+  const leader = await getCurrentLeader();
+  if (!leader?.group_id) {
+    throw new Error('Líder não está vinculado a um grupo');
+  }
+
+  const member = await queryOne<Pick<Member, 'id' | 'is_active' | 'excluded_at'>>(
+    `SELECT id, is_active, excluded_at FROM members WHERE id = $1 AND group_id = $2`,
+    [memberId, leader.group_id]
+  );
+
+  if (!member || member.excluded_at) {
+    return null;
+  }
+
+  if (!member.is_active) {
+    await query(
+      `UPDATE members SET excluded_at = NOW(), updated_at = NOW() WHERE id = $1`,
+      [memberId]
+    );
+    return 'excluded';
+  }
+
+  const updated = await updateMember(memberId, { is_active: false });
+  return updated ? 'deactivated' : null;
 }
 
 // ============================================

@@ -91,6 +91,7 @@ export async function GET(request: Request) {
        WHERE group_id = $1 
          AND member_type = 'visitor' 
          AND is_active = TRUE
+         AND excluded_at IS NULL
          ${dateCondition}
        GROUP BY integration_stage
        ORDER BY 
@@ -111,6 +112,7 @@ export async function GET(request: Request) {
        FROM members m
        WHERE m.group_id = $1
          AND m.is_active = TRUE
+         AND m.excluded_at IS NULL
          AND NOT EXISTS (
            SELECT 1
            FROM attendance a

@@ -212,6 +212,7 @@ export function PessoaCard({
             memberId={member.id}
             memberName={member.full_name}
             canDelete
+            isActive={member.is_active}
             variant="icon"
             className="shrink-0"
           />
