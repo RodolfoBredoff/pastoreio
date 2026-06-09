@@ -40,6 +40,8 @@ interface Meeting {
   attendance_list_deadline?: string | null;
   attendance_list_slug?: string | null;
   attendance_list_mode?: 'prefilled' | 'open' | null;
+  attendance_list_require_rg?: boolean;
+  attendance_list_limit?: number | null;
   invite_cover_image_url?: string | null;
 }
 
@@ -101,6 +103,10 @@ function EditMeetingDialog({
   const [attendanceDeadline, setAttendanceDeadline] = useState(
     meeting.attendance_list_deadline ? toInputDate(meeting.attendance_list_deadline) : ''
   );
+  const [attendanceRequireRg, setAttendanceRequireRg] = useState(meeting.attendance_list_require_rg ?? false);
+  const [attendanceLimit, setAttendanceLimit] = useState(
+    meeting.attendance_list_limit != null ? String(meeting.attendance_list_limit) : ''
+  );
   const [presenceMap, setPresenceMap] = useState<Record<string, boolean>>({});
   const [loadingAttendance, setLoadingAttendance] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string>(meeting.invite_cover_image_url ?? '');
@@ -117,6 +123,8 @@ function EditMeetingDialog({
     setMeetingType(meeting.meeting_type ?? 'regular');
     setLocation(meeting.location ?? '');
     setAttendanceDeadline(meeting.attendance_list_deadline ? toInputDate(meeting.attendance_list_deadline) : '');
+    setAttendanceRequireRg(meeting.attendance_list_require_rg ?? false);
+    setAttendanceLimit(meeting.attendance_list_limit != null ? String(meeting.attendance_list_limit) : '');
     setCoverUrl(meeting.invite_cover_image_url ?? '');
     setCoverError('');
     setPublicEntries([]);
@@ -259,6 +267,10 @@ function EditMeetingDialog({
           meeting_type: meetingType,
           location: location || null,
           attendance_list_deadline: attendanceDeadline || null,
+          attendance_list_require_rg: meeting.attendance_list_token ? attendanceRequireRg : undefined,
+          attendance_list_limit: meeting.attendance_list_token
+            ? (attendanceLimit.trim() ? Number(attendanceLimit) : null)
+            : undefined,
         }),
       });
       if (!meetingRes.ok) { const d = await meetingRes.json(); throw new Error(d.error || 'Erro ao salvar'); }
@@ -376,18 +388,46 @@ function EditMeetingDialog({
           </div>
 
           {meeting.meeting_type === 'special_event' && meeting.attendance_list_token && (
-            <div className="space-y-2">
-              <Label htmlFor="meeting-deadline">Prazo para confirmações pelo link (opcional)</Label>
-              <Input
-                id="meeting-deadline"
-                type="date"
-                value={attendanceDeadline}
-                onChange={(e) => setAttendanceDeadline(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Após esta data, o link continua aberto só com totais (confirmados e não confirmados); quem respondeu ou não deixa de aparecer publicamente. Você pode alterar ou estender o prazo a qualquer momento.
-              </p>
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="meeting-deadline">Prazo para confirmações pelo link (opcional)</Label>
+                <Input
+                  id="meeting-deadline"
+                  type="date"
+                  value={attendanceDeadline}
+                  onChange={(e) => setAttendanceDeadline(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Após esta data, o link continua aberto só com totais (confirmados e não confirmados); quem respondeu ou não deixa de aparecer publicamente. Você pode alterar ou estender o prazo a qualquer momento.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-attendance-limit">Limite de inscrições (opcional)</Label>
+                <Input
+                  id="edit-attendance-limit"
+                  type="number"
+                  min={1}
+                  placeholder="Sem limite"
+                  value={attendanceLimit}
+                  onChange={(e) => setAttendanceLimit(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Quando atingido, novas confirmações pelo link público são bloqueadas.
+                </p>
+              </div>
+              {meeting.attendance_list_mode === 'open' && (
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="edit-attendance-require-rg"
+                    checked={attendanceRequireRg}
+                    onCheckedChange={(c) => setAttendanceRequireRg(c === true)}
+                  />
+                  <Label htmlFor="edit-attendance-require-rg" className="text-sm font-normal cursor-pointer">
+                    Exigir RG no formulário de confirmação
+                  </Label>
+                </div>
+              )}
+            </>
           )}
 
           {(members.length > 0 || publicEntries.length > 0) && (
@@ -493,6 +533,8 @@ function AddMeetingDialog({
   const [generateAttendanceList, setGenerateAttendanceList] = useState(false);
   const [attendanceListMode, setAttendanceListMode] = useState<'prefilled' | 'open'>('prefilled');
   const [attendanceDeadline, setAttendanceDeadline] = useState('');
+  const [attendanceRequireRg, setAttendanceRequireRg] = useState(false);
+  const [attendanceLimit, setAttendanceLimit] = useState('');
   const [createdListLink, setCreatedListLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -518,6 +560,14 @@ function AddMeetingDialog({
           attendance_list_deadline: meetingType === 'special_event' && generateAttendanceList && attendanceDeadline
             ? attendanceDeadline
             : null,
+          attendance_list_require_rg:
+            meetingType === 'special_event' && generateAttendanceList && attendanceListMode === 'open'
+              ? attendanceRequireRg
+              : undefined,
+          attendance_list_limit:
+            meetingType === 'special_event' && generateAttendanceList && attendanceLimit.trim()
+              ? Number(attendanceLimit)
+              : null,
         }),
       });
       const data = await res.json();
@@ -528,7 +578,7 @@ function AddMeetingDialog({
         setCreatedListLink(link);
       } else {
         setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
-        setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline('');
+        setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline(''); setAttendanceRequireRg(false); setAttendanceLimit('');
         onSave();
         onOpenChange(false);
       }
@@ -541,7 +591,7 @@ function AddMeetingDialog({
 
   const handleCloseAfterList = () => {
     setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
-    setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline('');
+    setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline(''); setAttendanceRequireRg(false); setAttendanceLimit('');
     setCreatedListLink(null);
     onSave();
     onOpenChange(false);
@@ -612,7 +662,11 @@ function AddMeetingDialog({
                         <select
                           id="attendance-mode"
                           value={attendanceListMode}
-                          onChange={(e) => setAttendanceListMode(e.target.value as 'prefilled' | 'open')}
+                          onChange={(e) => {
+                            const mode = e.target.value as 'prefilled' | 'open';
+                            setAttendanceListMode(mode);
+                            if (mode !== 'open') setAttendanceRequireRg(false);
+                          }}
                           className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                         >
                           <option value="prefilled">Pré-preenchida (participantes já cadastrados)</option>
@@ -634,6 +688,32 @@ function AddMeetingDialog({
                           Após esta data, o link segue público com totais agregados, sem expor quem confirmou. Você pode alterar ou estender este prazo depois, na agenda.
                         </p>
                       </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="add-attendance-limit">Limite de inscrições (opcional)</Label>
+                        <Input
+                          id="add-attendance-limit"
+                          type="number"
+                          min={1}
+                          placeholder="Sem limite"
+                          value={attendanceLimit}
+                          onChange={(e) => setAttendanceLimit(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Quando atingido, novas confirmações pelo link público são bloqueadas.
+                        </p>
+                      </div>
+                      {attendanceListMode === 'open' && (
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="add-attendance-require-rg"
+                            checked={attendanceRequireRg}
+                            onCheckedChange={(c) => setAttendanceRequireRg(c === true)}
+                          />
+                          <Label htmlFor="add-attendance-require-rg" className="text-sm font-normal cursor-pointer">
+                            Exigir RG no formulário de confirmação
+                          </Label>
+                        </div>
+                      )}
                     </>
                   )}
                 </>

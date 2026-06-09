@@ -75,6 +75,8 @@ export async function GET(
       attendance_list_internal_result_positive: string | null;
       attendance_list_internal_result_negative: string | null;
       attendance_list_internal_unmarked_label: string | null;
+      attendance_list_require_rg: boolean;
+      attendance_list_limit: number | null;
     }>(
       `SELECT id, group_id, title, meeting_date, meeting_time, location, notes, attendance_list_token, attendance_list_deadline, attendance_list_mode,
               attendance_list_internal_label,
@@ -82,7 +84,9 @@ export async function GET(
               COALESCE(attendance_list_internal_enabled, FALSE) AS attendance_list_internal_enabled,
               attendance_list_internal_result_positive,
               attendance_list_internal_result_negative,
-              attendance_list_internal_unmarked_label
+              attendance_list_internal_unmarked_label,
+              COALESCE(attendance_list_require_rg, FALSE) AS attendance_list_require_rg,
+              attendance_list_limit
        FROM meetings WHERE id = $1`,
       [meetingId]
     );
@@ -138,9 +142,10 @@ export async function GET(
       last_name: string;
       email: string | null;
       phone: string | null;
+      rg: string | null;
       created_at: string;
     }>(
-      `SELECT id, first_name, last_name, email, phone, created_at
+      `SELECT id, first_name, last_name, email, phone, rg, created_at
        FROM attendance_list_public_entries
        WHERE meeting_id = $1
        ORDER BY created_at ASC`,
@@ -165,6 +170,8 @@ export async function GET(
         attendance_list_internal_result_positive: meetingRow.attendance_list_internal_result_positive,
         attendance_list_internal_result_negative: meetingRow.attendance_list_internal_result_negative,
         attendance_list_internal_unmarked_label: meetingRow.attendance_list_internal_unmarked_label,
+        attendance_list_require_rg: meetingRow.attendance_list_require_rg ?? false,
+        attendance_list_limit: meetingRow.attendance_list_limit,
       },
       members: members.map((m) => ({
         id: m.id,
@@ -187,6 +194,7 @@ export async function GET(
         full_name: `${e.first_name} ${e.last_name}`.trim(),
         email: e.email,
         phone: e.phone,
+        rg: e.rg,
         created_at: e.created_at,
       })),
     });

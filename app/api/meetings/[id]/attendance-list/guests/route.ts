@@ -3,6 +3,11 @@ import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { queryOne } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
+import {
+  getAttendanceConfirmedCount,
+  isAttendanceLimitReached,
+  type AttendanceListMode,
+} from '@/lib/attendance-list-public';
 
 /**
  * POST /api/meetings/[id]/attendance-list/guests
@@ -38,8 +43,15 @@ export async function POST(
       return NextResponse.json({ error: 'Informe o sobrenome do visitante' }, { status: 400 });
     }
 
-    const meeting = await queryOne<{ id: string; group_id: string; attendance_list_token: string | null }>(
-      `SELECT id, group_id, attendance_list_token FROM meetings WHERE id = $1`,
+    const meeting = await queryOne<{
+      id: string;
+      group_id: string;
+      attendance_list_token: string | null;
+      attendance_list_mode: string | null;
+      attendance_list_limit: number | null;
+    }>(
+      `SELECT id, group_id, attendance_list_token, attendance_list_mode, attendance_list_limit
+       FROM meetings WHERE id = $1`,
       [meetingId]
     );
 
@@ -50,6 +62,15 @@ export async function POST(
     if (!meeting.attendance_list_token) {
       return NextResponse.json(
         { error: 'Este encontro não possui lista de presença' },
+        { status: 400 }
+      );
+    }
+
+    const mode = (meeting.attendance_list_mode ?? 'prefilled') as AttendanceListMode;
+    const count = await getAttendanceConfirmedCount(meetingId, mode);
+    if (isAttendanceLimitReached(count, meeting.attendance_list_limit)) {
+      return NextResponse.json(
+        { error: 'O limite de inscrições para este evento já foi atingido' },
         { status: 400 }
       );
     }

@@ -50,6 +50,7 @@ interface PublicEntryRow {
   full_name: string;
   email: string | null;
   phone: string | null;
+  rg: string | null;
   created_at: string;
 }
 
@@ -63,6 +64,8 @@ interface ListData {
     notes: string | null;
     attendance_list_deadline?: string | null;
     attendance_list_mode?: 'prefilled' | 'open' | null;
+    attendance_list_require_rg?: boolean;
+    attendance_list_limit?: number | null;
     attendance_list_internal_label?: string | null;
     attendance_list_internal_checks?: Record<string, InternalCheckPair>;
     attendance_list_internal_enabled?: boolean;
@@ -182,12 +185,15 @@ export default function ListaConfirmacaoPage() {
   const [meetingNotes, setMeetingNotes] = useState('');
   const [meetingInfoSaving, setMeetingInfoSaving] = useState(false);
   const [meetingInfoSaved, setMeetingInfoSaved] = useState(false);
+  const [meetingListRequireRg, setMeetingListRequireRg] = useState(false);
+  const [meetingListLimit, setMeetingListLimit] = useState('');
   
   // Public entries management
   const [publicEntryFirst, setPublicEntryFirst] = useState('');
   const [publicEntryLast, setPublicEntryLast] = useState('');
   const [publicEntryEmail, setPublicEntryEmail] = useState('');
   const [publicEntryPhone, setPublicEntryPhone] = useState('');
+  const [publicEntryRg, setPublicEntryRg] = useState('');
   const [publicEntryUsePhone, setPublicEntryUsePhone] = useState(false);
   const [publicEntrySaving, setPublicEntrySaving] = useState(false);
   
@@ -197,6 +203,7 @@ export default function ListaConfirmacaoPage() {
   const [editEntryLast, setEditEntryLast] = useState('');
   const [editEntryEmail, setEditEntryEmail] = useState('');
   const [editEntryPhone, setEditEntryPhone] = useState('');
+  const [editEntryRg, setEditEntryRg] = useState('');
   const [editEntryUsePhone, setEditEntryUsePhone] = useState(false);
   const [editEntrySaving, setEditEntrySaving] = useState(false);
   
@@ -215,6 +222,10 @@ export default function ListaConfirmacaoPage() {
         setMeetingTitle(d.meeting.title ?? '');
         setMeetingLocation(d.meeting.location ?? '');
         setMeetingNotes(d.meeting.notes ?? '');
+        setMeetingListRequireRg(d.meeting.attendance_list_require_rg ?? false);
+        setMeetingListLimit(
+          d.meeting.attendance_list_limit != null ? String(d.meeting.attendance_list_limit) : ''
+        );
         if (!checklistDraftDirtyRef.current) {
           const s = syncInternalStateFromMeeting(d);
           setInternalLabel(s.label);
@@ -350,6 +361,12 @@ export default function ListaConfirmacaoPage() {
         return;
       }
     }
+
+    const requireRg = data?.meeting.attendance_list_require_rg ?? false;
+    if (requireRg && !publicEntryRg.trim()) {
+      setError('Informe o RG.');
+      return;
+    }
     
     setPublicEntrySaving(true);
     setError(null);
@@ -361,6 +378,7 @@ export default function ListaConfirmacaoPage() {
           first_name: fn,
           last_name: ln,
           ...(publicEntryUsePhone ? { phone: ph } : { email: em }),
+          ...(requireRg ? { rg: publicEntryRg.trim() } : {}),
         }),
       });
       const json = await res.json();
@@ -369,6 +387,7 @@ export default function ListaConfirmacaoPage() {
       setPublicEntryLast('');
       setPublicEntryEmail('');
       setPublicEntryPhone('');
+      setPublicEntryRg('');
       fetchList();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao adicionar');
@@ -383,6 +402,7 @@ export default function ListaConfirmacaoPage() {
     setEditEntryLast(entry.full_name.split(' ').slice(1).join(' ') || '');
     setEditEntryEmail(entry.email || '');
     setEditEntryPhone(entry.phone || '');
+    setEditEntryRg(entry.rg || '');
     setEditEntryUsePhone(!!entry.phone && !entry.email);
   };
 
@@ -409,6 +429,12 @@ export default function ListaConfirmacaoPage() {
         return;
       }
     }
+
+    const requireRg = data?.meeting.attendance_list_require_rg ?? false;
+    if (requireRg && !editEntryRg.trim()) {
+      setError('Informe o RG.');
+      return;
+    }
     
     setEditEntrySaving(true);
     setError(null);
@@ -420,6 +446,7 @@ export default function ListaConfirmacaoPage() {
           first_name: fn,
           last_name: ln,
           ...(editEntryUsePhone ? { phone: ph, email: null } : { email: em, phone: null }),
+          ...(requireRg ? { rg: editEntryRg.trim() } : {}),
         }),
       });
       const json = await res.json();
@@ -471,6 +498,10 @@ export default function ListaConfirmacaoPage() {
         setMeetingTitle(d.meeting.title ?? '');
         setMeetingLocation(d.meeting.location ?? '');
         setMeetingNotes(d.meeting.notes ?? '');
+        setMeetingListRequireRg(d.meeting.attendance_list_require_rg ?? false);
+        setMeetingListLimit(
+          d.meeting.attendance_list_limit != null ? String(d.meeting.attendance_list_limit) : ''
+        );
         const s = syncInternalStateFromMeeting(d);
         setInternalLabel(s.label);
         setInternalChecks(s.checks);
@@ -496,6 +527,8 @@ export default function ListaConfirmacaoPage() {
           title: meetingTitle.trim() || null,
           location: meetingLocation.trim() || null,
           notes: meetingNotes.trim() || null,
+          attendance_list_require_rg: data.meeting.attendance_list_mode === 'open' ? meetingListRequireRg : false,
+          attendance_list_limit: meetingListLimit.trim() ? Number(meetingListLimit) : null,
         }),
       });
       const json = await res.json();
@@ -656,7 +689,8 @@ export default function ListaConfirmacaoPage() {
   const labelNeither = internalUnmarked.trim() || 'Não marcados';
 
   const exportAttendanceCSV = () => {
-    const headers = ['Nome', 'Resposta', 'Contato'];
+    const includeRg = meeting.attendance_list_require_rg ?? false;
+    const headers = includeRg ? ['Nome', 'Resposta', 'Contato', 'RG'] : ['Nome', 'Resposta', 'Contato'];
     const memberRows = members.map((m) => [
       m.full_name,
       m.response?.status === 'present' ? 'Presente' : m.response?.status === 'absent' ? 'Ausente' : '—',
@@ -671,6 +705,7 @@ export default function ListaConfirmacaoPage() {
       `${e.full_name} (lista vazia)`,
       'Presente',
       publicEntryContactDisplay(e),
+      ...(includeRg ? [e.rg || '—'] : []),
     ]);
     const csvContent = [headers, ...memberRows, ...guestRows, ...publicRows]
       .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
@@ -699,6 +734,9 @@ export default function ListaConfirmacaoPage() {
             {meeting.title || 'Encontro'} — {formatDate(meeting.meeting_date)}
             {meeting.meeting_time && ` às ${formatTime(meeting.meeting_time)}`}
             {meeting.location && ` · ${meeting.location}`}
+            {meeting.attendance_list_limit != null && meeting.attendance_list_limit > 0 && (
+              <> · Limite: {publicEntries.length + members.filter((m) => m.response?.status === 'present').length + guests.length} / {meeting.attendance_list_limit}</>
+            )}
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={exportAttendanceCSV} className="gap-2 self-start sm:self-auto">
@@ -758,6 +796,33 @@ export default function ListaConfirmacaoPage() {
               <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
                 <p className="text-xs text-muted-foreground mb-1">Preview:</p>
                 <p className="whitespace-pre-wrap">{meetingNotes}</p>
+              </div>
+            )}
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 pt-2 border-t">
+            <div className="space-y-2">
+              <Label htmlFor="meeting-list-limit">Limite de inscrições (opcional)</Label>
+              <Input
+                id="meeting-list-limit"
+                type="number"
+                min={1}
+                placeholder="Sem limite"
+                value={meetingListLimit}
+                onChange={(e) => setMeetingListLimit(e.target.value)}
+                disabled={meetingInfoSaving}
+              />
+            </div>
+            {meeting.attendance_list_mode === 'open' && (
+              <div className="flex items-center space-x-2 sm:pt-8">
+                <Checkbox
+                  id="meeting-list-require-rg"
+                  checked={meetingListRequireRg}
+                  onCheckedChange={(c) => setMeetingListRequireRg(c === true)}
+                  disabled={meetingInfoSaving}
+                />
+                <Label htmlFor="meeting-list-require-rg" className="text-sm font-normal cursor-pointer">
+                  Exigir RG no formulário de confirmação
+                </Label>
               </div>
             )}
           </div>
@@ -1029,6 +1094,20 @@ export default function ListaConfirmacaoPage() {
               />
             </div>
           )}
+
+          {meeting.attendance_list_require_rg && (
+            <div className="space-y-1">
+              <Label htmlFor="public-entry-rg">RG</Label>
+              <Input
+                id="public-entry-rg"
+                placeholder="Ex: 12.345.678-9"
+                value={publicEntryRg}
+                onChange={(e) => setPublicEntryRg(e.target.value)}
+                disabled={publicEntrySaving}
+                onKeyDown={(e) => e.key === 'Enter' && void handleAddPublicEntry()}
+              />
+            </div>
+          )}
           
           <Button
             type="button"
@@ -1050,6 +1129,9 @@ export default function ListaConfirmacaoPage() {
                 <tr className="border-b bg-muted/30">
                   <th className="text-left p-3 font-medium">Nome</th>
                   <th className="text-left p-3 font-medium">E-mail / Telefone</th>
+                  {meeting.attendance_list_require_rg && (
+                    <th className="text-left p-3 font-medium">RG</th>
+                  )}
                   <th className="text-left p-3 font-medium">Quando</th>
                   <th className="text-left p-3 font-medium">Ações</th>
                 </tr>
@@ -1061,6 +1143,9 @@ export default function ListaConfirmacaoPage() {
                     <tr key={e.id} className="border-b last:border-0">
                       <td className="p-3">{e.full_name}</td>
                       <td className="p-3 font-mono text-xs">{publicEntryContactDisplay(e)}</td>
+                      {meeting.attendance_list_require_rg && (
+                        <td className="p-3 font-mono text-xs">{e.rg || '—'}</td>
+                      )}
                       <td className="p-3 text-xs text-muted-foreground">
                         {new Date(e.created_at).toLocaleString('pt-BR')}
                       </td>
@@ -1167,6 +1252,19 @@ export default function ListaConfirmacaoPage() {
                   placeholder="exemplo@email.com"
                   value={editEntryEmail}
                   onChange={(e) => setEditEntryEmail(e.target.value)}
+                  disabled={editEntrySaving}
+                />
+              </div>
+            )}
+
+            {data?.meeting.attendance_list_require_rg && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-entry-rg">RG</Label>
+                <Input
+                  id="edit-entry-rg"
+                  placeholder="Ex: 12.345.678-9"
+                  value={editEntryRg}
+                  onChange={(e) => setEditEntryRg(e.target.value)}
                   disabled={editEntrySaving}
                 />
               </div>

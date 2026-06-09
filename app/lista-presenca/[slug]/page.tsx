@@ -21,11 +21,14 @@ type PublicPayload = {
     notes: string | null;
     attendance_list_deadline: string | null;
     attendance_list_mode: Mode;
+    attendance_list_require_rg: boolean;
+    attendance_list_limit: number | null;
     invite_cover_image_url?: string | null;
   };
   count_confirmed: number;
   count_guests: number;
   is_expired: boolean;
+  is_limit_reached: boolean;
   public_summary_only: true;
 };
 
@@ -54,6 +57,7 @@ export default function ListaPresencaPublicPage() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [noEmail, setNoEmail] = useState(false);
+  const [rg, setRg] = useState('');
 
   // Form (prefilled)
   const [prefilledPhone, setPrefilledPhone] = useState('');
@@ -100,6 +104,10 @@ export default function ListaPresencaPublicPage() {
       setSubmitError(noEmail ? 'Informe um telefone com DDD (mín. 10 dígitos).' : 'Informe um e-mail válido.');
       return;
     }
+    if (data.meeting.attendance_list_require_rg && !rg.trim()) {
+      setSubmitError('Informe o RG.');
+      return;
+    }
 
     setSubmitLoading(true);
     try {
@@ -112,12 +120,13 @@ export default function ListaPresencaPublicPage() {
           last_name: ln,
           ...(hasEmail ? { email: em } : {}),
           ...(hasPhone ? { phone: ph } : {}),
+          ...(data.meeting.attendance_list_require_rg ? { rg: rg.trim() } : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Erro ao confirmar');
       setSubmitOk('Confirmação registrada. Obrigado!');
-      setFirstName(''); setLastName(''); setEmail(''); setPhone(''); setNoEmail(false);
+      setFirstName(''); setLastName(''); setEmail(''); setPhone(''); setNoEmail(false); setRg('');
       await fetchData();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Erro ao confirmar');
@@ -188,7 +197,9 @@ export default function ListaPresencaPublicPage() {
     );
   }
 
-  const { meeting, count_confirmed, count_guests, is_expired } = data;
+  const { meeting, count_confirmed, count_guests, is_expired, is_limit_reached } = data;
+  const hasLimit = meeting.attendance_list_limit != null && meeting.attendance_list_limit > 0;
+  const formDisabled = is_expired || is_limit_reached;
   const mapsUrl =
     meeting.location && meeting.location.trim().length > 0
       ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(meeting.location.trim())}`
@@ -246,7 +257,10 @@ export default function ListaPresencaPublicPage() {
         <div className="rounded-lg border bg-card p-4 flex flex-wrap gap-4 justify-center">
           <div className="flex items-center gap-2 text-green-700">
             <CheckCircle2 className="h-5 w-5" />
-            <span className="font-medium">{count_confirmed}</span>
+            <span className="font-medium">
+              {count_confirmed}
+              {hasLimit ? ` / ${meeting.attendance_list_limit}` : ''}
+            </span>
             <span className="text-sm text-muted-foreground">confirmados</span>
           </div>
           {count_guests > 0 && (
@@ -267,9 +281,11 @@ export default function ListaPresencaPublicPage() {
             <p className="text-sm text-muted-foreground">
               {is_expired
                 ? 'O prazo para registrar confirmações por este link foi encerrado.'
-                : meeting.attendance_list_mode === 'open'
-                  ? 'Confirme sua presença preenchendo nome, sobrenome e e-mail ou telefone.'
-                  : 'Confirme sua presença informando seu telefone (ou e-mail).'}
+                : is_limit_reached
+                  ? 'O limite de inscrições para este evento já foi atingido.'
+                  : meeting.attendance_list_mode === 'open'
+                    ? `Confirme sua presença preenchendo nome, sobrenome${meeting.attendance_list_require_rg ? ', RG' : ''} e e-mail ou telefone.`
+                    : 'Confirme sua presença informando seu telefone (ou e-mail).'}
             </p>
           </div>
 
@@ -284,7 +300,7 @@ export default function ListaPresencaPublicPage() {
             </div>
           )}
 
-          {!is_expired && (
+          {!formDisabled && (
             <div className="p-4 space-y-4">
               {meeting.attendance_list_mode === 'open' ? (
                 <>
@@ -296,6 +312,18 @@ export default function ListaPresencaPublicPage() {
                     <Label htmlFor="ln">Sobrenome</Label>
                     <Input id="ln" value={lastName} onChange={(e) => setLastName(e.target.value)} />
                   </div>
+                  {meeting.attendance_list_require_rg && (
+                    <div className="space-y-2">
+                      <Label htmlFor="rg">RG</Label>
+                      <Input
+                        id="rg"
+                        placeholder="Ex: 12.345.678-9"
+                        value={rg}
+                        onChange={(e) => setRg(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSubmitOpen()}
+                      />
+                    </div>
+                  )}
                   <div className="flex items-center space-x-2">
                     <Checkbox id="no-email" checked={noEmail} onCheckedChange={(c) => setNoEmail(c === true)} />
                     <Label htmlFor="no-email" className="text-sm font-normal cursor-pointer">Não quero informar e-mail</Label>

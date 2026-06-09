@@ -42,7 +42,18 @@ export async function PUT(
     }
 
     const data = await request.json();
-    const { meeting_date, meeting_time, is_cancelled, title, notes, meeting_type, location, attendance_list_deadline } = data as {
+    const {
+      meeting_date,
+      meeting_time,
+      is_cancelled,
+      title,
+      notes,
+      meeting_type,
+      location,
+      attendance_list_deadline,
+      attendance_list_require_rg,
+      attendance_list_limit,
+    } = data as {
       meeting_date?: string;
       meeting_time?: string | null;
       is_cancelled?: boolean;
@@ -51,6 +62,8 @@ export async function PUT(
       meeting_type?: 'regular' | 'special_event';
       location?: string | null;
       attendance_list_deadline?: string | null;
+      attendance_list_require_rg?: boolean;
+      attendance_list_limit?: number | null;
     };
 
     const updates: string[] = [];
@@ -100,6 +113,27 @@ export async function PUT(
       } else {
         updates.push(`attendance_list_deadline = $${paramIndex++}`);
         values.push(null);
+      }
+    }
+
+    if (attendance_list_require_rg !== undefined) {
+      updates.push(`attendance_list_require_rg = $${paramIndex++}`);
+      values.push(Boolean(attendance_list_require_rg));
+    }
+    if (attendance_list_limit !== undefined) {
+      if (attendance_list_limit == null) {
+        updates.push(`attendance_list_limit = $${paramIndex++}`);
+        values.push(null);
+      } else {
+        const parsed = Number(attendance_list_limit);
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          return NextResponse.json(
+            { error: 'O limite de inscrições deve ser um número inteiro maior que zero' },
+            { status: 400 }
+          );
+        }
+        updates.push(`attendance_list_limit = $${paramIndex++}`);
+        values.push(parsed);
       }
     }
 

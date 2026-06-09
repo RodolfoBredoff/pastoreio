@@ -11,6 +11,8 @@ export type PublicAttendanceListMeeting = {
   notes: string | null;
   attendance_list_deadline: string | null;
   attendance_list_mode: AttendanceListMode;
+  attendance_list_require_rg: boolean;
+  attendance_list_limit: number | null;
   invite_cover_image_url?: string | null;
 };
 
@@ -19,26 +21,66 @@ export type PublicAttendanceListPayload = {
   count_confirmed: number;
   count_guests: number;
   is_expired: boolean;
+  is_limit_reached: boolean;
   public_summary_only: true;
 };
 
-export async function getMeetingBySlugOrToken(identifier: string) {
-  // Identifier can be slug (new) or UUID token (legacy).
-  // We try slug first; if not found, fall back to token.
-  const meeting = await queryOne<{
-    id: string;
-    title: string | null;
-    meeting_date: string;
-    meeting_time: string | null;
-    location: string | null;
-    notes: string | null;
-    attendance_list_deadline: string | null;
-    attendance_list_mode: AttendanceListMode | null;
-    invite_cover_image_url: string | null;
-  }>(
+type MeetingRow = {
+  id: string;
+  title: string | null;
+  meeting_date: string;
+  meeting_time: string | null;
+  location: string | null;
+  notes: string | null;
+  attendance_list_deadline: string | null;
+  attendance_list_mode: AttendanceListMode | null;
+  attendance_list_require_rg: boolean;
+  attendance_list_limit: number | null;
+  invite_cover_image_url: string | null;
+};
+
+export function normalizeRg(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+export function isValidRg(value: string): boolean {
+  const normalized = normalizeRg(value);
+  return normalized.length >= 4 && normalized.length <= 20;
+}
+
+export function isAttendanceLimitReached(count: number, limit: number | null | undefined): boolean {
+  return limit != null && limit > 0 && count >= limit;
+}
+
+export async function getAttendanceConfirmedCount(meetingId: string, mode: AttendanceListMode): Promise<number> {
+  if (mode === 'open') {
+    const row = await queryOne<{ c: string }>(
+      `SELECT COUNT(*)::text as c FROM attendance_list_public_entries WHERE meeting_id = $1`,
+      [meetingId]
+    );
+    return parseInt(row?.c ?? '0', 10);
+  }
+
+  const presentRow = await queryOne<{ c: string }>(
+    `SELECT COUNT(*) FILTER (WHERE status = 'present')::text as c
+     FROM attendance_list_responses WHERE meeting_id = $1`,
+    [meetingId]
+  );
+  const guestsRow = await queryOne<{ c: string }>(
+    `SELECT COUNT(*)::text as c FROM attendance_list_guests WHERE meeting_id = $1`,
+    [meetingId]
+  ).catch(() => ({ c: '0' }));
+
+  return parseInt(presentRow?.c ?? '0', 10) + parseInt(guestsRow?.c ?? '0', 10);
+}
+
+export async function getMeetingBySlugOrToken(identifier: string): Promise<MeetingRow | null> {
+  const meeting = await queryOne<MeetingRow>(
     `SELECT id, title, meeting_date, meeting_time, location, notes,
             attendance_list_deadline,
             COALESCE(attendance_list_mode, 'prefilled') as attendance_list_mode,
+            COALESCE(attendance_list_require_rg, FALSE) as attendance_list_require_rg,
+            attendance_list_limit,
             invite_cover_image_url
      FROM meetings
      WHERE (attendance_list_slug = $1 OR attendance_list_token::text = $1)
@@ -60,7 +102,9 @@ export async function getPublicAttendanceList(identifier: string): Promise<Publi
   const meeting = await getMeetingBySlugOrToken(identifier);
   if (!meeting) return null;
 
+  const mode = meeting.attendance_list_mode ?? 'prefilled';
   const expired = isMeetingExpired(meeting.attendance_list_deadline);
+  const countConfirmed = await getAttendanceConfirmedCount(meeting.id, mode);
 
   const meetingPayload: PublicAttendanceListMeeting = {
     id: meeting.id,
@@ -70,20 +114,11 @@ export async function getPublicAttendanceList(identifier: string): Promise<Publi
     location: meeting.location,
     notes: meeting.notes,
     attendance_list_deadline: meeting.attendance_list_deadline,
-    attendance_list_mode: meeting.attendance_list_mode ?? 'prefilled',
+    attendance_list_mode: mode,
+    attendance_list_require_rg: meeting.attendance_list_require_rg ?? false,
+    attendance_list_limit: meeting.attendance_list_limit,
     invite_cover_image_url: meeting.invite_cover_image_url,
   };
-
-  // Counts:
-  // - prefilled: confirmed = responses with status='present'
-  // - open: confirmed = public entries count
-  const confirmedRow = await queryOne<{ c: string }>(
-    meetingPayload.attendance_list_mode === 'open'
-      ? `SELECT COUNT(*)::text as c FROM attendance_list_public_entries WHERE meeting_id = $1`
-      : `SELECT COUNT(*) FILTER (WHERE status = 'present')::text as c
-         FROM attendance_list_responses WHERE meeting_id = $1`,
-    [meeting.id]
-  );
 
   const guestsRow = await queryOne<{ c: string }>(
     `SELECT COUNT(*)::text as c FROM attendance_list_guests WHERE meeting_id = $1`,
@@ -92,9 +127,10 @@ export async function getPublicAttendanceList(identifier: string): Promise<Publi
 
   return {
     meeting: meetingPayload,
-    count_confirmed: parseInt(confirmedRow?.c ?? '0', 10),
+    count_confirmed: countConfirmed,
     count_guests: parseInt(guestsRow?.c ?? '0', 10),
     is_expired: expired,
+    is_limit_reached: isAttendanceLimitReached(countConfirmed, meeting.attendance_list_limit),
     public_summary_only: true,
   };
 }
@@ -125,8 +161,6 @@ export async function publicConfirmPrefilledByPhoneOrEmail(args: {
     return { error: 'Informe um telefone (com DDD) ou um e-mail válido.', status: 400 };
   }
 
-  // Find member within the meeting's group.
-  // Phone is required in members schema; we match by normalized digits.
   const member = await queryOne<{ id: string }>(
     hasPhone
       ? `SELECT m.id
@@ -141,6 +175,18 @@ export async function publicConfirmPrefilledByPhoneOrEmail(args: {
 
   if (!member) {
     return { error: 'Não encontramos um participante com esse telefone neste grupo.', status: 404 };
+  }
+
+  const existing = await queryOne<{ status: string }>(
+    `SELECT status FROM attendance_list_responses WHERE meeting_id = $1 AND member_id = $2`,
+    [meeting.id, member.id]
+  );
+
+  if (!existing || existing.status !== 'present') {
+    const count = await getAttendanceConfirmedCount(meeting.id, mode);
+    if (isAttendanceLimitReached(count, meeting.attendance_list_limit)) {
+      return { error: 'O limite de inscrições para este evento já foi atingido.', status: 400 };
+    }
   }
 
   await query(
@@ -159,6 +205,7 @@ export async function publicCreateOpenEntry(args: {
   last_name: string;
   email?: string;
   phone?: string;
+  rg?: string;
 }) {
   const meeting = await getMeetingBySlugOrToken(args.identifier);
   if (!meeting) return { error: 'Lista não encontrada ou indisponível', status: 404 };
@@ -172,25 +219,41 @@ export async function publicCreateOpenEntry(args: {
     return { error: 'O prazo para confirmação deste encontro já foi encerrado.', status: 400 };
   }
 
+  const count = await getAttendanceConfirmedCount(meeting.id, mode);
+  if (isAttendanceLimitReached(count, meeting.attendance_list_limit)) {
+    return { error: 'O limite de inscrições para este evento já foi atingido.', status: 400 };
+  }
+
   const firstName = typeof args.first_name === 'string' ? args.first_name.trim() : '';
   const lastName = typeof args.last_name === 'string' ? args.last_name.trim() : '';
   const emailVal = typeof args.email === 'string' ? args.email.trim().toLowerCase() : '';
   const phoneVal = typeof args.phone === 'string' ? args.phone.replace(/\D/g, '').trim() : '';
   const hasEmail = emailVal && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal);
   const hasPhone = phoneVal.length >= 10;
+  const rgVal = typeof args.rg === 'string' ? normalizeRg(args.rg) : '';
 
   if (!firstName) return { error: 'Informe o nome.', status: 400 };
   if (!lastName) return { error: 'Informe o sobrenome.', status: 400 };
   if (!hasEmail && !hasPhone) {
     return { error: 'Informe um e-mail válido ou telefone (com DDD).', status: 400 };
   }
+  if (meeting.attendance_list_require_rg) {
+    if (!rgVal) return { error: 'Informe o RG.', status: 400 };
+    if (!isValidRg(rgVal)) return { error: 'Informe um RG válido.', status: 400 };
+  }
 
   await query(
-    `INSERT INTO attendance_list_public_entries (meeting_id, first_name, last_name, email, phone)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [meeting.id, firstName, lastName, hasEmail ? emailVal : null, hasPhone ? phoneVal : null]
+    `INSERT INTO attendance_list_public_entries (meeting_id, first_name, last_name, email, phone, rg)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      meeting.id,
+      firstName,
+      lastName,
+      hasEmail ? emailVal : null,
+      hasPhone ? phoneVal : null,
+      meeting.attendance_list_require_rg ? rgVal : null,
+    ]
   );
 
   return { ok: true, status: 201 };
 }
-

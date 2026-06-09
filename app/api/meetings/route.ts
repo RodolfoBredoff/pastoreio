@@ -85,6 +85,8 @@ export async function POST(request: Request) {
       attendance_list_deadline,
       attendance_list_mode,
       attendance_list_slug,
+      attendance_list_require_rg,
+      attendance_list_limit,
     } = data as {
       meeting_date: string;
       meeting_time?: string | null;
@@ -96,6 +98,8 @@ export async function POST(request: Request) {
       attendance_list_deadline?: string | null;
       attendance_list_mode?: 'prefilled' | 'open';
       attendance_list_slug?: string | null;
+      attendance_list_require_rg?: boolean;
+      attendance_list_limit?: number | null;
     };
 
     if (!meeting_date) {
@@ -126,6 +130,20 @@ export async function POST(request: Request) {
       attendanceListDeadlineVal = `${attendance_list_deadline}T23:59:59.999Z`;
     }
 
+    const attendanceListRequireRg =
+      withList && attendance_list_mode === 'open' && Boolean(attendance_list_require_rg);
+    let attendanceListLimit: number | null = null;
+    if (withList && attendance_list_limit != null) {
+      const parsed = Number(attendance_list_limit);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        return NextResponse.json(
+          { error: 'O limite de inscrições deve ser um número inteiro maior que zero' },
+          { status: 400 }
+        );
+      }
+      attendanceListLimit = parsed;
+    }
+
     let attendanceListSlug: string | null = null;
     if (withList) {
       const provided = typeof attendance_list_slug === 'string' ? attendance_list_slug.trim() : '';
@@ -137,8 +155,8 @@ export async function POST(request: Request) {
     }
 
     const result = await query(
-      `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token, attendance_list_deadline, attendance_list_slug, attendance_list_mode)
-       VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11)
+      `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token, attendance_list_deadline, attendance_list_slug, attendance_list_mode, attendance_list_require_rg, attendance_list_limit)
+       VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (group_id, meeting_date) DO NOTHING
        RETURNING *`,
       [
@@ -153,6 +171,8 @@ export async function POST(request: Request) {
         attendanceListDeadlineVal,
         attendanceListSlug,
         attendanceListMode,
+        attendanceListRequireRg,
+        attendanceListLimit,
       ]
     );
 

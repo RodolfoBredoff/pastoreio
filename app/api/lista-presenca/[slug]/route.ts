@@ -41,13 +41,21 @@ export async function POST(
     const { mode } = body as { mode?: 'open' | 'prefilled' };
 
     if (mode === 'open') {
-      const { first_name, last_name, email, phone } = body as {
+      const { first_name, last_name, email, phone, rg } = body as {
         first_name?: string;
         last_name?: string;
         email?: string;
         phone?: string;
+        rg?: string;
       };
-      const res = await publicCreateOpenEntry({ identifier: slug, first_name: first_name ?? '', last_name: last_name ?? '', email, phone });
+      const res = await publicCreateOpenEntry({
+        identifier: slug,
+        first_name: first_name ?? '',
+        last_name: last_name ?? '',
+        email,
+        phone,
+        rg,
+      });
       if ('error' in res) return NextResponse.json({ error: res.error }, { status: res.status });
       return NextResponse.json({ ok: true }, { status: 201 });
     }
