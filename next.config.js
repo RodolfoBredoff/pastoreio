@@ -67,6 +67,7 @@ const withPWA = require('next-pwa')({
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  turbopack: {}, // Silencia aviso de webpack config em Next.js 16
   experimental: {
     serverActions: {
       bodySizeLimit: '2mb'

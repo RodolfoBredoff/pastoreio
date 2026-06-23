@@ -27,6 +27,10 @@ import {
   PeriodSelector,
 } from '@/components/dashboard/engagement-filter-controls';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
+import { AtRiskMembersCard } from '@/components/dashboard/at-risk-members-card';
+import { FrequencyDistributionCard } from '@/components/dashboard/frequency-distribution-card';
+import { VisitorFunnelCard } from '@/components/dashboard/visitor-funnel-card';
+import { RetentionMetricsCard } from '@/components/dashboard/retention-metrics-card';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -1594,6 +1598,18 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
             memberStats={filteredMemberStats}
             presenceFilter={presenceFilter}
           />
+          
+          {/* Novos cards de métricas avançadas */}
+          <div className="grid gap-6 md:grid-cols-2">
+            <AtRiskMembersCard memberFilter={memberFilter} periodDays={90} />
+            <FrequencyDistributionCard memberFilter={memberFilter} periodDays={90} />
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <VisitorFunnelCard periodDays={180} />
+            <RetentionMetricsCard memberFilter={memberFilter} />
+          </div>
+
           <PeriodSummaryBreakdown
             summary={summary}
             breakdownRows={breakdownRows}
