@@ -3,7 +3,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Shield, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Shield, TrendingUp, TrendingDown, Minus, Eye } from 'lucide-react';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
 import {
   Chart as ChartJS,
@@ -50,6 +51,9 @@ interface RetentionMetricsCardProps {
 export function RetentionMetricsCard({ memberFilter }: RetentionMetricsCardProps) {
   const [data, setData] = useState<RetentionAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedMetric, setSelectedMetric] = useState<RetentionMetric | null>(null);
+  const [showDialog, setShowDialog] = useState(false);
+  const [members, setMembers] = useState<Array<{ id: string; full_name: string; status: 'active' | 'inactive' }>>([]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -70,6 +74,23 @@ export function RetentionMetricsCard({ memberFilter }: RetentionMetricsCardProps
 
     fetchData();
   }, [memberFilter]);
+
+  const handleMetricClick = async (metric: RetentionMetric) => {
+    setSelectedMetric(metric);
+    setShowDialog(true);
+    
+    // Buscar membros do cohort (criados entre cohort_start_date e cohort_end_date)
+    try {
+      const url = `/api/members?created_after=${metric.cohort_start_date}&created_before=${metric.cohort_end_date}&member_filter=${memberFilter}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const membersData = await res.json();
+        setMembers(membersData);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar membros do cohort:', error);
+    }
+  };
 
   const chartData: ChartData<'line'> = useMemo(() => {
     if (!data) return { labels: [], datasets: [] };
@@ -265,9 +286,10 @@ export function RetentionMetricsCard({ memberFilter }: RetentionMetricsCardProps
             const isHealthy = metric.retention_rate >= metric.benchmark;
 
             return (
-              <div
+              <button
                 key={metric.period}
-                className={`p-3 rounded-lg border ${
+                onClick={() => handleMetricClick(metric)}
+                className={`w-full text-left p-3 rounded-lg border hover:shadow-md transition-shadow cursor-pointer ${
                   metric.health_status === 'excellent'
                     ? 'border-green-200 bg-green-50/30'
                     : metric.health_status === 'good'
@@ -289,11 +311,14 @@ export function RetentionMetricsCard({ memberFilter }: RetentionMetricsCardProps
                       {metric.total_members} membros no cohort
                     </p>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-2xl font-bold">{metric.retention_rate}%</p>
-                    <p className="text-xs text-muted-foreground">
-                      {metric.retained_members}/{metric.total_members}
-                    </p>
+                  <div className="text-right shrink-0 flex items-center gap-2">
+                    <div>
+                      <p className="text-2xl font-bold">{metric.retention_rate}%</p>
+                      <p className="text-xs text-muted-foreground">
+                        {metric.retained_members}/{metric.total_members}
+                      </p>
+                    </div>
+                    <Eye className="h-4 w-4 text-muted-foreground" />
                   </div>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-xs">
@@ -311,7 +336,7 @@ export function RetentionMetricsCard({ memberFilter }: RetentionMetricsCardProps
                     {metric.churned_members} {metric.churned_members === 1 ? 'pessoa saiu' : 'pessoas saíram'} ({metric.churn_rate}%)
                   </p>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -335,6 +360,76 @@ export function RetentionMetricsCard({ memberFilter }: RetentionMetricsCardProps
           )}
         </div>
       </CardContent>
+
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="h-5 w-5" />
+              {selectedMetric?.label}
+            </DialogTitle>
+            <DialogDescription>
+              Cohort de {selectedMetric?.total_members} membros ({new Date(selectedMetric?.cohort_start_date || '').toLocaleDateString('pt-BR')} até {new Date(selectedMetric?.cohort_end_date || '').toLocaleDateString('pt-BR')})
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 mt-4">
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-sm">
+              <p><strong>Período:</strong> {selectedMetric?.label}</p>
+              <p><strong>Membros no cohort:</strong> {selectedMetric?.total_members}</p>
+              <p><strong>Taxa de retenção:</strong> {selectedMetric?.retention_rate}%</p>
+              <p><strong>Membros retidos:</strong> {selectedMetric?.retained_members} de {selectedMetric?.total_members}</p>
+              <p><strong>Membros que saíram:</strong> {selectedMetric?.churned_members} ({selectedMetric?.churn_rate}%)</p>
+              <p><strong>Benchmark esperado:</strong> {selectedMetric?.benchmark}%</p>
+              <p>
+                <strong>Status de saúde:</strong>{' '}
+                <Badge className={`text-xs ${getHealthStatusColor(selectedMetric?.health_status || '')}`}>
+                  {getHealthStatusLabel(selectedMetric?.health_status || '')}
+                </Badge>
+              </p>
+            </div>
+
+            <div>
+              <h4 className="font-medium mb-2 text-sm">
+                Membros do cohort ({selectedMetric?.total_members}):
+              </h4>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <div className="text-center p-2 rounded-lg border bg-green-50 dark:bg-green-950/20">
+                  <p className="text-xl font-bold text-green-700">{selectedMetric?.retained_members}</p>
+                  <p className="text-xs text-green-600">Retidos</p>
+                </div>
+                <div className="text-center p-2 rounded-lg border bg-red-50 dark:bg-red-950/20">
+                  <p className="text-xl font-bold text-red-700">{selectedMetric?.churned_members}</p>
+                  <p className="text-xs text-red-600">Saíram</p>
+                </div>
+              </div>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {members.length > 0 ? (
+                  members.map((member) => (
+                    <div
+                      key={member.id}
+                      className={`flex items-center justify-between p-3 rounded-lg border ${
+                        member.status === 'active' 
+                          ? 'bg-green-50/30 dark:bg-green-950/10' 
+                          : 'bg-red-50/30 dark:bg-red-950/10'
+                      }`}
+                    >
+                      <p className="font-medium text-sm">{member.full_name}</p>
+                      <Badge variant={member.status === 'active' ? 'default' : 'destructive'} className="text-xs">
+                        {member.status === 'active' ? '✓ Ativo' : '✗ Inativo'}
+                      </Badge>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Carregando membros...
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

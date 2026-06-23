@@ -4,6 +4,98 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { query } from '@/lib/db/postgres';
 
 /**
+ * GET /api/members
+ * Busca membros por IDs ou filtros de período
+ */
+export async function GET(request: Request) {
+  try {
+    await requireAuth();
+    const leader = await getCurrentLeader();
+
+    if (!leader?.group_id) {
+      return NextResponse.json(
+        { error: 'Líder não está vinculado a um grupo' },
+        { status: 400 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const ids = searchParams.get('ids');
+    const createdAfter = searchParams.get('created_after');
+    const createdBefore = searchParams.get('created_before');
+    const memberFilter = searchParams.get('member_filter') || 'all';
+
+    let sql = `
+      SELECT 
+        m.id, 
+        m.full_name, 
+        m.phone, 
+        m.member_type,
+        m.status,
+        m.created_at,
+        COALESCE(
+          (SELECT COUNT(*) * 100.0 / NULLIF(
+            (SELECT COUNT(*) FROM meetings mt WHERE mt.group_id = m.group_id AND mt.date >= CURRENT_DATE - INTERVAL '90 days'),
+            0
+          )
+          FROM attendance a
+          JOIN meetings mt ON a.meeting_id = mt.id
+          WHERE a.member_id = m.id 
+            AND a.present = true 
+            AND mt.date >= CURRENT_DATE - INTERVAL '90 days'),
+          0
+        )::INTEGER as frequency_rate
+      FROM members m
+      WHERE m.group_id = $1
+    `;
+    
+    const params: any[] = [leader.group_id];
+    let paramIndex = 2;
+
+    // Filtro por IDs
+    if (ids) {
+      const idArray = ids.split(',').filter(id => id.trim());
+      if (idArray.length > 0) {
+        sql += ` AND m.id = ANY($${paramIndex}::uuid[])`;
+        params.push(idArray);
+        paramIndex++;
+      }
+    }
+
+    // Filtro por período de criação
+    if (createdAfter) {
+      sql += ` AND m.created_at >= $${paramIndex}`;
+      params.push(createdAfter);
+      paramIndex++;
+    }
+    
+    if (createdBefore) {
+      sql += ` AND m.created_at <= $${paramIndex}`;
+      params.push(createdBefore);
+      paramIndex++;
+    }
+
+    // Filtro por tipo de membro
+    if (memberFilter === 'members') {
+      sql += ` AND m.member_type = 'participant'`;
+    } else if (memberFilter === 'visitors') {
+      sql += ` AND m.member_type = 'visitor'`;
+    }
+
+    sql += ` ORDER BY m.full_name`;
+
+    const result = await query(sql, params);
+    return NextResponse.json(result.rows);
+  } catch (error) {
+    console.error('Erro ao buscar membros:', error);
+    return NextResponse.json(
+      { error: 'Erro ao buscar membros' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
  * POST /api/members
  * Cria um novo membro. O campo birth_date é opcional.
  */

@@ -3,7 +3,9 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Users, TrendingUp } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Users, TrendingUp, Eye } from 'lucide-react';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
 import {
   Chart as ChartJS,
@@ -48,6 +50,9 @@ interface FrequencyDistributionCardProps {
 export function FrequencyDistributionCard({ memberFilter, periodDays = 90 }: FrequencyDistributionCardProps) {
   const [data, setData] = useState<FrequencyDistribution | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedSegment, setSelectedSegment] = useState<FrequencySegment | null>(null);
+  const [showDialog, setShowDialog] = useState(false);
+  const [members, setMembers] = useState<Array<{ id: string; full_name: string; frequency_rate: number }>>([]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -68,6 +73,23 @@ export function FrequencyDistributionCard({ memberFilter, periodDays = 90 }: Fre
 
     fetchData();
   }, [memberFilter, periodDays]);
+
+  const handleSegmentClick = async (segment: FrequencySegment) => {
+    setSelectedSegment(segment);
+    setShowDialog(true);
+    
+    // Buscar dados dos membros
+    try {
+      const url = `/api/members?ids=${segment.memberIds.join(',')}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const membersData = await res.json();
+        setMembers(membersData);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar membros:', error);
+    }
+  };
 
   const chartData: ChartData<'bar'> = useMemo(() => {
     if (!data) return { labels: [], datasets: [] };
@@ -216,13 +238,17 @@ export function FrequencyDistributionCard({ memberFilter, periodDays = 90 }: Fre
             const isSignificantDiff = Math.abs(percentageDiff) >= 5;
 
             return (
-              <div key={segment.segment} className="flex items-center justify-between p-2 rounded-lg border">
+              <button
+                key={segment.segment}
+                onClick={() => handleSegmentClick(segment)}
+                className="w-full flex items-center justify-between p-2 rounded-lg border hover:bg-muted/50 transition-colors cursor-pointer"
+              >
                 <div className="flex items-center gap-2 flex-1 min-w-0">
                   <div
                     className="w-3 h-3 rounded-full shrink-0"
                     style={{ backgroundColor: segment.color }}
                   />
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 text-left">
                     <p className="text-sm font-medium truncate">{segment.label}</p>
                     <p className="text-xs text-muted-foreground">{segment.description}</p>
                   </div>
@@ -240,8 +266,9 @@ export function FrequencyDistributionCard({ memberFilter, periodDays = 90 }: Fre
                       {isAboveBenchmark ? '+' : ''}{percentageDiff}pp
                     </Badge>
                   )}
+                  <Eye className="h-4 w-4 text-muted-foreground" />
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -264,6 +291,62 @@ export function FrequencyDistributionCard({ memberFilter, periodDays = 90 }: Fre
           </div>
         )}
       </CardContent>
+
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <div
+                className="w-4 h-4 rounded-full"
+                style={{ backgroundColor: selectedSegment?.color }}
+              />
+              {selectedSegment?.label}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedSegment?.description} • {selectedSegment?.count} {selectedSegment?.count === 1 ? 'membro' : 'membros'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 mt-4">
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-sm">
+              <p><strong>Faixa de frequência:</strong> {selectedSegment?.description}</p>
+              <p><strong>Percentual do grupo:</strong> {selectedSegment?.percentage}%</p>
+              <p><strong>Benchmark esperado:</strong> {selectedSegment?.benchmark}%</p>
+              <p>
+                <strong>Status:</strong>{' '}
+                {selectedSegment && selectedSegment.percentage >= selectedSegment.benchmark ? (
+                  <span className="text-green-600">✓ Acima do esperado</span>
+                ) : (
+                  <span className="text-amber-600">⚠ Abaixo do esperado</span>
+                )}
+              </p>
+            </div>
+
+            <div>
+              <h4 className="font-medium mb-2 text-sm">
+                Membros neste segmento ({selectedSegment?.count}):
+              </h4>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {members.length > 0 ? (
+                  members.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-3 rounded-lg border bg-white dark:bg-card"
+                    >
+                      <p className="font-medium text-sm">{member.full_name}</p>
+                      <Badge variant="outline">{member.frequency_rate}%</Badge>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Carregando membros...
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

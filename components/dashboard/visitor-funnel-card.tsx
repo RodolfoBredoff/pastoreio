@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { UserPlus, TrendingDown } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { UserPlus, TrendingDown, Eye } from 'lucide-react';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
 
 interface VisitorFunnelStage {
@@ -31,6 +32,9 @@ interface VisitorFunnelCardProps {
 export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) {
   const [data, setData] = useState<VisitorFunnel | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedStage, setSelectedStage] = useState<VisitorFunnelStage | null>(null);
+  const [showDialog, setShowDialog] = useState(false);
+  const [members, setMembers] = useState<Array<{ id: string; full_name: string; phone: string | null }>>([]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -51,6 +55,23 @@ export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) 
 
     fetchData();
   }, [periodDays]);
+
+  const handleStageClick = async (stage: VisitorFunnelStage) => {
+    setSelectedStage(stage);
+    setShowDialog(true);
+    
+    // Buscar dados dos membros
+    try {
+      const url = `/api/members?ids=${stage.memberIds.join(',')}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const membersData = await res.json();
+        setMembers(membersData);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar membros:', error);
+    }
+  };
 
   if (loading || !data) {
     return (
@@ -154,7 +175,10 @@ export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) 
 
             return (
               <div key={stage.stage} className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
+                <button
+                  onClick={() => handleStageClick(stage)}
+                  className="w-full flex items-center justify-between gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                >
                   <div className="flex items-center gap-2 flex-1">
                     <p className="text-sm font-medium w-24">{stage.label}</p>
                     <div className="flex-1 h-8 bg-muted rounded-md overflow-hidden">
@@ -176,11 +200,14 @@ export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) 
                       </div>
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-sm font-medium">{stage.count}</p>
-                    <p className="text-xs text-muted-foreground">{stage.percentage}%</p>
+                  <div className="text-right shrink-0 flex items-center gap-2">
+                    <div>
+                      <p className="text-sm font-medium">{stage.count}</p>
+                      <p className="text-xs text-muted-foreground">{stage.percentage}%</p>
+                    </div>
+                    <Eye className="h-4 w-4 text-muted-foreground" />
                   </div>
-                </div>
+                </button>
                 <div className="flex items-center gap-2 pl-24">
                   {!isLastStage && stage.dropoff > 0 && (
                     <div className="flex items-center gap-1 text-xs text-red-600">
@@ -229,6 +256,71 @@ export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) 
           </ul>
         </div>
       </CardContent>
+
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{selectedStage?.label}</DialogTitle>
+            <DialogDescription>
+              {selectedStage?.count} {selectedStage?.count === 1 ? 'visitante' : 'visitantes'} nesta etapa
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 mt-4">
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-sm">
+              <p><strong>Etapa:</strong> {selectedStage?.label}</p>
+              <p><strong>Quantidade:</strong> {selectedStage?.count} visitantes</p>
+              <p><strong>Percentual do funil:</strong> {selectedStage?.percentage}%</p>
+              {selectedStage?.dropoff !== undefined && selectedStage.dropoff > 0 && (
+                <p className="text-red-600">
+                  <strong>Drop-off:</strong> {selectedStage.dropoff}% abandonaram após esta etapa
+                </p>
+              )}
+              <p><strong>Benchmark esperado:</strong> {selectedStage?.benchmark}%</p>
+              <p>
+                <strong>Status:</strong>{' '}
+                {selectedStage && selectedStage.percentage >= selectedStage.benchmark ? (
+                  <span className="text-green-600">✓ Acima do esperado</span>
+                ) : (
+                  <span className="text-amber-600">⚠ Abaixo do esperado</span>
+                )}
+              </p>
+            </div>
+
+            <div>
+              <h4 className="font-medium mb-2 text-sm">
+                Visitantes nesta etapa ({selectedStage?.count}):
+              </h4>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {members.length > 0 ? (
+                  members.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-3 rounded-lg border bg-white dark:bg-card"
+                    >
+                      <p className="font-medium text-sm">{member.full_name}</p>
+                      {member.phone && (
+                        <a
+                          href={`https://wa.me/${member.phone.replace(/\D/g, '')}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-green-600 hover:text-green-700"
+                        >
+                          {member.phone}
+                        </a>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Carregando visitantes...
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
