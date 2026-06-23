@@ -59,17 +59,31 @@ export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) 
   const handleStageClick = async (stage: VisitorFunnelStage) => {
     setSelectedStage(stage);
     setShowDialog(true);
+    setMembers([]); // Reset members
+    
+    // Se não houver IDs, retornar
+    if (!stage.memberIds || stage.memberIds.length === 0) {
+      console.log('Etapa sem visitantes');
+      return;
+    }
     
     // Buscar dados dos membros
     try {
       const url = `/api/members?ids=${stage.memberIds.join(',')}`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const membersData = await res.json();
-        setMembers(membersData);
+      console.log('Buscando visitantes:', url);
+      const res = await fetch(url, { cache: 'no-store' });
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Erro na resposta da API:', res.status, errorText);
+        return;
       }
+      
+      const membersData = await res.json();
+      console.log('Visitantes recebidos:', membersData.length);
+      setMembers(membersData);
     } catch (error) {
-      console.error('Erro ao buscar membros:', error);
+      console.error('Erro ao buscar visitantes:', error);
     }
   };
 

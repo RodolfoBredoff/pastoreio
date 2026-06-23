@@ -25,6 +25,44 @@ export async function GET(request: Request) {
     const createdBefore = searchParams.get('created_before');
     const memberFilter = searchParams.get('member_filter') || 'all';
 
+    // Se IDs foram passados, usar query simplificada
+    if (ids) {
+      const idArray = ids.split(',').filter(id => id.trim());
+      
+      if (idArray.length === 0) {
+        return NextResponse.json([]);
+      }
+
+      // Query simplificada para buscar por IDs
+      const placeholders = idArray.map((_, i) => `$${i + 2}`).join(',');
+      const sql = `
+        SELECT 
+          m.id, 
+          m.full_name, 
+          m.phone, 
+          m.member_type,
+          m.status,
+          m.created_at,
+          COALESCE((
+            SELECT ROUND(COUNT(CASE WHEN a.is_present THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0))::INTEGER
+            FROM attendance a
+            JOIN meetings mt ON a.meeting_id = mt.id
+            WHERE a.member_id = m.id 
+              AND mt.group_id = m.group_id
+              AND mt.meeting_date >= CURRENT_DATE - INTERVAL '90 days'
+              AND mt.is_cancelled = FALSE
+          ), 0) as frequency_rate
+        FROM members m
+        WHERE m.group_id = $1
+          AND m.id IN (${placeholders})
+        ORDER BY m.full_name
+      `;
+      
+      const result = await query(sql, [leader.group_id, ...idArray]);
+      return NextResponse.json(result.rows);
+    }
+
+    // Query para buscar por período (cohorts)
     let sql = `
       SELECT 
         m.id, 
@@ -33,34 +71,21 @@ export async function GET(request: Request) {
         m.member_type,
         m.status,
         m.created_at,
-        COALESCE(
-          (SELECT COUNT(*) * 100.0 / NULLIF(
-            (SELECT COUNT(*) FROM meetings mt WHERE mt.group_id = m.group_id AND mt.date >= CURRENT_DATE - INTERVAL '90 days'),
-            0
-          )
+        COALESCE((
+          SELECT ROUND(COUNT(CASE WHEN a.is_present THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0))::INTEGER
           FROM attendance a
           JOIN meetings mt ON a.meeting_id = mt.id
           WHERE a.member_id = m.id 
-            AND a.present = true 
-            AND mt.date >= CURRENT_DATE - INTERVAL '90 days'),
-          0
-        )::INTEGER as frequency_rate
+            AND mt.group_id = m.group_id
+            AND mt.meeting_date >= CURRENT_DATE - INTERVAL '90 days'
+            AND mt.is_cancelled = FALSE
+        ), 0) as frequency_rate
       FROM members m
       WHERE m.group_id = $1
     `;
     
     const params: any[] = [leader.group_id];
     let paramIndex = 2;
-
-    // Filtro por IDs
-    if (ids) {
-      const idArray = ids.split(',').filter(id => id.trim());
-      if (idArray.length > 0) {
-        sql += ` AND m.id = ANY($${paramIndex}::uuid[])`;
-        params.push(idArray);
-        paramIndex++;
-      }
-    }
 
     // Filtro por período de criação
     if (createdAfter) {
@@ -76,7 +101,7 @@ export async function GET(request: Request) {
     }
 
     // Filtro por tipo de membro
-    if (memberFilter === 'members') {
+    if (memberFilter === 'members' || memberFilter === 'participants') {
       sql += ` AND m.member_type = 'participant'`;
     } else if (memberFilter === 'visitors') {
       sql += ` AND m.member_type = 'visitor'`;

@@ -78,15 +78,23 @@ export function RetentionMetricsCard({ memberFilter }: RetentionMetricsCardProps
   const handleMetricClick = async (metric: RetentionMetric) => {
     setSelectedMetric(metric);
     setShowDialog(true);
+    setMembers([]); // Reset members
     
     // Buscar membros do cohort (criados entre cohort_start_date e cohort_end_date)
     try {
       const url = `/api/members?created_after=${metric.cohort_start_date}&created_before=${metric.cohort_end_date}&member_filter=${memberFilter}`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const membersData = await res.json();
-        setMembers(membersData);
+      console.log('Buscando cohort:', url);
+      const res = await fetch(url, { cache: 'no-store' });
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Erro na resposta da API:', res.status, errorText);
+        return;
       }
+      
+      const membersData = await res.json();
+      console.log('Membros do cohort recebidos:', membersData.length);
+      setMembers(membersData);
     } catch (error) {
       console.error('Erro ao buscar membros do cohort:', error);
     }
