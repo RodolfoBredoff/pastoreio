@@ -3,9 +3,42 @@ import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { query } from '@/lib/db/postgres';
 
+const MEMBER_SELECT = `
+  SELECT 
+    m.id, 
+    m.full_name, 
+    m.phone, 
+    m.member_type,
+    m.is_active,
+    m.created_at,
+    CASE WHEN m.is_active THEN 'active' ELSE 'inactive' END as status,
+    COALESCE((
+      SELECT ROUND(COUNT(CASE WHEN a.is_present THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0))::INTEGER
+      FROM attendance a
+      JOIN meetings mt ON a.meeting_id = mt.id
+      WHERE a.member_id = m.id 
+        AND mt.group_id = m.group_id
+        AND mt.meeting_date >= CURRENT_DATE - INTERVAL '90 days'
+        AND mt.is_cancelled = FALSE
+    ), 0) as frequency_rate,
+    CASE
+      WHEN m.is_active AND EXISTS (
+        SELECT 1
+        FROM attendance a
+        JOIN meetings mt ON a.meeting_id = mt.id
+        WHERE a.member_id = m.id
+          AND a.is_present = TRUE
+          AND mt.is_cancelled = FALSE
+          AND mt.meeting_date >= CURRENT_DATE - INTERVAL '30 days'
+      ) THEN 'retained'
+      ELSE 'churned'
+    END as retention_status
+  FROM members m
+`;
+
 /**
  * GET /api/members
- * Busca membros por IDs ou filtros de período
+ * Busca membros por IDs ou filtros de período (cohort)
  */
 export async function GET(request: Request) {
   try {
@@ -24,83 +57,52 @@ export async function GET(request: Request) {
     const createdAfter = searchParams.get('created_after');
     const createdBefore = searchParams.get('created_before');
     const memberFilter = searchParams.get('member_filter') || 'all';
+    const retentionContext = searchParams.get('retention_context') === 'true';
 
-    // Se IDs foram passados, usar query simplificada
     if (ids) {
-      const idArray = ids.split(',').filter(id => id.trim());
-      
+      const idArray = [...new Set(ids.split(',').map((id) => id.trim()).filter(Boolean))];
+
       if (idArray.length === 0) {
         return NextResponse.json([]);
       }
 
-      // Query simplificada para buscar por IDs
       const placeholders = idArray.map((_, i) => `$${i + 2}`).join(',');
       const sql = `
-        SELECT 
-          m.id, 
-          m.full_name, 
-          m.phone, 
-          m.member_type,
-          m.status,
-          m.created_at,
-          COALESCE((
-            SELECT ROUND(COUNT(CASE WHEN a.is_present THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0))::INTEGER
-            FROM attendance a
-            JOIN meetings mt ON a.meeting_id = mt.id
-            WHERE a.member_id = m.id 
-              AND mt.group_id = m.group_id
-              AND mt.meeting_date >= CURRENT_DATE - INTERVAL '90 days'
-              AND mt.is_cancelled = FALSE
-          ), 0) as frequency_rate
-        FROM members m
+        ${MEMBER_SELECT}
         WHERE m.group_id = $1
           AND m.id IN (${placeholders})
         ORDER BY m.full_name
       `;
-      
+
       const result = await query(sql, [leader.group_id, ...idArray]);
-      return NextResponse.json(result.rows);
+      return NextResponse.json(
+        result.rows.map((row) => ({
+          ...row,
+          status: retentionContext ? row.retention_status : row.status,
+        }))
+      );
     }
 
-    // Query para buscar por período (cohorts)
     let sql = `
-      SELECT 
-        m.id, 
-        m.full_name, 
-        m.phone, 
-        m.member_type,
-        m.status,
-        m.created_at,
-        COALESCE((
-          SELECT ROUND(COUNT(CASE WHEN a.is_present THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0))::INTEGER
-          FROM attendance a
-          JOIN meetings mt ON a.meeting_id = mt.id
-          WHERE a.member_id = m.id 
-            AND mt.group_id = m.group_id
-            AND mt.meeting_date >= CURRENT_DATE - INTERVAL '90 days'
-            AND mt.is_cancelled = FALSE
-        ), 0) as frequency_rate
-      FROM members m
+      ${MEMBER_SELECT}
       WHERE m.group_id = $1
     `;
-    
-    const params: any[] = [leader.group_id];
+
+    const params: (string | boolean)[] = [leader.group_id];
     let paramIndex = 2;
 
-    // Filtro por período de criação
     if (createdAfter) {
       sql += ` AND m.created_at >= $${paramIndex}`;
       params.push(createdAfter);
       paramIndex++;
     }
-    
+
     if (createdBefore) {
-      sql += ` AND m.created_at <= $${paramIndex}`;
+      sql += ` AND m.created_at < $${paramIndex}`;
       params.push(createdBefore);
       paramIndex++;
     }
 
-    // Filtro por tipo de membro
     if (memberFilter === 'members' || memberFilter === 'participants') {
       sql += ` AND m.member_type = 'participant'`;
     } else if (memberFilter === 'visitors') {
@@ -110,7 +112,12 @@ export async function GET(request: Request) {
     sql += ` ORDER BY m.full_name`;
 
     const result = await query(sql, params);
-    return NextResponse.json(result.rows);
+    return NextResponse.json(
+      result.rows.map((row) => ({
+        ...row,
+        status: retentionContext ? row.retention_status : row.status,
+      }))
+    );
   } catch (error) {
     console.error('Erro ao buscar membros:', error);
     return NextResponse.json(

@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Shield, TrendingUp, TrendingDown, Minus, Eye } from 'lucide-react';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
+import { MetricMembersList } from '@/components/dashboard/metric-members-list';
+import { fetchCohortMembers, type MetricMember } from '@/lib/api/fetch-members-by-ids';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -53,7 +55,9 @@ export function RetentionMetricsCard({ memberFilter }: RetentionMetricsCardProps
   const [loading, setLoading] = useState(true);
   const [selectedMetric, setSelectedMetric] = useState<RetentionMetric | null>(null);
   const [showDialog, setShowDialog] = useState(false);
-  const [members, setMembers] = useState<Array<{ id: string; full_name: string; status: 'active' | 'inactive' }>>([]);
+  const [members, setMembers] = useState<MetricMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -78,25 +82,22 @@ export function RetentionMetricsCard({ memberFilter }: RetentionMetricsCardProps
   const handleMetricClick = async (metric: RetentionMetric) => {
     setSelectedMetric(metric);
     setShowDialog(true);
-    setMembers([]); // Reset members
-    
-    // Buscar membros do cohort (criados entre cohort_start_date e cohort_end_date)
+    setMembers([]);
+    setMembersError(null);
+    setMembersLoading(true);
+
     try {
-      const url = `/api/members?created_after=${metric.cohort_start_date}&created_before=${metric.cohort_end_date}&member_filter=${memberFilter}`;
-      console.log('Buscando cohort:', url);
-      const res = await fetch(url, { cache: 'no-store' });
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('Erro na resposta da API:', res.status, errorText);
-        return;
-      }
-      
-      const membersData = await res.json();
-      console.log('Membros do cohort recebidos:', membersData.length);
+      const membersData = await fetchCohortMembers(
+        metric.cohort_start_date,
+        metric.cohort_end_date,
+        memberFilter
+      );
       setMembers(membersData);
     } catch (error) {
       console.error('Erro ao buscar membros do cohort:', error);
+      setMembersError('Não foi possível carregar os membros deste cohort.');
+    } finally {
+      setMembersLoading(false);
     }
   };
 
@@ -411,29 +412,14 @@ export function RetentionMetricsCard({ memberFilter }: RetentionMetricsCardProps
                   <p className="text-xs text-red-600">Saíram</p>
                 </div>
               </div>
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {members.length > 0 ? (
-                  members.map((member) => (
-                    <div
-                      key={member.id}
-                      className={`flex items-center justify-between p-3 rounded-lg border ${
-                        member.status === 'active' 
-                          ? 'bg-green-50/30 dark:bg-green-950/10' 
-                          : 'bg-red-50/30 dark:bg-red-950/10'
-                      }`}
-                    >
-                      <p className="font-medium text-sm">{member.full_name}</p>
-                      <Badge variant={member.status === 'active' ? 'default' : 'destructive'} className="text-xs">
-                        {member.status === 'active' ? '✓ Ativo' : '✗ Inativo'}
-                      </Badge>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    Carregando membros...
-                  </p>
-                )}
-              </div>
+              <MetricMembersList
+                members={members}
+                loading={membersLoading}
+                error={membersError}
+                loadingLabel="Carregando membros..."
+                emptyLabel="Nenhum membro neste cohort."
+                showRetentionStatus
+              />
             </div>
           </div>
         </DialogContent>

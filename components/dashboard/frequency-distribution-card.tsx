@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Users, TrendingUp, Eye } from 'lucide-react';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
+import { MetricMembersList } from '@/components/dashboard/metric-members-list';
+import { fetchMembersByIds, type MetricMember } from '@/lib/api/fetch-members-by-ids';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -52,7 +54,9 @@ export function FrequencyDistributionCard({ memberFilter, periodDays = 90 }: Fre
   const [loading, setLoading] = useState(true);
   const [selectedSegment, setSelectedSegment] = useState<FrequencySegment | null>(null);
   const [showDialog, setShowDialog] = useState(false);
-  const [members, setMembers] = useState<Array<{ id: string; full_name: string; frequency_rate: number }>>([]);
+  const [members, setMembers] = useState<MetricMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -77,31 +81,18 @@ export function FrequencyDistributionCard({ memberFilter, periodDays = 90 }: Fre
   const handleSegmentClick = async (segment: FrequencySegment) => {
     setSelectedSegment(segment);
     setShowDialog(true);
-    setMembers([]); // Reset members
-    
-    // Se não houver IDs, retornar
-    if (!segment.memberIds || segment.memberIds.length === 0) {
-      console.log('Segmento sem membros');
-      return;
-    }
-    
-    // Buscar dados dos membros
+    setMembers([]);
+    setMembersError(null);
+    setMembersLoading(true);
+
     try {
-      const url = `/api/members?ids=${segment.memberIds.join(',')}`;
-      console.log('Buscando membros:', url);
-      const res = await fetch(url, { cache: 'no-store' });
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('Erro na resposta da API:', res.status, errorText);
-        return;
-      }
-      
-      const membersData = await res.json();
-      console.log('Membros recebidos:', membersData.length);
+      const membersData = await fetchMembersByIds(segment.memberIds || []);
       setMembers(membersData);
     } catch (error) {
       console.error('Erro ao buscar membros:', error);
+      setMembersError('Não foi possível carregar os membros deste segmento.');
+    } finally {
+      setMembersLoading(false);
     }
   };
 
@@ -340,23 +331,14 @@ export function FrequencyDistributionCard({ memberFilter, periodDays = 90 }: Fre
               <h4 className="font-medium mb-2 text-sm">
                 Membros neste segmento ({selectedSegment?.count}):
               </h4>
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {members.length > 0 ? (
-                  members.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center justify-between p-3 rounded-lg border bg-white dark:bg-card"
-                    >
-                      <p className="font-medium text-sm">{member.full_name}</p>
-                      <Badge variant="outline">{member.frequency_rate}%</Badge>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    Carregando membros...
-                  </p>
-                )}
-              </div>
+              <MetricMembersList
+                members={members}
+                loading={membersLoading}
+                error={membersError}
+                loadingLabel="Carregando membros..."
+                emptyLabel="Nenhum membro neste segmento."
+                showFrequency
+              />
             </div>
           </div>
         </DialogContent>
