@@ -6,9 +6,6 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Upgrade npm to match the version used to generate the lock file
-RUN npm install -g npm@latest --quiet
-
 # Install dependencies
 RUN npm ci
 
