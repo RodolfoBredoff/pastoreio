@@ -37,6 +37,7 @@ type PublicPayload = {
     allow_custom: boolean;
     position: number;
   }>;
+  extra_options_taken?: Record<string, Record<string, number>>;
 };
 
 function formatDate(d: string) {
@@ -56,12 +57,14 @@ function ExtraFieldsSection({
   fields,
   selections,
   custom,
+  taken,
   onToggleOption,
   onCustomChange,
 }: {
   fields: ExtraFieldCfg[];
   selections: Record<string, string[]>;
   custom: Record<string, string>;
+  taken: Record<string, Record<string, number>>;
   onToggleOption: (fieldId: string, option: string) => void;
   onCustomChange: (fieldId: string, value: string) => void;
 }) {
@@ -80,15 +83,29 @@ function ExtraFieldsSection({
             {f.options ? (
               <>
                 <div className="space-y-1.5">
-                  {f.options.map((opt) => (
-                    <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <Checkbox
-                        checked={selected.includes(opt)}
-                        onCheckedChange={() => onToggleOption(f.id, opt)}
-                      />
-                      <span>{opt}</span>
-                    </label>
-                  ))}
+                  {f.options.map((opt) => {
+                    const count = taken?.[f.id]?.[opt] ?? 0;
+                    return (
+                      <label
+                        key={opt}
+                        className={cn('flex items-start gap-2 text-sm cursor-pointer', count > 0 && 'opacity-60')}
+                      >
+                        <Checkbox
+                          className="mt-0.5"
+                          checked={selected.includes(opt)}
+                          onCheckedChange={() => onToggleOption(f.id, opt)}
+                        />
+                        <span>
+                          {opt}
+                          {count > 0 && (
+                            <span className="ml-1 text-xs text-amber-700 dark:text-amber-400 whitespace-nowrap">
+                              · já escolhido por {count} {count === 1 ? 'pessoa' : 'pessoas'}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
                 {f.allow_custom && (
                   <div className="space-y-1">
@@ -487,6 +504,7 @@ export default function ListaPresencaPublicPage() {
                     fields={extraFields}
                     selections={extraSelections}
                     custom={extraCustom}
+                    taken={data?.extra_options_taken ?? {}}
                     onToggleOption={toggleExtraOption}
                     onCustomChange={setExtraCustomValue}
                   />
@@ -535,6 +553,7 @@ export default function ListaPresencaPublicPage() {
                     fields={extraFields}
                     selections={extraSelections}
                     custom={extraCustom}
+                    taken={data?.extra_options_taken ?? {}}
                     onToggleOption={toggleExtraOption}
                     onCustomChange={setExtraCustomValue}
                   />

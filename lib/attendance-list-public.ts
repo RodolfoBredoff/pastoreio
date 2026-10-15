@@ -1,4 +1,4 @@
-import { query, queryOne } from '@/lib/db/postgres';
+import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import {
   getMeetingExtraFields,
   normalizeExtraValues,
@@ -25,6 +25,7 @@ export type PublicAttendanceListMeeting = {
 export type PublicAttendanceListPayload = {
   meeting: PublicAttendanceListMeeting;
   extra_fields: AttendanceExtraFieldConfig[];
+  extra_options_taken: Record<string, Record<string, number>>;
   count_confirmed: number;
   count_guests: number;
   is_expired: boolean;
@@ -105,6 +106,56 @@ export function isMeetingExpired(deadline: string | null): boolean {
   );
 }
 
+/**
+ * Conta quantas vezes cada opção dos campos adicionais já foi escolhida.
+ * Agrega respostas de membros (só 'present'), autocadastro e visitantes.
+ * Expõe apenas CONTAGENS por opção — nenhum dado pessoal (padrão "somente totais").
+ */
+export async function getExtraOptionCounts(
+  meetingId: string,
+  fields: AttendanceExtraFieldConfig[]
+): Promise<Record<string, Record<string, number>>> {
+  const taken: Record<string, Record<string, number>> = {};
+  if (fields.length === 0) return taken;
+
+  const rows = await queryMany<{ extra_values: unknown }>(
+    `SELECT extra_values FROM attendance_list_responses WHERE meeting_id = $1 AND status = 'present'
+     UNION ALL
+     SELECT extra_values FROM attendance_list_public_entries WHERE meeting_id = $1
+     UNION ALL
+     SELECT extra_values FROM attendance_list_guests WHERE meeting_id = $1`,
+    [meetingId]
+  ).catch(() => []);
+
+  const optionsByField = new Map<string, Map<string, string>>();
+  for (const f of fields) {
+    if (!f.options) continue;
+    const lower = new Map<string, string>();
+    for (const o of f.options) lower.set(o.toLowerCase(), o);
+    optionsByField.set(f.id, lower);
+    taken[f.id] = {};
+  }
+  if (optionsByField.size === 0) return taken;
+
+  for (const row of rows) {
+    const entries = Array.isArray(row.extra_values) ? row.extra_values : [];
+    for (const item of entries) {
+      if (!item || typeof item !== 'object') continue;
+      const e = item as Record<string, unknown>;
+      if (typeof e.field_id !== 'string' || !Array.isArray(e.values)) continue;
+      const lower = optionsByField.get(e.field_id);
+      if (!lower) continue;
+      for (const v of e.values) {
+        if (typeof v !== 'string') continue;
+        const canonical = lower.get(v.trim().toLowerCase());
+        if (!canonical) continue;
+        taken[e.field_id][canonical] = (taken[e.field_id][canonical] ?? 0) + 1;
+      }
+    }
+  }
+  return taken;
+}
+
 export async function getPublicAttendanceList(identifier: string): Promise<PublicAttendanceListPayload | null> {
   const meeting = await getMeetingBySlugOrToken(identifier);
   if (!meeting) return null;
@@ -133,9 +184,12 @@ export async function getPublicAttendanceList(identifier: string): Promise<Publi
     [meeting.id]
   ).catch(() => ({ c: '0' }));
 
+  const extraOptionsTaken = await getExtraOptionCounts(meeting.id, extraFields);
+
   return {
     meeting: meetingPayload,
     extra_fields: extraFields,
+    extra_options_taken: extraOptionsTaken,
     count_confirmed: countConfirmed,
     count_guests: parseInt(guestsRow?.c ?? '0', 10),
     is_expired: expired,
