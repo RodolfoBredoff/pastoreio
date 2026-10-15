@@ -98,7 +98,41 @@ jobs:
               sleep 5
             done
           fi
-          echo "Containers parados (ou comando ignorado). Iniciando deploy..."
+          echo "Containers parados (ou comando ignorado). Liberando disco..."
+
+      - name: Free disk space on EC2
+        run: |
+          set -e
+          CLEANUP_ID=$(aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[
+              'set -e',
+              'export HOME=/root',
+              'cd ${{ env.APP_DIR }} || { echo \"Directory ${{ env.APP_DIR }} not found\"; exit 1; }',
+              'git config --global --add safe.directory ${{ env.APP_DIR }}',
+              'git pull origin main || true',
+              'bash scripts/ec2-disk-cleanup.sh'
+            ]" \
+            --region ${{ env.AWS_REGION }} \
+            --output text --query "Command.CommandId" 2>&1) || true
+
+          if [ -z "$CLEANUP_ID" ] || [ ${#CLEANUP_ID} -lt 36 ]; then
+            echo "::warning::SSM SendCommand da limpeza falhou. Seguindo o deploy mesmo assim."
+            exit 0
+          fi
+
+          for i in {1..36}; do
+            S=$(aws ssm get-command-invocation --command-id "$CLEANUP_ID" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --region ${{ env.AWS_REGION }} --query "Status" --output text 2>/dev/null || echo "InProgress")
+            [ "$S" = "Success" ] || [ "$S" = "Failed" ] || [ "$S" = "Cancelled" ] && break
+            echo "Aguardando limpeza... $S ($i/36)"
+            sleep 5
+          done
+          echo "=== Cleanup output (stdout) ==="
+          aws ssm get-command-invocation --command-id "$CLEANUP_ID" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --region ${{ env.AWS_REGION }} --query "StandardOutputContent" --output text || true
+          echo "=== Cleanup output (stderr) ==="
+          aws ssm get-command-invocation --command-id "$CLEANUP_ID" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --region ${{ env.AWS_REGION }} --query "StandardErrorContent" --output text || true
+          echo "Disco liberado. Iniciando deploy..."
 
       - name: Deploy to EC2 via SSM
         id: deploy
@@ -181,6 +215,42 @@ jobs:
             fi
             exit 1
           fi
+
+      - name: Apply database migration on EC2
+        run: |
+          set -e
+          MIGRATE_ID=$(aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[
+              'set -e',
+              'export HOME=/root',
+              'cd ${{ env.APP_DIR }} || { echo \"Directory ${{ env.APP_DIR }} not found\"; exit 1; }',
+              'bash scripts/ec2-deploy-migrate.sh'
+            ]" \
+            --region ${{ env.AWS_REGION }} \
+            --output text --query "Command.CommandId" 2>&1) || true
+
+          if [ -z "$MIGRATE_ID" ] || [ ${#MIGRATE_ID} -lt 36 ]; then
+            echo "::error::SSM SendCommand da migration falhou."
+            exit 1
+          fi
+
+          for i in {1..36}; do
+            S=$(aws ssm get-command-invocation --command-id "$MIGRATE_ID" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --region ${{ env.AWS_REGION }} --query "Status" --output text 2>/dev/null || echo "InProgress")
+            [ "$S" = "Success" ] || [ "$S" = "Failed" ] || [ "$S" = "Cancelled" ] && break
+            echo "Aguardando migration... $S ($i/36)"
+            sleep 5
+          done
+          echo "=== Migration output (stdout) ==="
+          aws ssm get-command-invocation --command-id "$MIGRATE_ID" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --region ${{ env.AWS_REGION }} --query "StandardOutputContent" --output text || true
+          echo "=== Migration output (stderr) ==="
+          aws ssm get-command-invocation --command-id "$MIGRATE_ID" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --region ${{ env.AWS_REGION }} --query "StandardErrorContent" --output text || true
+          if [ "$S" != "Success" ]; then
+            echo "::error::Migration falhou na EC2 (status: $S). Verifique o output acima."
+            exit 1
+          fi
+          echo "Migration aplicada."
 
       - name: Health check
         run: |
