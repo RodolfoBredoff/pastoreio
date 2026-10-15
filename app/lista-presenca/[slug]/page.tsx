@@ -72,7 +72,7 @@ function ExtraFieldsSection({
   return (
     <div className="space-y-4 rounded-lg border bg-muted/20 p-3">
       <p className="text-xs font-medium text-muted-foreground">
-        Preenchimento obrigatório para confirmar presença
+        Escolha exatamente 1 item abaixo (qualquer lista) para confirmar presença
       </p>
       {fields.map((f) => {
         const selected = selections[f.id] ?? [];
@@ -162,37 +162,56 @@ export default function ListaPresencaPublicPage() {
   const toggleExtraOption = (fieldId: string, option: string) => {
     setExtraSelections((prev) => {
       const cur = prev[fieldId] ?? [];
-      return {
-        ...prev,
-        [fieldId]: cur.includes(option) ? cur.filter((o) => o !== option) : [...cur, option],
-      };
+      if (cur.includes(option)) {
+        return { ...prev, [fieldId]: cur.filter((o) => o !== option) };
+      }
+      // Escolha única: marcar uma opção desmarca todas as outras
+      const next: Record<string, string[]> = {};
+      for (const k of Object.keys(prev)) next[k] = [];
+      next[fieldId] = [option];
+      return next;
+    });
+    // Selecionar uma opção substitui respostas digitadas
+    setExtraCustom((prev) => {
+      const next: Record<string, string> = {};
+      for (const k of Object.keys(prev)) next[k] = '';
+      return next;
     });
   };
   const setExtraCustomValue = (fieldId: string, value: string) => {
-    setExtraCustom((prev) => ({ ...prev, [fieldId]: value }));
+    // Escolha única: digitar uma resposta limpa as outras escolhas
+    setExtraCustom((prev) => {
+      const next: Record<string, string> = {};
+      for (const k of Object.keys(prev)) next[k] = '';
+      next[fieldId] = value;
+      return next;
+    });
+    setExtraSelections((prev) => {
+      const next: Record<string, string[]> = {};
+      for (const k of Object.keys(prev)) next[k] = [];
+      return next;
+    });
   };
   const resetExtras = () => {
     setExtraSelections({});
     setExtraCustom({});
   };
   const buildExtraValues = (): { ok: false; error: string } | { ok: true; values: Array<{ field_id: string; values: string[] }> } => {
-    const out: Array<{ field_id: string; values: string[] }> = [];
+    const answers: Array<{ field_id: string; value: string }> = [];
     for (const f of extraFields) {
-      const selected = extraSelections[f.id] ?? [];
+      for (const s of extraSelections[f.id] ?? []) {
+        if (s.trim()) answers.push({ field_id: f.id, value: s.trim() });
+      }
       const customVal = (extraCustom[f.id] ?? '').trim();
-      let values: string[];
-      if (f.options) {
-        values = [...selected];
-        if (f.allow_custom && customVal) values.push(customVal);
-      } else {
-        values = customVal ? [customVal] : [];
-      }
-      if (values.length === 0) {
-        return { ok: false, error: `Preencha o campo obrigatório: ${f.label}` };
-      }
-      out.push({ field_id: f.id, values });
+      if (customVal) answers.push({ field_id: f.id, value: customVal });
     }
-    return { ok: true, values: out };
+    if (answers.length === 0) {
+      return { ok: false, error: 'Escolha um item para confirmar presença.' };
+    }
+    if (answers.length > 1) {
+      return { ok: false, error: 'Selecione apenas um item para confirmar presença.' };
+    }
+    return { ok: true, values: [{ field_id: answers[0].field_id, values: [answers[0].value] }] };
   };
 
   const [submitLoading, setSubmitLoading] = useState(false);

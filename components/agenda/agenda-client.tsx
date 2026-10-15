@@ -743,7 +743,7 @@ function AddMeetingDialog({
                         <Label className="text-sm font-medium">Campos adicionais obrigatórios (opcional)</Label>
                         <p className="text-xs text-muted-foreground">
                           Peça uma informação obrigatória a quem confirmar (ex.: "O que você vai levar?"). Pode ser
-                          resposta livre ou uma lista de opções para marcar (seleção múltipla, com opção de resposta própria).
+                          resposta livre ou uma lista de opções. Quem confirmar escolhe exatamente 1 item entre todos os campos.
                         </p>
                         {extraFieldsDraft.map((f, idx) => (
                           <div key={idx} className="space-y-2 rounded-md border bg-muted/20 p-3">

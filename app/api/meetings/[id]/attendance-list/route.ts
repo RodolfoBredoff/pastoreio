@@ -4,7 +4,7 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { normalizeInternalChecks } from '@/lib/attendance-list-internal';
-import { getMeetingExtraFields } from '@/lib/attendance-list-extra';
+import { getMeetingExtraFields, normalizeExtraValues } from '@/lib/attendance-list-extra';
 
 type AuthError = { message: string; status: number };
 type MeetingAuth =
@@ -242,6 +242,7 @@ export async function PATCH(
       internal_result_positive,
       internal_result_negative,
       internal_unmarked_label,
+      extra_values,
     } = body as {
       member_id?: string;
       status?: string;
@@ -251,6 +252,7 @@ export async function PATCH(
       internal_result_positive?: string | null;
       internal_result_negative?: string | null;
       internal_unmarked_label?: string | null;
+      extra_values?: unknown;
     };
 
     const hasInternalPatch =
@@ -313,13 +315,13 @@ export async function PATCH(
       }
     }
 
-    if (!member_id || !newStatus) {
+    if (!member_id || (!newStatus && extra_values === undefined)) {
       return NextResponse.json(
-        { error: 'Informe member_id e status (present ou absent), ou campos de checklist interno' },
+        { error: 'Informe member_id com status (present ou absent) e/ou extra_values, ou campos de checklist interno' },
         { status: 400 }
       );
     }
-    if (newStatus !== 'present' && newStatus !== 'absent') {
+    if (newStatus && newStatus !== 'present' && newStatus !== 'absent') {
       return NextResponse.json({ error: 'status deve ser "present" ou "absent"' }, { status: 400 });
     }
 
@@ -331,12 +333,57 @@ export async function PATCH(
       return NextResponse.json({ error: 'Membro não encontrado' }, { status: 404 });
     }
 
-    await query(
-      `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email, phone)
-       VALUES ($1, $2, $3, NULL, NULL)
-       ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = $3`,
-      [meetingId, member_id, newStatus]
-    );
+    // Campos adicionais (regra: exatamente 1 item em todo o convite)
+    let extraValuesJson: string | null = null;
+    if (extra_values !== undefined) {
+      const extraFieldsCfg = await getMeetingExtraFields(meetingId);
+      if (extraFieldsCfg.length > 0) {
+        const extraRes = normalizeExtraValues(extraFieldsCfg, extra_values);
+        if (!extraRes.ok) {
+          return NextResponse.json({ error: extraRes.error }, { status: 400 });
+        }
+        extraValuesJson = JSON.stringify(extraRes.values);
+      } else {
+        extraValuesJson = '[]';
+      }
+    }
+
+    if (newStatus) {
+      // Status (e extra_values, se enviados) em um único upsert
+      if (extraValuesJson !== null) {
+        await query(
+          `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email, phone, extra_values)
+           VALUES ($1, $2, $3, NULL, NULL, $4::jsonb)
+           ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = $3, extra_values = $4::jsonb`,
+          [meetingId, member_id, newStatus, extraValuesJson]
+        );
+      } else {
+        await query(
+          `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email, phone)
+           VALUES ($1, $2, $3, NULL, NULL)
+           ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = $3`,
+          [meetingId, member_id, newStatus]
+        );
+      }
+    } else {
+      // Apenas extra_values: preserva o status existente (ou cria como presente)
+      const existing = await queryOne<{ id: string }>(
+        `SELECT id FROM attendance_list_responses WHERE meeting_id = $1 AND member_id = $2`,
+        [meetingId, member_id]
+      );
+      if (existing) {
+        await query(
+          `UPDATE attendance_list_responses SET extra_values = $3::jsonb WHERE id = $1 AND meeting_id = $2`,
+          [existing.id, meetingId, extraValuesJson]
+        );
+      } else {
+        await query(
+          `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email, phone, extra_values)
+           VALUES ($1, $2, 'present', NULL, NULL, $3::jsonb)`,
+          [meetingId, member_id, extraValuesJson]
+        );
+      }
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {

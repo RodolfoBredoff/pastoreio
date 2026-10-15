@@ -94,28 +94,26 @@ function extraValuesToEditorState(fields: ExtraFieldCfg[], extraValues: unknown)
   return state;
 }
 
-/** Monta o payload extra_values a partir do estado do editor. */
+/** Monta o payload extra_values a partir do estado do editor (escolha única: exatamente 1 item). */
 function buildExtraValuesFromState(
   fields: ExtraFieldCfg[],
   state: ExtraEditorState
 ): { ok: false; error: string } | { ok: true; values: ExtraValuesEntry[] } {
-  const out: ExtraValuesEntry[] = [];
+  const answers: Array<{ field_id: string; value: string }> = [];
   for (const f of fields) {
-    const selected = state.selections[f.id] ?? [];
-    const customVal = (state.custom[f.id] ?? '').trim();
-    let values: string[];
-    if (f.options) {
-      values = [...selected];
-      if (f.allow_custom && customVal) values.push(customVal);
-    } else {
-      values = customVal ? [customVal] : [];
+    for (const s of state.selections[f.id] ?? []) {
+      if (s.trim()) answers.push({ field_id: f.id, value: s.trim() });
     }
-    if (values.length === 0) {
-      return { ok: false, error: `Preencha o campo obrigatório: ${f.label}` };
-    }
-    out.push({ field_id: f.id, values });
+    const c = (state.custom[f.id] ?? '').trim();
+    if (c) answers.push({ field_id: f.id, value: c });
   }
-  return { ok: true, values: out };
+  if (answers.length === 0) {
+    return { ok: false, error: 'Escolha um item para confirmar presença.' };
+  }
+  if (answers.length > 1) {
+    return { ok: false, error: 'Selecione apenas um item para confirmar presença.' };
+  }
+  return { ok: true, values: [{ field_id: answers[0].field_id, values: [answers[0].value] }] };
 }
 
 function ExtraFieldsEditor({
@@ -132,7 +130,9 @@ function ExtraFieldsEditor({
   if (fields.length === 0) return null;
   return (
     <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-      <p className="text-xs font-medium text-muted-foreground">Campos adicionais obrigatórios</p>
+      <p className="text-xs font-medium text-muted-foreground">
+        Campos adicionais — a pessoa escolhe exatamente 1 item (qualquer lista)
+      </p>
       {fields.map((f) => {
         const selected = state.selections[f.id] ?? [];
         const customVal = state.custom[f.id] ?? '';
@@ -149,13 +149,22 @@ function ExtraFieldsEditor({
                         disabled={disabled}
                         onCheckedChange={() => {
                           const cur = state.selections[f.id] ?? [];
-                          onChange({
-                            ...state,
-                            selections: {
-                              ...state.selections,
-                              [f.id]: cur.includes(opt) ? cur.filter((o) => o !== opt) : [...cur, opt],
-                            },
-                          });
+                          if (cur.includes(opt)) {
+                            onChange({
+                              ...state,
+                              selections: { ...state.selections, [f.id]: cur.filter((o) => o !== opt) },
+                            });
+                            return;
+                          }
+                          // Escolha única: marcar uma opção desmarca todas as outras e limpa textos
+                          const selections: Record<string, string[]> = {};
+                          const custom: Record<string, string> = {};
+                          for (const x of fields) {
+                            selections[x.id] = [];
+                            custom[x.id] = '';
+                          }
+                          selections[f.id] = [opt];
+                          onChange({ selections, custom });
                         }}
                       />
                       <span>{opt}</span>
@@ -167,7 +176,16 @@ function ExtraFieldsEditor({
                     placeholder="Outro (especifique)"
                     value={customVal}
                     disabled={disabled}
-                    onChange={(e) => onChange({ ...state, custom: { ...state.custom, [f.id]: e.target.value } })}
+                    onChange={(e) => {
+                      // Escolha única: digitar limpa as outras escolhas
+                      const selections: Record<string, string[]> = {};
+                      const custom: Record<string, string> = {};
+                      for (const x of fields) {
+                        selections[x.id] = [];
+                        custom[x.id] = x.id === f.id ? e.target.value : '';
+                      }
+                      onChange({ selections, custom });
+                    }}
                   />
                 )}
               </>
@@ -176,7 +194,16 @@ function ExtraFieldsEditor({
                 placeholder="Digite a resposta"
                 value={customVal}
                 disabled={disabled}
-                onChange={(e) => onChange({ ...state, custom: { ...state.custom, [f.id]: e.target.value } })}
+                onChange={(e) => {
+                  // Escolha única: digitar limpa as outras escolhas
+                  const selections: Record<string, string[]> = {};
+                  const custom: Record<string, string> = {};
+                  for (const x of fields) {
+                    selections[x.id] = [];
+                    custom[x.id] = x.id === f.id ? e.target.value : '';
+                  }
+                  onChange({ selections, custom });
+                }}
               />
             )}
           </div>
@@ -367,6 +394,16 @@ export default function ListaConfirmacaoPage() {
   const [editEntryRg, setEditEntryRg] = useState('');
   const [editEntryUsePhone, setEditEntryUsePhone] = useState(false);
   const [editEntrySaving, setEditEntrySaving] = useState(false);
+  // Edição de campos adicionais do membro (resposta)
+  const [editingMember, setEditingMember] = useState<MemberRow | null>(null);
+  const [memberExtras, setMemberExtras] = useState<ExtraEditorState>({ selections: {}, custom: {} });
+  const [memberExtrasSaving, setMemberExtrasSaving] = useState(false);
+  // Edição de visitante (nome + campos adicionais)
+  const [editingGuest, setEditingGuest] = useState<GuestRow | null>(null);
+  const [guestEditFirst, setGuestEditFirst] = useState('');
+  const [guestEditLast, setGuestEditLast] = useState('');
+  const [guestEditExtras, setGuestEditExtras] = useState<ExtraEditorState>({ selections: {}, custom: {} });
+  const [guestEditSaving, setGuestEditSaving] = useState(false);
   
   /** Evita sobrescrever rascunho do checklist ao recarregar só membros/confirmações */
   const checklistDraftDirtyRef = useRef(false);
@@ -574,6 +611,90 @@ export default function ListaConfirmacaoPage() {
       setError(e instanceof Error ? e.message : 'Erro ao adicionar');
     } finally {
       setPublicEntrySaving(false);
+    }
+  };
+
+  const handleEditMember = (m: MemberRow) => {
+    setEditingMember(m);
+    setMemberExtras(extraValuesToEditorState(data?.extra_fields ?? [], m.response?.extra_values));
+  };
+
+  const handleSaveMemberExtras = async () => {
+    if (!meetingId || !editingMember) return;
+    const extraFields = data?.extra_fields ?? [];
+    if (extraFields.length === 0) {
+      setEditingMember(null);
+      return;
+    }
+    const extras = buildExtraValuesFromState(extraFields, memberExtras);
+    if (!extras.ok) {
+      setError(extras.error);
+      return;
+    }
+    setMemberExtrasSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/attendance-list`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ member_id: editingMember.id, extra_values: extras.values }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao salvar');
+      setEditingMember(null);
+      fetchList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao salvar');
+    } finally {
+      setMemberExtrasSaving(false);
+    }
+  };
+
+  const handleEditGuest = (g: GuestRow) => {
+    setEditingGuest(g);
+    setGuestEditFirst(g.full_name.split(' ')[0] || '');
+    setGuestEditLast(g.full_name.split(' ').slice(1).join(' ') || '');
+    setGuestEditExtras(extraValuesToEditorState(data?.extra_fields ?? [], g.extra_values));
+  };
+
+  const handleSaveEditGuest = async () => {
+    if (!meetingId || !editingGuest) return;
+    const fn = guestEditFirst.trim();
+    const ln = guestEditLast.trim();
+    if (!fn || !ln) {
+      setError('Informe nome e sobrenome do visitante.');
+      return;
+    }
+    const extraFields = data?.extra_fields ?? [];
+    let extras: ExtraValuesEntry[] | null = null;
+    if (extraFields.length > 0) {
+      const r = buildExtraValuesFromState(extraFields, guestEditExtras);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      extras = r.values;
+    }
+    setGuestEditSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/attendance-list/guests/${editingGuest.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name: fn,
+          last_name: ln,
+          ...(extras ? { extra_values: extras } : {}),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao salvar visitante');
+      setEditingGuest(null);
+      fetchList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao salvar visitante');
+    } finally {
+      setGuestEditSaving(false);
     }
   };
 
@@ -1078,8 +1199,8 @@ export default function ListaConfirmacaoPage() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Exigidos de quem confirmar pelo link público (seleção múltipla nas opções, com opção de resposta própria)
-              e também no cadastro de visitantes e registros manuais. Remover um campo não apaga respostas antigas.
+              A pessoa escolhe exatamente 1 item entre todos os campos ao confirmar pelo link público — e também no
+              cadastro de visitantes e registros manuais. Remover um campo não apaga respostas antigas.
             </p>
             {extraFieldsDraft.map((f, idx) => (
               <div key={f.id ?? `new-${idx}`} className="space-y-2 rounded-md border bg-muted/20 p-3">
@@ -1244,6 +1365,19 @@ export default function ListaConfirmacaoPage() {
                     )}
                     <td className="p-3">
                       <div className="flex flex-wrap items-center gap-1">
+                        {listExtraFields.length > 0 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            disabled={busy}
+                            onClick={() => handleEditMember(m)}
+                            title="Editar o item escolhido"
+                          >
+                            <Pencil className="h-3 w-3 mr-1" />
+                            Editar
+                          </Button>
+                        )}
                         <Button
                           variant={isPresent ? 'secondary' : 'outline'}
                           size="sm"
@@ -1376,16 +1510,29 @@ export default function ListaConfirmacaoPage() {
                         </td>
                       )}
                       <td className="p-3">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs text-muted-foreground hover:text-destructive"
-                          disabled={guestBusy}
-                          onClick={() => handleResetGuest(g.id)}
-                          title="Remover visitante da lista"
-                        >
-                          {guestBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <><RotateCcw className="h-3 w-3 mr-1" /> Remover</>}
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            disabled={guestBusy}
+                            onClick={() => handleEditGuest(g)}
+                            title="Editar visitante"
+                          >
+                            <Pencil className="h-3 w-3 mr-1" />
+                            Editar
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                            disabled={guestBusy}
+                            onClick={() => handleResetGuest(g.id)}
+                            title="Remover visitante da lista"
+                          >
+                            {guestBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <><RotateCcw className="h-3 w-3 mr-1" /> Remover</>}
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1682,6 +1829,78 @@ export default function ListaConfirmacaoPage() {
             </Button>
             <Button onClick={() => void handleSaveEditEntry()} disabled={editEntrySaving}>
               {editEntrySaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingMember} onOpenChange={(open) => !open && setEditingMember(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar item de {editingMember?.full_name || 'membro'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <ExtraFieldsEditor
+              fields={listExtraFields}
+              state={memberExtras}
+              onChange={setMemberExtras}
+              disabled={memberExtrasSaving}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingMember(null)} disabled={memberExtrasSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void handleSaveMemberExtras()} disabled={memberExtrasSaving}>
+              {memberExtrasSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingGuest} onOpenChange={(open) => !open && setEditingGuest(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar visitante</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="edit-guest-first">Nome</Label>
+                <Input
+                  id="edit-guest-first"
+                  value={guestEditFirst}
+                  onChange={(e) => setGuestEditFirst(e.target.value)}
+                  placeholder="Nome"
+                  disabled={guestEditSaving}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-guest-last">Sobrenome</Label>
+                <Input
+                  id="edit-guest-last"
+                  value={guestEditLast}
+                  onChange={(e) => setGuestEditLast(e.target.value)}
+                  placeholder="Sobrenome"
+                  disabled={guestEditSaving}
+                />
+              </div>
+            </div>
+            <ExtraFieldsEditor
+              fields={listExtraFields}
+              state={guestEditExtras}
+              onChange={setGuestEditExtras}
+              disabled={guestEditSaving}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingGuest(null)} disabled={guestEditSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void handleSaveEditGuest()} disabled={guestEditSaving}>
+              {guestEditSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Salvar
             </Button>
           </DialogFooter>

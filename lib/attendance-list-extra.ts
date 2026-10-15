@@ -30,7 +30,6 @@ const MAX_EXTRA_FIELDS = 10;
 const MAX_LABEL_LENGTH = 120;
 const MAX_OPTION_LENGTH = 120;
 const MAX_VALUE_LENGTH = 200;
-const MAX_VALUES_PER_FIELD = 30;
 
 function normalizeLabel(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, MAX_LABEL_LENGTH) : '';
@@ -131,25 +130,11 @@ export async function getMeetingExtraFields(meetingId: string): Promise<Attendan
   return rows.map(rowToConfig);
 }
 
-function findEntry(raw: unknown, fieldId: string): string[] | null {
-  if (!Array.isArray(raw)) return null;
-  for (const item of raw) {
-    if (item == null || typeof item !== 'object') continue;
-    const entry = item as Record<string, unknown>;
-    if (typeof entry.field_id !== 'string' || entry.field_id !== fieldId) continue;
-    if (!Array.isArray(entry.values)) return [];
-    return entry.values;
-  }
-  return null;
-}
-
 /**
  * Valida as respostas dos campos adicionais.
- * Regras:
- *  - Todos os campos configurados devem estar presentes e preenchidos.
- *  - Campo com opções: cada valor deve ser uma opção (case-insensitive);
- *    se allow_custom, também aceita texto livre.
- *  - Campo livre (options null): um texto não vazio.
+ * Regra (escolha única global): em todo o convite a pessoa fornece EXATAMENTE
+ * UM item — uma opção marcada (ou texto próprio) em um único campo, ou o texto
+ * de um campo livre. Não pode ficar vazio nem selecionar mais de um.
  */
 export function normalizeExtraValues(
   fields: AttendanceExtraFieldConfig[],
@@ -158,49 +143,44 @@ export function normalizeExtraValues(
   if (fields.length === 0) return { ok: true, values: [] };
 
   if (!Array.isArray(raw)) {
-    return { ok: false, error: `Preencha o campo obrigatório: ${fields[0].label}` };
+    return { ok: false, error: 'Escolha um item para confirmar presença.' };
   }
 
-  const knownIds = new Set(fields.map((f) => f.id));
-  const values: ExtraValuesEntry[] = [];
+  const byId = new Map(fields.map((f) => [f.id, f]));
+  const answers: Array<{ field: AttendanceExtraFieldConfig; value: string }> = [];
 
-  for (const field of fields) {
-    const rawValues = findEntry(raw, field.id);
-    if (rawValues === null) {
-      return { ok: false, error: `Preencha o campo obrigatório: ${field.label}` };
-    }
-    const cleaned: string[] = [];
-    for (const v of rawValues) {
-      if (typeof v !== 'string') continue;
-      const trimmed = v.trim().slice(0, MAX_VALUE_LENGTH);
-      if (!trimmed || cleaned.includes(trimmed)) continue;
-      cleaned.push(trimmed);
-      if (cleaned.length >= MAX_VALUES_PER_FIELD) break;
-    }
-    if (cleaned.length === 0) {
-      return { ok: false, error: `Preencha o campo obrigatório: ${field.label}` };
-    }
-    if (field.options) {
-      const allowed = new Set(field.options.map((o) => o.toLowerCase()));
-      for (const v of cleaned) {
-        if (allowed.has(v.toLowerCase())) continue;
-        if (field.allow_custom) continue; // texto próprio permitido
-        return { ok: false, error: `Escolha uma opção válida em: ${field.label}` };
-      }
-    }
-    values.push({ field_id: field.id, values: cleaned });
-  }
-
-  // Rejeita field_ids desconhecidos para evitar lixo no banco
   for (const item of raw) {
-    if (item == null || typeof item !== 'object') continue;
-    const entry = item as Record<string, unknown>;
-    if (typeof entry.field_id === 'string' && !knownIds.has(entry.field_id)) {
+    if (!item || typeof item !== 'object') continue;
+    const e = item as Record<string, unknown>;
+    if (typeof e.field_id !== 'string' || !Array.isArray(e.values)) continue;
+    const field = byId.get(e.field_id);
+    if (!field) {
       return { ok: false, error: 'Campo adicional inválido' };
     }
+    for (const v of e.values) {
+      if (typeof v !== 'string') continue;
+      const trimmed = v.trim().slice(0, MAX_VALUE_LENGTH);
+      if (!trimmed) continue;
+      answers.push({ field, value: trimmed });
+    }
   }
 
-  return { ok: true, values };
+  if (answers.length === 0) {
+    return { ok: false, error: 'Escolha um item para confirmar presença.' };
+  }
+  if (answers.length > 1) {
+    return { ok: false, error: 'Selecione apenas um item para confirmar presença.' };
+  }
+
+  const { field, value } = answers[0];
+  if (field.options) {
+    const allowed = new Set(field.options.map((o) => o.toLowerCase()));
+    if (!allowed.has(value.toLowerCase()) && !field.allow_custom) {
+      return { ok: false, error: `Escolha uma opção válida em: ${field.label}` };
+    }
+  }
+
+  return { ok: true, values: [{ field_id: field.id, values: [value] }] };
 }
 
 /** Formata os valores de um campo para exibição (tabela interna / CSV). */
