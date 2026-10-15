@@ -535,12 +535,35 @@ function AddMeetingDialog({
   const [attendanceDeadline, setAttendanceDeadline] = useState('');
   const [attendanceRequireRg, setAttendanceRequireRg] = useState(false);
   const [attendanceLimit, setAttendanceLimit] = useState('');
+  const [extraFieldsDraft, setExtraFieldsDraft] = useState<Array<{ label: string; mode: 'text' | 'options'; optionsText: string; allowCustom: boolean }>>([]);
   const [createdListLink, setCreatedListLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleCreate = async () => {
     if (!date) { setError('A data é obrigatória'); return; }
+    const withList = meetingType === 'special_event' && generateAttendanceList;
+
+    // Validação dos campos adicionais (antes de enviar)
+    const cleanedExtraFields = extraFieldsDraft
+      .map((f) => ({
+        label: f.label.trim(),
+        mode: f.mode,
+        options:
+          f.mode === 'options'
+            ? f.optionsText.split('\n').map((l) => l.trim()).filter(Boolean)
+            : null,
+        allow_custom: f.mode === 'options' ? f.allowCustom : true,
+      }))
+      .filter((f) => f.label || (f.options && f.options.length > 0));
+    for (const f of cleanedExtraFields) {
+      if (!f.label) { setError('Informe o título de cada campo adicional.'); return; }
+      if (f.mode === 'options' && (!f.options || f.options.length === 0)) {
+        setError(`Informe ao menos uma opção para o campo "${f.label}".`);
+        return;
+      }
+    }
+
     setError('');
     setLoading(true);
     setCreatedListLink(null);
@@ -568,6 +591,8 @@ function AddMeetingDialog({
             meetingType === 'special_event' && generateAttendanceList && attendanceLimit.trim()
               ? Number(attendanceLimit)
               : null,
+          attendance_list_extra_fields:
+            withList && cleanedExtraFields.length > 0 ? cleanedExtraFields : undefined,
         }),
       });
       const data = await res.json();
@@ -578,7 +603,7 @@ function AddMeetingDialog({
         setCreatedListLink(link);
       } else {
         setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
-        setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline(''); setAttendanceRequireRg(false); setAttendanceLimit('');
+        setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline(''); setAttendanceRequireRg(false); setAttendanceLimit(''); setExtraFieldsDraft([]);
         onSave();
         onOpenChange(false);
       }
@@ -591,7 +616,7 @@ function AddMeetingDialog({
 
   const handleCloseAfterList = () => {
     setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
-    setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline(''); setAttendanceRequireRg(false); setAttendanceLimit('');
+    setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline(''); setAttendanceRequireRg(false); setAttendanceLimit(''); setExtraFieldsDraft([]);
     setCreatedListLink(null);
     onSave();
     onOpenChange(false);
@@ -714,6 +739,95 @@ function AddMeetingDialog({
                           </Label>
                         </div>
                       )}
+                      <div className="space-y-2 rounded-md border p-3">
+                        <Label className="text-sm font-medium">Campos adicionais obrigatórios (opcional)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Peça uma informação obrigatória a quem confirmar (ex.: "O que você vai levar?"). Pode ser
+                          resposta livre ou uma lista de opções para marcar (seleção múltipla, com opção de resposta própria).
+                        </p>
+                        {extraFieldsDraft.map((f, idx) => (
+                          <div key={idx} className="space-y-2 rounded-md border bg-muted/20 p-3">
+                            <div className="flex items-end gap-2">
+                              <div className="flex-1 space-y-1">
+                                <Label htmlFor={`extra-label-${idx}`}>Título do campo</Label>
+                                <Input
+                                  id={`extra-label-${idx}`}
+                                  placeholder="Ex: O que você vai levar?"
+                                  value={f.label}
+                                  onChange={(e) =>
+                                    setExtraFieldsDraft((prev) => prev.map((p, i) => (i === idx ? { ...p, label: e.target.value } : p)))
+                                  }
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-9 text-muted-foreground hover:text-destructive"
+                                onClick={() => setExtraFieldsDraft((prev) => prev.filter((_, i) => i !== idx))}
+                                title="Remover campo"
+                              >
+                                Remover
+                              </Button>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor={`extra-mode-${idx}`}>Tipo de resposta</Label>
+                              <select
+                                id={`extra-mode-${idx}`}
+                                value={f.mode}
+                                onChange={(e) =>
+                                  setExtraFieldsDraft((prev) =>
+                                    prev.map((p, i) =>
+                                      i === idx ? { ...p, mode: e.target.value as 'text' | 'options' } : p
+                                    )
+                                  )
+                                }
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              >
+                                <option value="text">Resposta livre (texto)</option>
+                                <option value="options">Lista de opções (seleção múltipla)</option>
+                              </select>
+                            </div>
+                            {f.mode === 'options' && (
+                              <>
+                                <div className="space-y-1">
+                                  <Label htmlFor={`extra-options-${idx}`}>Opções (uma por linha)</Label>
+                                  <textarea
+                                    id={`extra-options-${idx}`}
+                                    rows={4}
+                                    placeholder={'Pão de queijo\nPatê com torradas\nFrutas\nSalada...'}
+                                    value={f.optionsText}
+                                    onChange={(e) =>
+                                      setExtraFieldsDraft((prev) => prev.map((p, i) => (i === idx ? { ...p, optionsText: e.target.value } : p)))
+                                    }
+                                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y"
+                                  />
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <Checkbox
+                                    id={`extra-allow-custom-${idx}`}
+                                    checked={f.allowCustom}
+                                    onCheckedChange={(c) =>
+                                      setExtraFieldsDraft((prev) => prev.map((p, i) => (i === idx ? { ...p, allowCustom: c === true } : p)))
+                                    }
+                                  />
+                                  <Label htmlFor={`extra-allow-custom-${idx}`} className="text-sm font-normal cursor-pointer">
+                                    Permitir também resposta própria (outro)
+                                  </Label>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setExtraFieldsDraft((prev) => [...prev, { label: '', mode: 'text', optionsText: '', allowCustom: true }])}
+                        >
+                          + Adicionar campo
+                        </Button>
+                      </div>
                     </>
                   )}
                 </>

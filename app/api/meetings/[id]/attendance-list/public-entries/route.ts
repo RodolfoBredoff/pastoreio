@@ -11,6 +11,7 @@ import {
   normalizeRg,
   type AttendanceListMode,
 } from '@/lib/attendance-list-public';
+import { getMeetingExtraFields, normalizeExtraValues } from '@/lib/attendance-list-extra';
 
 /**
  * POST /api/meetings/[id]/attendance-list/public-entries
@@ -51,12 +52,13 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { first_name, last_name, email, phone, rg } = body as {
+    const { first_name, last_name, email, phone, rg, extra_values } = body as {
       first_name?: string;
       last_name?: string;
       email?: string;
       phone?: string;
       rg?: string;
+      extra_values?: unknown;
     };
 
     const fn = first_name?.trim();
@@ -83,6 +85,18 @@ export async function POST(
     }
 
     const mode = (meeting.attendance_list_mode ?? 'open') as AttendanceListMode;
+
+    // Campos adicionais obrigatórios (mesma regra do link público)
+    const extraFields = await getMeetingExtraFields(meetingId);
+    let extraValues: unknown = [];
+    if (extraFields.length > 0) {
+      const extraRes = normalizeExtraValues(extraFields, extra_values);
+      if (!extraRes.ok) {
+        return NextResponse.json({ error: extraRes.error }, { status: 400 });
+      }
+      extraValues = extraRes.values;
+    }
+
     const count = await getAttendanceConfirmedCount(meetingId, mode);
     if (isAttendanceLimitReached(count, meeting.attendance_list_limit)) {
       return NextResponse.json(
@@ -93,9 +107,9 @@ export async function POST(
 
     const id = uuidv4();
     await query(
-      `INSERT INTO attendance_list_public_entries (id, meeting_id, first_name, last_name, email, phone, rg)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [id, meetingId, fn, ln, em, ph, meeting.attendance_list_require_rg ? rgVal : null]
+      `INSERT INTO attendance_list_public_entries (id, meeting_id, first_name, last_name, email, phone, rg, extra_values)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+      [id, meetingId, fn, ln, em, ph, meeting.attendance_list_require_rg ? rgVal : null, JSON.stringify(extraValues)]
     );
 
     return NextResponse.json({ ok: true, id });

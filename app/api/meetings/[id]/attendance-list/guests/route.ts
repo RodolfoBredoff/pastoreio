@@ -8,6 +8,7 @@ import {
   isAttendanceLimitReached,
   type AttendanceListMode,
 } from '@/lib/attendance-list-public';
+import { getMeetingExtraFields, normalizeExtraValues } from '@/lib/attendance-list-extra';
 
 /**
  * POST /api/meetings/[id]/attendance-list/guests
@@ -31,7 +32,11 @@ export async function POST(
 
     const { id: meetingId } = await params;
     const body = await request.json();
-    const { first_name, last_name } = body as { first_name?: string; last_name?: string };
+    const { first_name, last_name, extra_values } = body as {
+      first_name?: string;
+      last_name?: string;
+      extra_values?: unknown;
+    };
 
     const firstName = typeof first_name === 'string' ? first_name.trim() : '';
     const lastName = typeof last_name === 'string' ? last_name.trim() : '';
@@ -66,6 +71,17 @@ export async function POST(
       );
     }
 
+    // Campos adicionais obrigatórios também para o visitante
+    const extraFields = await getMeetingExtraFields(meetingId);
+    let extraValues: unknown = [];
+    if (extraFields.length > 0) {
+      const extraRes = normalizeExtraValues(extraFields, extra_values);
+      if (!extraRes.ok) {
+        return NextResponse.json({ error: extraRes.error }, { status: 400 });
+      }
+      extraValues = extraRes.values;
+    }
+
     const mode = (meeting.attendance_list_mode ?? 'prefilled') as AttendanceListMode;
     const count = await getAttendanceConfirmedCount(meetingId, mode);
     if (isAttendanceLimitReached(count, meeting.attendance_list_limit)) {
@@ -76,10 +92,10 @@ export async function POST(
     }
 
     const row = await queryOne<{ id: string }>(
-      `INSERT INTO attendance_list_guests (meeting_id, first_name, last_name, registered_by_email, registered_by_phone, registered_by_leader)
-       VALUES ($1, $2, $3, NULL, NULL, TRUE)
+      `INSERT INTO attendance_list_guests (meeting_id, first_name, last_name, registered_by_email, registered_by_phone, registered_by_leader, extra_values)
+       VALUES ($1, $2, $3, NULL, NULL, TRUE, $4::jsonb)
        RETURNING id`,
-      [meetingId, firstName, lastName]
+      [meetingId, firstName, lastName, JSON.stringify(extraValues)]
     );
 
     const guestId = row?.id;

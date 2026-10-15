@@ -30,6 +30,13 @@ type PublicPayload = {
   is_expired: boolean;
   is_limit_reached: boolean;
   public_summary_only: true;
+  extra_fields?: Array<{
+    id: string;
+    label: string;
+    options: string[] | null;
+    allow_custom: boolean;
+    position: number;
+  }>;
 };
 
 function formatDate(d: string) {
@@ -41,6 +48,71 @@ function formatTime(t: string | null) {
   if (!t) return '';
   const [h, m] = t.split(':');
   return `${h}:${m}`;
+}
+
+type ExtraFieldCfg = NonNullable<PublicPayload['extra_fields']>[number];
+
+function ExtraFieldsSection({
+  fields,
+  selections,
+  custom,
+  onToggleOption,
+  onCustomChange,
+}: {
+  fields: ExtraFieldCfg[];
+  selections: Record<string, string[]>;
+  custom: Record<string, string>;
+  onToggleOption: (fieldId: string, option: string) => void;
+  onCustomChange: (fieldId: string, value: string) => void;
+}) {
+  if (fields.length === 0) return null;
+  return (
+    <div className="space-y-4 rounded-lg border bg-muted/20 p-3">
+      <p className="text-xs font-medium text-muted-foreground">
+        Preenchimento obrigatório para confirmar presença
+      </p>
+      {fields.map((f) => {
+        const selected = selections[f.id] ?? [];
+        const customVal = custom[f.id] ?? '';
+        return (
+          <div key={f.id} className="space-y-2">
+            <Label className="text-sm font-medium">{f.label}</Label>
+            {f.options ? (
+              <>
+                <div className="space-y-1.5">
+                  {f.options.map((opt) => (
+                    <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox
+                        checked={selected.includes(opt)}
+                        onCheckedChange={() => onToggleOption(f.id, opt)}
+                      />
+                      <span>{opt}</span>
+                    </label>
+                  ))}
+                </div>
+                {f.allow_custom && (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Outro (especifique)</Label>
+                    <Input
+                      value={customVal}
+                      onChange={(e) => onCustomChange(f.id, e.target.value)}
+                      placeholder="Digite sua resposta"
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <Input
+                value={customVal}
+                onChange={(e) => onCustomChange(f.id, e.target.value)}
+                placeholder="Digite sua resposta"
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function ListaPresencaPublicPage() {
@@ -63,6 +135,48 @@ export default function ListaPresencaPublicPage() {
   const [prefilledPhone, setPrefilledPhone] = useState('');
   const [prefilledEmail, setPrefilledEmail] = useState('');
   const [prefilledNoEmail, setPrefilledNoEmail] = useState(true);
+
+  // Campos adicionais obrigatórios
+  const [extraSelections, setExtraSelections] = useState<Record<string, string[]>>({});
+  const [extraCustom, setExtraCustom] = useState<Record<string, string>>({});
+
+  const extraFields = data?.extra_fields ?? [];
+
+  const toggleExtraOption = (fieldId: string, option: string) => {
+    setExtraSelections((prev) => {
+      const cur = prev[fieldId] ?? [];
+      return {
+        ...prev,
+        [fieldId]: cur.includes(option) ? cur.filter((o) => o !== option) : [...cur, option],
+      };
+    });
+  };
+  const setExtraCustomValue = (fieldId: string, value: string) => {
+    setExtraCustom((prev) => ({ ...prev, [fieldId]: value }));
+  };
+  const resetExtras = () => {
+    setExtraSelections({});
+    setExtraCustom({});
+  };
+  const buildExtraValues = (): { ok: false; error: string } | { ok: true; values: Array<{ field_id: string; values: string[] }> } => {
+    const out: Array<{ field_id: string; values: string[] }> = [];
+    for (const f of extraFields) {
+      const selected = extraSelections[f.id] ?? [];
+      const customVal = (extraCustom[f.id] ?? '').trim();
+      let values: string[];
+      if (f.options) {
+        values = [...selected];
+        if (f.allow_custom && customVal) values.push(customVal);
+      } else {
+        values = customVal ? [customVal] : [];
+      }
+      if (values.length === 0) {
+        return { ok: false, error: `Preencha o campo obrigatório: ${f.label}` };
+      }
+      out.push({ field_id: f.id, values });
+    }
+    return { ok: true, values: out };
+  };
 
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -109,6 +223,12 @@ export default function ListaPresencaPublicPage() {
       return;
     }
 
+    const extras = buildExtraValues();
+    if (!extras.ok) {
+      setSubmitError(extras.error);
+      return;
+    }
+
     setSubmitLoading(true);
     try {
       const res = await fetch(`/api/lista-presenca/${slug}`, {
@@ -121,12 +241,14 @@ export default function ListaPresencaPublicPage() {
           ...(hasEmail ? { email: em } : {}),
           ...(hasPhone ? { phone: ph } : {}),
           ...(data.meeting.attendance_list_require_rg ? { rg: rg.trim() } : {}),
+          ...(extras.values.length > 0 ? { extra_values: extras.values } : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Erro ao confirmar');
       setSubmitOk('Confirmação registrada. Obrigado!');
       setFirstName(''); setLastName(''); setEmail(''); setPhone(''); setNoEmail(false); setRg('');
+      resetExtras();
       await fetchData();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Erro ao confirmar');
@@ -150,6 +272,12 @@ export default function ListaPresencaPublicPage() {
       return;
     }
 
+    const extras = buildExtraValues();
+    if (!extras.ok) {
+      setSubmitError(extras.error);
+      return;
+    }
+
     setSubmitLoading(true);
     try {
       const res = await fetch(`/api/lista-presenca/${slug}`, {
@@ -159,12 +287,14 @@ export default function ListaPresencaPublicPage() {
           mode: 'prefilled',
           ...(hasPhone ? { phone: ph } : {}),
           ...(hasEmail ? { email: em } : {}),
+          ...(extras.values.length > 0 ? { extra_values: extras.values } : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Erro ao confirmar');
       setSubmitOk('Presença confirmada. Obrigado!');
       setPrefilledPhone(''); setPrefilledEmail('');
+      resetExtras();
       await fetchData();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Erro ao confirmar');
@@ -353,6 +483,13 @@ export default function ListaPresencaPublicPage() {
                       />
                     </div>
                   )}
+                  <ExtraFieldsSection
+                    fields={extraFields}
+                    selections={extraSelections}
+                    custom={extraCustom}
+                    onToggleOption={toggleExtraOption}
+                    onCustomChange={setExtraCustomValue}
+                  />
                   <Button onClick={handleSubmitOpen} disabled={submitLoading} className={cn('w-full', submitLoading && 'opacity-70')}>
                     {submitLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirmar presença'}
                   </Button>
@@ -394,6 +531,13 @@ export default function ListaPresencaPublicPage() {
                       </p>
                     </div>
                   )}
+                  <ExtraFieldsSection
+                    fields={extraFields}
+                    selections={extraSelections}
+                    custom={extraCustom}
+                    onToggleOption={toggleExtraOption}
+                    onCustomChange={setExtraCustomValue}
+                  />
                   <Button onClick={handleSubmitPrefilled} disabled={submitLoading} className={cn('w-full', submitLoading && 'opacity-70')}>
                     {submitLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirmar presença'}
                   </Button>

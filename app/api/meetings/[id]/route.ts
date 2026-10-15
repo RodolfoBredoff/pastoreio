@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
-import { query, queryOne } from '@/lib/db/postgres';
+import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
+import { normalizeExtraFieldConfigs, type ExtraFieldConfigInput } from '@/lib/attendance-list-extra';
 
 /**
  * PUT /api/meetings/[id]
@@ -53,6 +54,7 @@ export async function PUT(
       attendance_list_deadline,
       attendance_list_require_rg,
       attendance_list_limit,
+      attendance_list_extra_fields,
     } = data as {
       meeting_date?: string;
       meeting_time?: string | null;
@@ -64,6 +66,7 @@ export async function PUT(
       attendance_list_deadline?: string | null;
       attendance_list_require_rg?: boolean;
       attendance_list_limit?: number | null;
+      attendance_list_extra_fields?: unknown;
     };
 
     const updates: string[] = [];
@@ -137,17 +140,74 @@ export async function PUT(
       }
     }
 
-    if (updates.length === 0) {
+    // Campos adicionais obrigatórios (edição da configuração pelo admin)
+    let extraFieldsPayload: ExtraFieldConfigInput[] | null = null;
+    if (attendance_list_extra_fields !== undefined) {
+      const res = normalizeExtraFieldConfigs(attendance_list_extra_fields);
+      if (!res.ok) {
+        return NextResponse.json({ error: res.error }, { status: 400 });
+      }
+      extraFieldsPayload = res.fields;
+    }
+
+    if (updates.length === 0 && extraFieldsPayload === null) {
       return NextResponse.json({ error: 'Nenhum campo para atualizar' }, { status: 400 });
     }
 
-    values.push(id);
-    const result = await query(
-      `UPDATE meetings SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-      values
-    );
+    if (updates.length > 0) {
+      values.push(id);
+      await query(
+        `UPDATE meetings SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
+        values
+      );
+    }
 
-    return NextResponse.json(result.rows[0]);
+    if (extraFieldsPayload !== null) {
+      const existingRows = await queryMany<{ id: string }>(
+        `SELECT id FROM attendance_list_extra_fields WHERE meeting_id = $1`,
+        [id]
+      );
+      const existingIds = new Set(existingRows.map((r) => r.id));
+      const keptIds = new Set<string>();
+
+      for (let i = 0; i < extraFieldsPayload.length; i++) {
+        const f = extraFieldsPayload[i];
+        const optionsJson = f.options ? JSON.stringify(f.options) : null;
+        if (f.id && existingIds.has(f.id)) {
+          keptIds.add(f.id);
+          await query(
+            `UPDATE attendance_list_extra_fields
+             SET label = $1, options = $2::jsonb, allow_custom = $3, position = $4
+             WHERE id = $5 AND meeting_id = $6`,
+            [f.label, optionsJson, f.allow_custom, i, f.id, id]
+          );
+        } else {
+          const inserted = await queryOne<{ id: string }>(
+            `INSERT INTO attendance_list_extra_fields (meeting_id, label, options, allow_custom, position)
+             VALUES ($1, $2, $3::jsonb, $4, $5)
+             RETURNING id`,
+            [id, f.label, optionsJson, f.allow_custom, i]
+          );
+          if (inserted?.id) keptIds.add(inserted.id);
+        }
+      }
+
+      // Remove campos que não estão mais na configuração
+      for (const existingId of existingIds) {
+        if (!keptIds.has(existingId)) {
+          await query(
+            `DELETE FROM attendance_list_extra_fields WHERE id = $1 AND meeting_id = $2`,
+            [existingId, id]
+          );
+        }
+      }
+    }
+
+    const updated = await queryOne<Record<string, unknown>>(
+      `SELECT * FROM meetings WHERE id = $1`,
+      [id]
+    );
+    return NextResponse.json(updated);
   } catch (error) {
     console.error('Erro ao atualizar reunião:', error);
     return NextResponse.json(

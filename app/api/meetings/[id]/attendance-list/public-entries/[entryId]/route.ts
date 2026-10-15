@@ -4,6 +4,7 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryOne } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { isValidRg, normalizeRg } from '@/lib/attendance-list-public';
+import { getMeetingExtraFields, normalizeExtraValues } from '@/lib/attendance-list-extra';
 
 /**
  * PATCH /api/meetings/[id]/attendance-list/public-entries/[entryId]
@@ -45,12 +46,13 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { first_name, last_name, email, phone, rg } = body as {
+    const { first_name, last_name, email, phone, rg, extra_values } = body as {
       first_name?: string;
       last_name?: string;
       email?: string;
       phone?: string;
       rg?: string;
+      extra_values?: unknown;
     };
 
     const fn = first_name?.trim();
@@ -76,11 +78,28 @@ export async function PATCH(
       }
     }
 
+    // Campos adicionais: atualiza quando enviados (validando contra a config atual)
+    let extraValuesJson: string | null = null;
+    if (extra_values !== undefined) {
+      const extraFields = await getMeetingExtraFields(meetingId);
+      if (extraFields.length > 0) {
+        const extraRes = normalizeExtraValues(extraFields, extra_values);
+        if (!extraRes.ok) {
+          return NextResponse.json({ error: extraRes.error }, { status: 400 });
+        }
+        extraValuesJson = JSON.stringify(extraRes.values);
+      }
+      // Sem campos configurados: não altera extra_values existentes
+    }
+
     await query(
       `UPDATE attendance_list_public_entries
        SET first_name = $1, last_name = $2, email = $3, phone = $4, rg = $5
+           ${extraValuesJson !== null ? ', extra_values = $7::jsonb' : ''}
        WHERE id = $6`,
-      [fn, ln, em, ph, meeting.attendance_list_require_rg ? rgVal : null, entryId]
+      extraValuesJson !== null
+        ? [fn, ln, em, ph, meeting.attendance_list_require_rg ? rgVal : null, entryId, extraValuesJson]
+        : [fn, ln, em, ph, meeting.attendance_list_require_rg ? rgVal : null, entryId]
     );
 
     return NextResponse.json({ ok: true });

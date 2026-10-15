@@ -29,6 +29,7 @@ interface MemberResponse {
   status: string;
   email: string | null;
   phone: string | null;
+  extra_values?: unknown;
 }
 
 interface MemberRow {
@@ -43,6 +44,7 @@ interface GuestRow {
   registered_by_email: string | null;
   registered_by_phone: string | null;
   registered_by_leader?: boolean;
+  extra_values?: unknown;
 }
 
 interface PublicEntryRow {
@@ -52,6 +54,160 @@ interface PublicEntryRow {
   phone: string | null;
   rg: string | null;
   created_at: string;
+  extra_values?: unknown;
+}
+
+interface ExtraFieldCfg {
+  id: string;
+  label: string;
+  options: string[] | null;
+  allow_custom: boolean;
+  position: number;
+}
+
+type ExtraValuesEntry = { field_id: string; values: string[] };
+type ExtraEditorState = { selections: Record<string, string[]>; custom: Record<string, string> };
+
+/** Converte extra_values salvos para o estado do editor (seleções + texto próprio). */
+function extraValuesToEditorState(fields: ExtraFieldCfg[], extraValues: unknown): ExtraEditorState {
+  const state: ExtraEditorState = { selections: {}, custom: {} };
+  const entries = Array.isArray(extraValues)
+    ? (extraValues.filter((e) => e && typeof e === 'object') as Record<string, unknown>[])
+    : [];
+  for (const f of fields) {
+    const entry = entries.find((e) => e.field_id === f.id);
+    const values = entry && Array.isArray(entry.values) ? (entry.values as string[]) : [];
+    if (f.options) {
+      const selected: string[] = [];
+      const customParts: string[] = [];
+      const allowed = new Set(f.options.map((o) => o.toLowerCase()));
+      for (const v of values) {
+        if (allowed.has(v.toLowerCase())) selected.push(f.options.find((o) => o.toLowerCase() === v.toLowerCase()) as string);
+        else customParts.push(v);
+      }
+      state.selections[f.id] = selected;
+      state.custom[f.id] = customParts.join(', ');
+    } else {
+      state.custom[f.id] = values.join(', ');
+    }
+  }
+  return state;
+}
+
+/** Monta o payload extra_values a partir do estado do editor. */
+function buildExtraValuesFromState(
+  fields: ExtraFieldCfg[],
+  state: ExtraEditorState
+): { ok: false; error: string } | { ok: true; values: ExtraValuesEntry[] } {
+  const out: ExtraValuesEntry[] = [];
+  for (const f of fields) {
+    const selected = state.selections[f.id] ?? [];
+    const customVal = (state.custom[f.id] ?? '').trim();
+    let values: string[];
+    if (f.options) {
+      values = [...selected];
+      if (f.allow_custom && customVal) values.push(customVal);
+    } else {
+      values = customVal ? [customVal] : [];
+    }
+    if (values.length === 0) {
+      return { ok: false, error: `Preencha o campo obrigatório: ${f.label}` };
+    }
+    out.push({ field_id: f.id, values });
+  }
+  return { ok: true, values: out };
+}
+
+function ExtraFieldsEditor({
+  fields,
+  state,
+  onChange,
+  disabled,
+}: {
+  fields: ExtraFieldCfg[];
+  state: ExtraEditorState;
+  onChange: (next: ExtraEditorState) => void;
+  disabled?: boolean;
+}) {
+  if (fields.length === 0) return null;
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+      <p className="text-xs font-medium text-muted-foreground">Campos adicionais obrigatórios</p>
+      {fields.map((f) => {
+        const selected = state.selections[f.id] ?? [];
+        const customVal = state.custom[f.id] ?? '';
+        return (
+          <div key={f.id} className="space-y-2">
+            <Label className="text-sm font-medium">{f.label}</Label>
+            {f.options ? (
+              <>
+                <div className="space-y-1.5">
+                  {f.options.map((opt) => (
+                    <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox
+                        checked={selected.includes(opt)}
+                        disabled={disabled}
+                        onCheckedChange={() => {
+                          const cur = state.selections[f.id] ?? [];
+                          onChange({
+                            ...state,
+                            selections: {
+                              ...state.selections,
+                              [f.id]: cur.includes(opt) ? cur.filter((o) => o !== opt) : [...cur, opt],
+                            },
+                          });
+                        }}
+                      />
+                      <span>{opt}</span>
+                    </label>
+                  ))}
+                </div>
+                {f.allow_custom && (
+                  <Input
+                    placeholder="Outro (especifique)"
+                    value={customVal}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ ...state, custom: { ...state.custom, [f.id]: e.target.value } })}
+                  />
+                )}
+              </>
+            ) : (
+              <Input
+                placeholder="Digite a resposta"
+                value={customVal}
+                disabled={disabled}
+                onChange={(e) => onChange({ ...state, custom: { ...state.custom, [f.id]: e.target.value } })}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Linhas "label: valores" para exibir nas tabelas internas. */
+function extraValuesDisplay(fields: ExtraFieldCfg[], extraValues: unknown): string[] {
+  const lines: string[] = [];
+  const entries = Array.isArray(extraValues)
+    ? (extraValues.filter((e) => e && typeof e === 'object') as Record<string, unknown>[])
+    : [];
+  for (const f of fields) {
+    const entry = entries.find((e) => e.field_id === f.id);
+    const values = entry && Array.isArray(entry.values) ? (entry.values as string[]).filter((v) => typeof v === 'string' && v.trim()) : [];
+    if (values.length > 0) lines.push(`${f.label}: ${values.join(', ')}`);
+  }
+  return lines;
+}
+
+/** Valores de um campo específico (para colunas do CSV). */
+function extraFieldValuesForCsv(extraValues: unknown, fieldId: string): string {
+  const entries = Array.isArray(extraValues)
+    ? (extraValues.filter((e) => e && typeof e === 'object') as Record<string, unknown>[])
+    : [];
+  const entry = entries.find((e) => e.field_id === fieldId);
+  const values = entry && Array.isArray(entry.values) ? (entry.values as string[]).filter((v) => typeof v === 'string' && v.trim()) : [];
+  return values.join('; ');
 }
 
 interface ListData {
@@ -76,6 +232,7 @@ interface ListData {
   members: MemberRow[];
   guests: GuestRow[];
   public_entries?: PublicEntryRow[];
+  extra_fields?: ExtraFieldCfg[];
 }
 
 function formatDate(d: string) {
@@ -196,6 +353,10 @@ export default function ListaConfirmacaoPage() {
   const [publicEntryRg, setPublicEntryRg] = useState('');
   const [publicEntryUsePhone, setPublicEntryUsePhone] = useState(false);
   const [publicEntrySaving, setPublicEntrySaving] = useState(false);
+  const [leaderGuestExtras, setLeaderGuestExtras] = useState<ExtraEditorState>({ selections: {}, custom: {} });
+  const [publicEntryExtras, setPublicEntryExtras] = useState<ExtraEditorState>({ selections: {}, custom: {} });
+  const [editEntryExtras, setEditEntryExtras] = useState<ExtraEditorState>({ selections: {}, custom: {} });
+  const [extraFieldsDraft, setExtraFieldsDraft] = useState<Array<{ id?: string; label: string; mode: 'text' | 'options'; optionsText: string; allowCustom: boolean }>>([]);
   
   // Edit dialog
   const [editingEntry, setEditingEntry] = useState<PublicEntryRow | null>(null);
@@ -318,18 +479,29 @@ export default function ListaConfirmacaoPage() {
       setError('Informe nome e sobrenome do visitante.');
       return;
     }
+    const extraFields = data?.extra_fields ?? [];
+    const extras = buildExtraValuesFromState(extraFields, leaderGuestExtras);
+    if (!extras.ok) {
+      setError(extras.error);
+      return;
+    }
     setLeaderGuestSaving(true);
     setError(null);
     try {
       const res = await fetch(`/api/meetings/${meetingId}/attendance-list/guests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ first_name: fn, last_name: ln }),
+        body: JSON.stringify({
+          first_name: fn,
+          last_name: ln,
+          ...(extras.values.length > 0 ? { extra_values: extras.values } : {}),
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Erro ao adicionar visitante');
       setLeaderGuestFirst('');
       setLeaderGuestLast('');
+      setLeaderGuestExtras({ selections: {}, custom: {} });
       fetchList();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao adicionar visitante');
@@ -367,7 +539,14 @@ export default function ListaConfirmacaoPage() {
       setError('Informe o RG.');
       return;
     }
-    
+
+    const extraFields = data?.extra_fields ?? [];
+    const extras = buildExtraValuesFromState(extraFields, publicEntryExtras);
+    if (!extras.ok) {
+      setError(extras.error);
+      return;
+    }
+
     setPublicEntrySaving(true);
     setError(null);
     try {
@@ -379,6 +558,7 @@ export default function ListaConfirmacaoPage() {
           last_name: ln,
           ...(publicEntryUsePhone ? { phone: ph } : { email: em }),
           ...(requireRg ? { rg: publicEntryRg.trim() } : {}),
+          ...(extras.values.length > 0 ? { extra_values: extras.values } : {}),
         }),
       });
       const json = await res.json();
@@ -388,6 +568,7 @@ export default function ListaConfirmacaoPage() {
       setPublicEntryEmail('');
       setPublicEntryPhone('');
       setPublicEntryRg('');
+      setPublicEntryExtras({ selections: {}, custom: {} });
       fetchList();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao adicionar');
@@ -404,6 +585,9 @@ export default function ListaConfirmacaoPage() {
     setEditEntryPhone(entry.phone || '');
     setEditEntryRg(entry.rg || '');
     setEditEntryUsePhone(!!entry.phone && !entry.email);
+    setEditEntryExtras(
+      extraValuesToEditorState(data?.extra_fields ?? [], entry.extra_values)
+    );
   };
 
   const handleSaveEditEntry = async () => {
@@ -435,7 +619,14 @@ export default function ListaConfirmacaoPage() {
       setError('Informe o RG.');
       return;
     }
-    
+
+    const extraFields = data?.extra_fields ?? [];
+    const extras = buildExtraValuesFromState(extraFields, editEntryExtras);
+    if (!extras.ok) {
+      setError(extras.error);
+      return;
+    }
+
     setEditEntrySaving(true);
     setError(null);
     try {
@@ -447,6 +638,7 @@ export default function ListaConfirmacaoPage() {
           last_name: ln,
           ...(editEntryUsePhone ? { phone: ph, email: null } : { email: em, phone: null }),
           ...(requireRg ? { rg: editEntryRg.trim() } : {}),
+          ...(extraFields.length > 0 ? { extra_values: extras.values } : {}),
         }),
       });
       const json = await res.json();
@@ -502,6 +694,15 @@ export default function ListaConfirmacaoPage() {
         setMeetingListLimit(
           d.meeting.attendance_list_limit != null ? String(d.meeting.attendance_list_limit) : ''
         );
+        setExtraFieldsDraft(
+          (d.extra_fields ?? []).map((f: ExtraFieldCfg) => ({
+            id: f.id,
+            label: f.label,
+            mode: f.options && f.options.length > 0 ? 'options' as const : 'text' as const,
+            optionsText: (f.options ?? []).join('\n'),
+            allowCustom: f.allow_custom !== false,
+          }))
+        );
         const s = syncInternalStateFromMeeting(d);
         setInternalLabel(s.label);
         setInternalChecks(s.checks);
@@ -516,6 +717,23 @@ export default function ListaConfirmacaoPage() {
 
   const saveMeetingInfo = async () => {
     if (!meetingId || !data) return;
+    // Limpa rascunhos vazios e valida os campos adicionais antes de enviar
+    const cleanedExtraFields = extraFieldsDraft
+      .map((f) => ({
+        ...(f.id ? { id: f.id } : {}),
+        label: f.label.trim(),
+        mode: f.mode,
+        optionsText: f.optionsText,
+        allowCustom: f.allowCustom,
+      }))
+      .filter((f) => f.label || (f.mode === 'options' && f.optionsText.split('\n').some((l) => l.trim())));
+    for (const f of cleanedExtraFields) {
+      if (!f.label) { setError('Informe o título de cada campo adicional.'); return; }
+      if (f.mode === 'options' && !f.optionsText.split('\n').some((l) => l.trim())) {
+        setError(`Informe ao menos uma opção para o campo "${f.label}".`);
+        return;
+      }
+    }
     setMeetingInfoSaving(true);
     setMeetingInfoSaved(false);
     setError(null);
@@ -529,6 +747,12 @@ export default function ListaConfirmacaoPage() {
           notes: meetingNotes.trim() || null,
           attendance_list_require_rg: data.meeting.attendance_list_mode === 'open' ? meetingListRequireRg : false,
           attendance_list_limit: meetingListLimit.trim() ? Number(meetingListLimit) : null,
+          attendance_list_extra_fields: cleanedExtraFields.map((f) => ({
+            ...(f.id ? { id: f.id } : {}),
+            label: f.label,
+            options: f.mode === 'options' ? f.optionsText.split('\n').map((l) => l.trim()).filter(Boolean) : null,
+            allow_custom: f.mode === 'options' ? f.allowCustom : true,
+          })),
         }),
       });
       const json = await res.json();
@@ -662,6 +886,7 @@ export default function ListaConfirmacaoPage() {
 
   const { meeting, members, guests } = data;
   const publicEntries = data.public_entries ?? [];
+  const listExtraFields = data.extra_fields ?? [];
 
   // Se modo é "open" (lista vazia) E checklist interno habilitado:
   // mostrar APENAS public_entries na checklist (não membros/guests)
@@ -690,22 +915,33 @@ export default function ListaConfirmacaoPage() {
 
   const exportAttendanceCSV = () => {
     const includeRg = meeting.attendance_list_require_rg ?? false;
-    const headers = includeRg ? ['Nome', 'Resposta', 'Contato', 'RG'] : ['Nome', 'Resposta', 'Contato'];
+    const extraFields = data?.extra_fields ?? [];
+    const extraHeaders = extraFields.map((f) => f.label);
+    const headers = [
+      'Nome',
+      'Resposta',
+      'Contato',
+      ...(includeRg ? ['RG'] : []),
+      ...extraHeaders,
+    ];
     const memberRows = members.map((m) => [
       m.full_name,
       m.response?.status === 'present' ? 'Presente' : m.response?.status === 'absent' ? 'Ausente' : '—',
       contactDisplay(m.response),
+      ...extraFields.map((f) => extraFieldValuesForCsv(m.response?.extra_values, f.id)),
     ]);
     const guestRows = guests.map((g) => [
       `${g.full_name} (visitante)`,
       '—',
       guestRegisteredBy(g),
+      ...extraFields.map((f) => extraFieldValuesForCsv(g.extra_values, f.id)),
     ]);
     const publicRows = publicEntries.map((e) => [
       `${e.full_name} (lista vazia)`,
       'Presente',
       publicEntryContactDisplay(e),
       ...(includeRg ? [e.rg || '—'] : []),
+      ...extraFields.map((f) => extraFieldValuesForCsv(e.extra_values, f.id)),
     ]);
     const csvContent = [headers, ...memberRows, ...guestRows, ...publicRows]
       .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
@@ -826,6 +1062,103 @@ export default function ListaConfirmacaoPage() {
               </div>
             )}
           </div>
+          <div className="space-y-3 pt-2 border-t">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-sm font-medium">Campos adicionais obrigatórios</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={meetingInfoSaving}
+                onClick={() =>
+                  setExtraFieldsDraft((prev) => [...prev, { label: '', mode: 'text', optionsText: '', allowCustom: true }])
+                }
+              >
+                + Adicionar campo
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Exigidos de quem confirmar pelo link público (seleção múltipla nas opções, com opção de resposta própria)
+              e também no cadastro de visitantes e registros manuais. Remover um campo não apaga respostas antigas.
+            </p>
+            {extraFieldsDraft.map((f, idx) => (
+              <div key={f.id ?? `new-${idx}`} className="space-y-2 rounded-md border bg-muted/20 p-3">
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Label htmlFor={`cfg-extra-label-${idx}`}>Título do campo</Label>
+                    <Input
+                      id={`cfg-extra-label-${idx}`}
+                      placeholder="Ex: O que você vai levar?"
+                      value={f.label}
+                      disabled={meetingInfoSaving}
+                      onChange={(e) =>
+                        setExtraFieldsDraft((prev) => prev.map((p, i) => (i === idx ? { ...p, label: e.target.value } : p)))
+                      }
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 text-muted-foreground hover:text-destructive"
+                    disabled={meetingInfoSaving}
+                    onClick={() => setExtraFieldsDraft((prev) => prev.filter((_, i) => i !== idx))}
+                    title="Remover campo"
+                  >
+                    Remover
+                  </Button>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor={`cfg-extra-mode-${idx}`}>Tipo de resposta</Label>
+                  <select
+                    id={`cfg-extra-mode-${idx}`}
+                    value={f.mode}
+                    disabled={meetingInfoSaving}
+                    onChange={(e) =>
+                      setExtraFieldsDraft((prev) =>
+                        prev.map((p, i) => (i === idx ? { ...p, mode: e.target.value as 'text' | 'options' } : p))
+                      )
+                    }
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="text">Resposta livre (texto)</option>
+                    <option value="options">Lista de opções (seleção múltipla)</option>
+                  </select>
+                </div>
+                {f.mode === 'options' && (
+                  <>
+                    <div className="space-y-1">
+                      <Label htmlFor={`cfg-extra-options-${idx}`}>Opções (uma por linha)</Label>
+                      <textarea
+                        id={`cfg-extra-options-${idx}`}
+                        rows={4}
+                        placeholder={'Pão de queijo\nPatê com torradas\nFrutas\nSalada...'}
+                        value={f.optionsText}
+                        disabled={meetingInfoSaving}
+                        onChange={(e) =>
+                          setExtraFieldsDraft((prev) => prev.map((p, i) => (i === idx ? { ...p, optionsText: e.target.value } : p)))
+                        }
+                        className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`cfg-extra-allow-custom-${idx}`}
+                        checked={f.allowCustom}
+                        disabled={meetingInfoSaving}
+                        onCheckedChange={(c) =>
+                          setExtraFieldsDraft((prev) => prev.map((p, i) => (i === idx ? { ...p, allowCustom: c === true } : p)))
+                        }
+                      />
+                      <Label htmlFor={`cfg-extra-allow-custom-${idx}`} className="text-sm font-normal cursor-pointer">
+                        Permitir também resposta própria (outro)
+                      </Label>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
           <div className="flex items-center gap-3">
             <Button
               type="button"
@@ -861,6 +1194,9 @@ export default function ListaConfirmacaoPage() {
                 <th className="text-left p-3 font-medium">Nome</th>
                 <th className="text-left p-3 font-medium">Resposta</th>
                 <th className="text-left p-3 font-medium">E-mail / Telefone</th>
+                {listExtraFields.length > 0 && (
+                  <th className="text-left p-3 font-medium">Campos adicionais</th>
+                )}
                 <th className="text-left p-3 font-medium">Ações</th>
               </tr>
             </thead>
@@ -891,6 +1227,21 @@ export default function ListaConfirmacaoPage() {
                       )}
                     </td>
                     <td className="p-3 font-mono text-xs">{contactDisplay(m.response)}</td>
+                    {listExtraFields.length > 0 && (
+                      <td className="p-3 text-xs">
+                        {(() => {
+                          const lines = extraValuesDisplay(listExtraFields, m.response?.extra_values);
+                          if (lines.length === 0) return <span className="text-muted-foreground">—</span>;
+                          return (
+                            <div className="space-y-0.5">
+                              {lines.map((l) => (
+                                <p key={l}>{l}</p>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                    )}
                     <td className="p-3">
                       <div className="flex flex-wrap items-center gap-1">
                         <Button
@@ -980,6 +1331,12 @@ export default function ListaConfirmacaoPage() {
               {leaderGuestSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Adicionar'}
             </Button>
           </div>
+          <ExtraFieldsEditor
+            fields={listExtraFields}
+            state={leaderGuestExtras}
+            onChange={setLeaderGuestExtras}
+            disabled={leaderGuestSaving}
+          />
         </div>
         <div className="overflow-x-auto">
           {guests.length === 0 ? (
@@ -990,6 +1347,9 @@ export default function ListaConfirmacaoPage() {
                 <tr className="border-b bg-muted/30">
                   <th className="text-left p-3 font-medium">Visitante</th>
                   <th className="text-left p-3 font-medium">Cadastrado por</th>
+                  {listExtraFields.length > 0 && (
+                    <th className="text-left p-3 font-medium">Campos adicionais</th>
+                  )}
                   <th className="text-left p-3 font-medium">Ações</th>
                 </tr>
               </thead>
@@ -1000,6 +1360,21 @@ export default function ListaConfirmacaoPage() {
                     <tr key={g.id} className="border-b last:border-0">
                       <td className="p-3">{g.full_name}</td>
                       <td className="p-3 font-mono text-xs">{guestRegisteredBy(g)}</td>
+                      {listExtraFields.length > 0 && (
+                        <td className="p-3 text-xs">
+                          {(() => {
+                            const lines = extraValuesDisplay(listExtraFields, g.extra_values);
+                            if (lines.length === 0) return <span className="text-muted-foreground">—</span>;
+                            return (
+                              <div className="space-y-0.5">
+                                {lines.map((l) => (
+                                  <p key={l}>{l}</p>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                      )}
                       <td className="p-3">
                         <Button
                           variant="ghost"
@@ -1109,6 +1484,13 @@ export default function ListaConfirmacaoPage() {
             </div>
           )}
           
+          <ExtraFieldsEditor
+            fields={listExtraFields}
+            state={publicEntryExtras}
+            onChange={setPublicEntryExtras}
+            disabled={publicEntrySaving}
+          />
+
           <Button
             type="button"
             onClick={() => void handleAddPublicEntry()}
@@ -1132,6 +1514,9 @@ export default function ListaConfirmacaoPage() {
                   {meeting.attendance_list_require_rg && (
                     <th className="text-left p-3 font-medium">RG</th>
                   )}
+                  {listExtraFields.length > 0 && (
+                    <th className="text-left p-3 font-medium">Campos adicionais</th>
+                  )}
                   <th className="text-left p-3 font-medium">Quando</th>
                   <th className="text-left p-3 font-medium">Ações</th>
                 </tr>
@@ -1145,6 +1530,21 @@ export default function ListaConfirmacaoPage() {
                       <td className="p-3 font-mono text-xs">{publicEntryContactDisplay(e)}</td>
                       {meeting.attendance_list_require_rg && (
                         <td className="p-3 font-mono text-xs">{e.rg || '—'}</td>
+                      )}
+                      {listExtraFields.length > 0 && (
+                        <td className="p-3 text-xs">
+                          {(() => {
+                            const lines = extraValuesDisplay(listExtraFields, e.extra_values);
+                            if (lines.length === 0) return <span className="text-muted-foreground">—</span>;
+                            return (
+                              <div className="space-y-0.5">
+                                {lines.map((l) => (
+                                  <p key={l}>{l}</p>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </td>
                       )}
                       <td className="p-3 text-xs text-muted-foreground">
                         {new Date(e.created_at).toLocaleString('pt-BR')}
@@ -1269,6 +1669,12 @@ export default function ListaConfirmacaoPage() {
                 />
               </div>
             )}
+            <ExtraFieldsEditor
+              fields={listExtraFields}
+              state={editEntryExtras}
+              onChange={setEditEntryExtras}
+              disabled={editEntrySaving}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingEntry(null)} disabled={editEntrySaving}>

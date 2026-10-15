@@ -1,4 +1,10 @@
 import { query, queryOne } from '@/lib/db/postgres';
+import {
+  getMeetingExtraFields,
+  normalizeExtraValues,
+  type AttendanceExtraFieldConfig,
+  type ExtraValuesEntry,
+} from '@/lib/attendance-list-extra';
 
 export type AttendanceListMode = 'prefilled' | 'open';
 
@@ -18,6 +24,7 @@ export type PublicAttendanceListMeeting = {
 
 export type PublicAttendanceListPayload = {
   meeting: PublicAttendanceListMeeting;
+  extra_fields: AttendanceExtraFieldConfig[];
   count_confirmed: number;
   count_guests: number;
   is_expired: boolean;
@@ -105,6 +112,7 @@ export async function getPublicAttendanceList(identifier: string): Promise<Publi
   const mode = meeting.attendance_list_mode ?? 'prefilled';
   const expired = isMeetingExpired(meeting.attendance_list_deadline);
   const countConfirmed = await getAttendanceConfirmedCount(meeting.id, mode);
+  const extraFields = await getMeetingExtraFields(meeting.id);
 
   const meetingPayload: PublicAttendanceListMeeting = {
     id: meeting.id,
@@ -127,6 +135,7 @@ export async function getPublicAttendanceList(identifier: string): Promise<Publi
 
   return {
     meeting: meetingPayload,
+    extra_fields: extraFields,
     count_confirmed: countConfirmed,
     count_guests: parseInt(guestsRow?.c ?? '0', 10),
     is_expired: expired,
@@ -139,6 +148,7 @@ export async function publicConfirmPrefilledByPhoneOrEmail(args: {
   identifier: string;
   phone?: string;
   email?: string;
+  extra_values?: unknown;
 }) {
   const meeting = await getMeetingBySlugOrToken(args.identifier);
   if (!meeting) return { error: 'Lista não encontrada ou indisponível', status: 404 };
@@ -150,6 +160,14 @@ export async function publicConfirmPrefilledByPhoneOrEmail(args: {
 
   if (isMeetingExpired(meeting.attendance_list_deadline)) {
     return { error: 'O prazo para confirmação deste encontro já foi encerrado.', status: 400 };
+  }
+
+  const extraFields = await getMeetingExtraFields(meeting.id);
+  let extraValues: ExtraValuesEntry[] = [];
+  if (extraFields.length > 0) {
+    const extraRes = normalizeExtraValues(extraFields, args.extra_values);
+    if (!extraRes.ok) return { error: extraRes.error, status: 400 };
+    extraValues = extraRes.values;
   }
 
   const phoneVal = typeof args.phone === 'string' ? args.phone.replace(/\D/g, '').trim() : '';
@@ -190,10 +208,10 @@ export async function publicConfirmPrefilledByPhoneOrEmail(args: {
   }
 
   await query(
-    `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email, phone)
-     VALUES ($1, $2, 'present', $3, $4)
-     ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = 'present', email = $3, phone = $4`,
-    [meeting.id, member.id, hasEmail ? emailVal : null, hasPhone ? phoneVal : null]
+    `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email, phone, extra_values)
+     VALUES ($1, $2, 'present', $3, $4, $5::jsonb)
+     ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = 'present', email = $3, phone = $4, extra_values = $5::jsonb`,
+    [meeting.id, member.id, hasEmail ? emailVal : null, hasPhone ? phoneVal : null, JSON.stringify(extraValues)]
   );
 
   return { ok: true, status: 200 };
@@ -206,6 +224,7 @@ export async function publicCreateOpenEntry(args: {
   email?: string;
   phone?: string;
   rg?: string;
+  extra_values?: unknown;
 }) {
   const meeting = await getMeetingBySlugOrToken(args.identifier);
   if (!meeting) return { error: 'Lista não encontrada ou indisponível', status: 404 };
@@ -217,6 +236,14 @@ export async function publicCreateOpenEntry(args: {
 
   if (isMeetingExpired(meeting.attendance_list_deadline)) {
     return { error: 'O prazo para confirmação deste encontro já foi encerrado.', status: 400 };
+  }
+
+  const extraFields = await getMeetingExtraFields(meeting.id);
+  let extraValues: ExtraValuesEntry[] = [];
+  if (extraFields.length > 0) {
+    const extraRes = normalizeExtraValues(extraFields, args.extra_values);
+    if (!extraRes.ok) return { error: extraRes.error, status: 400 };
+    extraValues = extraRes.values;
   }
 
   const count = await getAttendanceConfirmedCount(meeting.id, mode);
@@ -243,8 +270,8 @@ export async function publicCreateOpenEntry(args: {
   }
 
   await query(
-    `INSERT INTO attendance_list_public_entries (meeting_id, first_name, last_name, email, phone, rg)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+    `INSERT INTO attendance_list_public_entries (meeting_id, first_name, last_name, email, phone, rg, extra_values)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
     [
       meeting.id,
       firstName,
@@ -252,6 +279,7 @@ export async function publicCreateOpenEntry(args: {
       hasEmail ? emailVal : null,
       hasPhone ? phoneVal : null,
       meeting.attendance_list_require_rg ? rgVal : null,
+      JSON.stringify(extraValues),
     ]
   );
 

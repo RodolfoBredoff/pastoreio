@@ -4,6 +4,7 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { normalizeInternalChecks } from '@/lib/attendance-list-internal';
+import { getMeetingExtraFields } from '@/lib/attendance-list-extra';
 
 type AuthError = { message: string; status: number };
 type MeetingAuth =
@@ -112,14 +113,15 @@ export async function GET(
       status: string;
       email: string | null;
       phone: string | null;
+      extra_values: unknown;
     }>(
-      `SELECT member_id, status, email, phone FROM attendance_list_responses WHERE meeting_id = $1`,
+      `SELECT member_id, status, email, phone, extra_values FROM attendance_list_responses WHERE meeting_id = $1`,
       [meetingId]
     ).catch(() => []);
 
-    const responseMap: Record<string, { status: string; email: string | null; phone: string | null }> = {};
+    const responseMap: Record<string, { status: string; email: string | null; phone: string | null; extra_values: unknown }> = {};
     for (const r of responses) {
-      responseMap[r.member_id] = { status: r.status, email: r.email, phone: r.phone };
+      responseMap[r.member_id] = { status: r.status, email: r.email, phone: r.phone, extra_values: r.extra_values ?? [] };
     }
 
     const guests = await queryMany<{
@@ -129,9 +131,10 @@ export async function GET(
       registered_by_email: string | null;
       registered_by_phone: string | null;
       registered_by_leader: boolean;
+      extra_values: unknown;
     }>(
       `SELECT id, first_name, last_name, registered_by_email, registered_by_phone,
-              COALESCE(registered_by_leader, FALSE) AS registered_by_leader
+              COALESCE(registered_by_leader, FALSE) AS registered_by_leader, extra_values
        FROM attendance_list_guests WHERE meeting_id = $1 ORDER BY created_at ASC`,
       [meetingId]
     ).catch(() => []);
@@ -144,8 +147,9 @@ export async function GET(
       phone: string | null;
       rg: string | null;
       created_at: string;
+      extra_values: unknown;
     }>(
-      `SELECT id, first_name, last_name, email, phone, rg, created_at
+      `SELECT id, first_name, last_name, email, phone, rg, created_at, extra_values
        FROM attendance_list_public_entries
        WHERE meeting_id = $1
        ORDER BY created_at ASC`,
@@ -153,6 +157,7 @@ export async function GET(
     ).catch(() => []);
 
     const checksNorm = normalizeInternalChecks(meetingRow.attendance_list_internal_checks);
+    const extraFields = await getMeetingExtraFields(meetingId);
 
     return NextResponse.json({
       meeting: {
@@ -186,6 +191,7 @@ export async function GET(
         registered_by_email: g.registered_by_email,
         registered_by_phone: g.registered_by_phone,
         registered_by_leader: g.registered_by_leader,
+        extra_values: g.extra_values ?? [],
       })),
       public_entries: publicEntries.map((e) => ({
         id: e.id,
@@ -196,7 +202,9 @@ export async function GET(
         phone: e.phone,
         rg: e.rg,
         created_at: e.created_at,
+        extra_values: e.extra_values ?? [],
       })),
+      extra_fields: extraFields,
     });
   } catch (error) {
     console.error('Erro ao buscar lista de confirmação:', error);

@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
+import { normalizeExtraFieldConfigs } from '@/lib/attendance-list-extra';
 
 function slugify(input: string): string {
   return input
@@ -87,6 +88,7 @@ export async function POST(request: Request) {
       attendance_list_slug,
       attendance_list_require_rg,
       attendance_list_limit,
+      attendance_list_extra_fields,
     } = data as {
       meeting_date: string;
       meeting_time?: string | null;
@@ -100,6 +102,7 @@ export async function POST(request: Request) {
       attendance_list_slug?: string | null;
       attendance_list_require_rg?: boolean;
       attendance_list_limit?: number | null;
+      attendance_list_extra_fields?: unknown;
     };
 
     if (!meeting_date) {
@@ -154,6 +157,16 @@ export async function POST(request: Request) {
       attendanceListSlug = `${candidateBase}-${shortId()}`.replace(/-+/g, '-');
     }
 
+    // Campos adicionais obrigatórios (somente quando a lista pública é gerada)
+    let extraFieldConfigs: Awaited<ReturnType<typeof normalizeExtraFieldConfigs>> | null = null;
+    if (withList && attendance_list_extra_fields != null) {
+      const res = normalizeExtraFieldConfigs(attendance_list_extra_fields);
+      if (!res.ok) {
+        return NextResponse.json({ error: res.error }, { status: 400 });
+      }
+      extraFieldConfigs = res;
+    }
+
     const result = await query(
       `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token, attendance_list_deadline, attendance_list_slug, attendance_list_mode, attendance_list_require_rg, attendance_list_limit)
        VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11, $12, $13)
@@ -184,6 +197,26 @@ export async function POST(request: Request) {
     }
 
     const row = result.rows[0] as Record<string, unknown>;
+
+    // Persiste os campos adicionais configurados (se houver)
+    if (withList && extraFieldConfigs && extraFieldConfigs.fields.length > 0) {
+      const meetingId = String(row.id);
+      for (let i = 0; i < extraFieldConfigs.fields.length; i++) {
+        const f = extraFieldConfigs.fields[i];
+        await query(
+          `INSERT INTO attendance_list_extra_fields (meeting_id, label, options, allow_custom, position)
+           VALUES ($1, $2, $3::jsonb, $4, $5)`,
+          [
+            meetingId,
+            f.label,
+            f.options ? JSON.stringify(f.options) : null,
+            f.allow_custom,
+            i,
+          ]
+        );
+      }
+    }
+
     return NextResponse.json(row, { status: 201 });
   } catch (error) {
     console.error('Erro ao criar encontro:', error);
