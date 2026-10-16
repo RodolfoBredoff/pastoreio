@@ -27,10 +27,8 @@ import {
   PeriodSelector,
 } from '@/components/dashboard/engagement-filter-controls';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
-import { AtRiskMembersCard } from '@/components/dashboard/at-risk-members-card';
-import { FrequencyDistributionCard } from '@/components/dashboard/frequency-distribution-card';
-import { VisitorFunnelCard } from '@/components/dashboard/visitor-funnel-card';
-import { RetentionMetricsCard } from '@/components/dashboard/retention-metrics-card';
+import { EngagementGrowth } from '@/components/dashboard/engagement-growth';
+import Link from 'next/link';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -256,79 +254,6 @@ function StatsCards({
           <p className="text-xs text-muted-foreground mt-1">registros de falta</p>
         </CardContent>
       </Card>
-    </div>
-  );
-}
-
-function MemberRankings({ topPresent, topAbsent, perfectAttendance }: {
-  topPresent: MemberStat[]; topAbsent: MemberStat[]; perfectAttendance: string[];
-}) {
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <TrendingUp className="h-5 w-5 text-green-600" />Top 5 Mais Presentes
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {topPresent.length > 0 ? topPresent.map((m, i) => (
-                <div key={i} className="flex items-center justify-between p-2 rounded-lg border">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex items-center justify-center w-7 h-7 rounded-full bg-green-100 text-green-700 font-bold text-sm shrink-0">{i + 1}</div>
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm truncate">{m.name}</p>
-                      <p className="text-xs text-muted-foreground">{m.presences} presença{m.presences !== 1 ? 's' : ''}</p>
-                    </div>
-                  </div>
-                  <Badge className="bg-green-600 shrink-0">{m.taxa}%</Badge>
-                </div>
-              )) : <p className="text-sm text-muted-foreground">Sem dados suficientes</p>}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <TrendingDown className="h-5 w-5 text-red-600" />Top 5 Mais Ausentes
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {topAbsent.length > 0 ? topAbsent.map((m, i) => (
-                <div key={i} className="flex items-center justify-between p-2 rounded-lg border">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex items-center justify-center w-7 h-7 rounded-full bg-red-100 text-red-700 font-bold text-sm shrink-0">{i + 1}</div>
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm truncate">{m.name}</p>
-                      <p className="text-xs text-muted-foreground">{m.absences} falta{m.absences !== 1 ? 's' : ''}</p>
-                    </div>
-                  </div>
-                  <Badge variant="destructive" className="shrink-0">{m.taxa}%</Badge>
-                </div>
-              )) : <p className="text-sm text-muted-foreground">Sem dados suficientes</p>}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-      {perfectAttendance.length > 0 && (
-        <Card className="border-yellow-200 bg-yellow-50">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-yellow-800">
-              <Award className="h-5 w-5" />Membros Destaque (100% de Presença)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {perfectAttendance.map((name, i) => (
-                <Badge key={i} variant="secondary" className="bg-yellow-200 text-yellow-800">{name}</Badge>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
@@ -1481,8 +1406,6 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
       : presenceFilter === 'present'
         ? memberStats.filter((m) => m.presences > 0)
         : memberStats;
-  const topPresent = [...filteredMemberStats].filter((m) => m.presences + m.absences > 0).sort((a, b) => b.presences - a.presences).slice(0, 5);
-  const topAbsent = [...filteredMemberStats].filter((m) => m.absences > 0).sort((a, b) => b.absences - a.absences).slice(0, 5);
   const perfectAttendance = filteredMemberStats.filter((m) => m.presences > 0 && m.absences === 0).map((m) => m.name);
 
   const handlePeriodClick = (periodData: PeriodDataPoint) => {
@@ -1501,15 +1424,25 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
             <h1 className="text-2xl sm:text-3xl font-bold">Engajamento</h1>
             <p className="text-muted-foreground mt-1 text-sm">Análise de presença por período ou encontro</p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0 gap-2 print:hidden"
-            onClick={() => window.print()}
-          >
-            <Printer className="h-4 w-4" />
-            <span className="hidden sm:inline">Exportar PDF</span>
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            {!publicToken && (
+              <Button variant="outline" size="sm" className="gap-2 print:hidden" asChild>
+                <Link href="/engajamento/analises">
+                  <List className="h-4 w-4" />
+                  <span className="hidden sm:inline">Análises avançadas</span>
+                </Link>
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-2 print:hidden"
+              onClick={() => window.print()}
+            >
+              <Printer className="h-4 w-4" />
+              <span className="hidden sm:inline">Exportar PDF</span>
+            </Button>
+          </div>
         </div>
         <PeriodSelector
           selected={view}
@@ -1570,6 +1503,8 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
 
       <DataInterpretationGuide />
 
+      <EngagementGrowth apiSuffix={apiSuffix} />
+
       {view === 'title_group' ? (
         <>
           <TitleGroupView apiSuffix={apiSuffix} memberFilter={memberFilter} presenceFilter={presenceFilter} refreshKey={refreshNonce} />
@@ -1598,17 +1533,6 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
             memberStats={filteredMemberStats}
             presenceFilter={presenceFilter}
           />
-          
-          {/* Novos cards de métricas avançadas */}
-          <div className="grid gap-6 md:grid-cols-2">
-            <AtRiskMembersCard memberFilter={memberFilter} periodDays={90} />
-            <FrequencyDistributionCard memberFilter={memberFilter} periodDays={90} />
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            <VisitorFunnelCard periodDays={180} />
-            <RetentionMetricsCard memberFilter={memberFilter} />
-          </div>
 
           <PeriodSummaryBreakdown
             summary={summary}
@@ -1624,7 +1548,6 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
             onPeriodClick={handlePeriodClick}
             presenceFilter={presenceFilter}
           />
-          <MemberRankings topPresent={topPresent} topAbsent={topAbsent} perfectAttendance={perfectAttendance} />
           <MemberPresenceAbsenceDistribution stats={filteredMemberStats} groupId={groupId} />
           <DiscipleshipCard apiSuffix={apiSuffix} />
           <PeriodDetailDialog
