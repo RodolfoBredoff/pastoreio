@@ -108,8 +108,8 @@ export async function GET(request: Request) {
            AND ${MEETING_VISIBILITY}`,
         [groupId]
       ),
-      queryMany<{ created_at: string }>(
-        `SELECT created_at::text as created_at FROM guest_visitors WHERE group_id = $1`,
+      queryMany<{ id: string; created_at: string; full_name: string }>(
+        `SELECT id, created_at::text as created_at, full_name FROM guest_visitors WHERE group_id = $1`,
         [groupId]
       ),
       queryMany<{ member_id: string; tag_key: string; tag_value: string }>(
@@ -138,6 +138,7 @@ export async function GET(request: Request) {
       guestRows,
       visitorCount: visitorRows.length,
       guestCreatedAts: visitorRows.map((r) => r.created_at),
+      guestNames: visitorRows.map((r) => ({ id: r.id, full_name: r.full_name, created_at: r.created_at })),
       tagRows,
       meetingsInWindow: windowMeetings,
     });

@@ -37,6 +37,7 @@ const members: GrowthMemberRow[] = [
   { id: 'C', member_type: 'participant', integration_stage: 'novo_visitante', is_active: true, created_at: `${M(3, 1)}T10:00:00Z`, full_name: 'Caio' },
   { id: 'D', member_type: 'participant', integration_stage: 'novo_visitante', is_active: false, created_at: `${M(3, 2)}T10:00:00Z`, full_name: 'Duda' },
   { id: 'E', member_type: 'participant', integration_stage: 'membro', is_active: true, created_at: `${M(0, 3)}T10:00:00Z`, full_name: 'Eva' },
+  { id: 'F', member_type: 'visitor', integration_stage: 'retornou', is_active: true, created_at: `${M(8, 12)}T10:00:00Z`, full_name: 'Felipe' },
 ];
 
 const meetings: GrowthMeetingRow[] = [
@@ -57,6 +58,9 @@ const attendance: GrowthAttendanceRow[] = [
   // B: presente em m1, falta em m2 (primeira presença dentro da janela)
   { member_id: 'B', meeting_id: 'm1', is_present: true, meeting_date: M(1, 5) },
   { member_id: 'B', meeting_id: 'm2', is_present: false, meeting_date: M(0, 10) },
+  // F: visitante registrado (member_type=visitor) que voltou — 2 presenças
+  { member_id: 'F', meeting_id: 'm1', is_present: true, meeting_date: M(1, 5) },
+  { member_id: 'F', meeting_id: 'm2', is_present: true, meeting_date: M(0, 10) },
 ];
 
 const guests: GrowthGuestRow[] = [
@@ -75,6 +79,10 @@ const baseInput = {
   guestRows: guests,
   visitorCount: 2,
   guestCreatedAts: [`${M(1, 6)}T10:00:00Z`, `${M(1, 6)}T10:00:00Z`],
+  guestNames: [
+    { id: 'v1', full_name: 'Visitante 1', created_at: `${M(1, 6)}T10:00:00Z` },
+    { id: 'v2', full_name: 'Visitante 2', created_at: `${M(1, 6)}T10:00:00Z` },
+  ],
   tagRows: tags,
   meetingsInWindow: meetings,
 };
@@ -82,24 +90,24 @@ const baseInput = {
 // ── Sem filtro de tags ──
 const r1 = computeGrowthMetrics(baseInput);
 
-check('totals.peopleEver', r1.totals.peopleEver, 7);
+check('totals.peopleEver', r1.totals.peopleEver, 8);
 check('totals.uniqueVisitorsEver', r1.totals.uniqueVisitorsEver, 2);
-check('totals.membersAll', r1.totals.membersAll, 5);
+check('totals.membersAll', r1.totals.membersAll, 6);
 check('totals.membersActive', r1.totals.membersActive, 4);
 check('totals.convertedTotal', r1.totals.convertedTotal, 1);
-check('totals.attendedEver', r1.totals.attendedEver, 4);
-check('totals.newInWindow', r1.totals.newInWindow, 3);
+check('totals.attendedEver', r1.totals.attendedEver, 5);
+check('totals.newInWindow', r1.totals.newInWindow, 4);
 check('totals.returnedInWindow', r1.totals.returnedInWindow, 1);
 check('totals.conversionsInWindow', r1.totals.conversionsInWindow, 1);
 
 const byId = new Map(r1.perMeeting.map((p) => [p.meeting_id, p]));
 const m1 = byId.get('m1')!;
 const m2 = byId.get('m2')!;
-check('m1.totalPresent', m1.totalPresent, 4);
-check('m1.newPeople', m1.newPeople, 3);
-check('m1.newMembers', m1.newMembers, 1);
+check('m1.totalPresent', m1.totalPresent, 5);
+check('m1.newPeople', m1.newPeople, 4);
+check('m1.newMembers', m1.newMembers, 2);
 check('m1.newGuests', m1.newGuests, 2);
-check('m2.totalPresent', m2.totalPresent, 2);
+check('m2.totalPresent', m2.totalPresent, 3);
 check('m2.newPeople', m2.newPeople, 0);
 
 const curMonth = r1.months[r1.months.length - 1];
@@ -107,12 +115,13 @@ const prevMonth = r1.months[r1.months.length - 2];
 check('mes atual newPeople', curMonth.newPeople, 0);
 check('mes atual returnedVisitors', curMonth.returnedVisitors, 1);
 check('mes atual conversions', curMonth.conversions, 1);
-check('mes anterior newPeople', prevMonth.newPeople, 3);
+check('mes anterior newPeople', prevMonth.newPeople, 4);
 check('mes anterior newGuests', prevMonth.newGuests, 2);
+check('mes anterior newMembers', prevMonth.newMembers, 2);
 
-check('growthTrend.recentAvg', r1.growthTrend.recentAvg, 2.3);
+check('growthTrend.recentAvg', r1.growthTrend.recentAvg, 3);
 check('growthTrend.prevAvg', r1.growthTrend.prevAvg, 1);
-check('growthTrend.delta', r1.growthTrend.delta, 1.3);
+check('growthTrend.delta', r1.growthTrend.delta, 2);
 
 check('frequencia.totalMeetings', r1.memberFrequency?.totalMeetings, 6);
 check('frequencia.considered', r1.memberFrequency?.consideredMembers, 4);
@@ -126,11 +135,22 @@ check('retorno.returned', r1.newVisitorReturn.returned, 1);
 check('retorno.newVisitors', r1.newVisitorReturn.newVisitors, 2);
 
 const lastCumulative = r1.cumulativeByMonth[r1.cumulativeByMonth.length - 1];
-check('acumulado final = peopleEver', lastCumulative.total, 7);
+check('acumulado final = peopleEver', lastCumulative.total, 8);
 const firstCumulative = r1.cumulativeByMonth[0];
-check('acumulado inicial', firstCumulative.total, 1);
+check('acumulado inicial', firstCumulative.total, 2);
 
 check('availableTags', r1.availableTags, [{ key: 'célula', values: ['joão'] }]);
+
+// ── Listas dos cartões clicáveis ──
+check('lists.peopleEver tam', r1.lists.peopleEver.length, 8);
+check('lists.peopleEver primeiro', r1.lists.peopleEver[0], { name: 'Ana', kind: 'Membro', active: true });
+check('lists.visitors tam', r1.lists.visitors.length, 2);
+check('lists.visitors v2', r1.lists.visitors.find((v) => v.name === 'Visitante 2')?.presences, 2);
+check('lists.membersActive', r1.lists.membersActive, ['Ana', 'Bia', 'Caio', 'Eva']);
+check('lists.pathToMember tam', r1.lists.pathToMember.length, 2);
+check('lists.pathToMember[0]', r1.lists.pathToMember[0], { name: 'Felipe', kind: 'Voltou', presences: 2 });
+check('lists.pathToMember inclui membro', r1.lists.pathToMember.some((p) => p.name === 'Eva' && p.kind === 'Membro'), true);
+check('lists.newInWindow tam', r1.lists.newInWindow.length, 4);
 
 // ── Com filtro de tags (só B) ──
 const r2 = computeGrowthMetrics({ ...baseInput, tags: { 'célula': ['joão'] } });
@@ -142,7 +162,18 @@ check('filtro: attendedEver', r2.totals.attendedEver, 3);
 check('filtro: frequencia.considered', r2.memberFrequency?.consideredMembers, 1);
 check('filtro: frequencia.afastado', r2.memberFrequency?.buckets.find((b) => b.key === 'afastado')?.count, 1);
 check('filtro: mes anterior newMembers', r2.months[r2.months.length - 2].newMembers, 1);
-check('filtro: acumulado inalterado', r2.cumulativeByMonth[r2.cumulativeByMonth.length - 1].total, 7);
+check('filtro: acumulado inalterado', r2.cumulativeByMonth[r2.cumulativeByMonth.length - 1].total, 8);
+check('filtro: lists.membersActive', r2.lists.membersActive, ['Bia']);
+check('filtro: lists.pathToMember vazio', r2.lists.pathToMember.length, 0);
+check('filtro: lists.newInWindow (visitantes sempre)', r2.lists.newInWindow.length, 3);
+
+// ── Janela de 3 meses (mecânica do filtro de janela) ──
+const r4 = computeGrowthMetrics({ ...baseInput, windowMonths: 3 });
+check('janela3: perMeeting tam', r4.perMeeting.length, 3);
+check('janela3: months tam', r4.months.length, 3);
+check('janela3: months[0] = cur-2', r4.months[0].month, monthKeyOf(2));
+check('janela3: newInWindow', r4.totals.newInWindow, 4);
+check('janela3: trend delta nulo (<6 encontros)', r4.growthTrend.delta, null);
 
 // ── Janela com poucos encontros: trend nulo ──
 const r3 = computeGrowthMetrics({ ...baseInput, meetingsInWindow: meetings.slice(0, 2) });

@@ -18,6 +18,7 @@ import { Bar, Line } from 'react-chartjs-2';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { Loader2, Users, UserPlus, UserCheck, TrendingUp, TrendingDown, Repeat, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 
@@ -86,7 +87,16 @@ interface GrowthData {
   cumulativeByMonth: { month: string; label: string; total: number }[];
   availableTags: { key: string; values: string[] }[];
   tagFilterActive: boolean;
+  lists: {
+    peopleEver: { name: string; kind: string; active: boolean }[];
+    visitors: { name: string; presences: number; firstDate: string }[];
+    membersActive: string[];
+    pathToMember: { name: string; kind: string; presences: number }[];
+    newInWindow: { name: string; kind: string; date: string; label: string }[];
+  };
 }
+
+type ListKey = 'peopleEver' | 'visitors' | 'membersActive' | 'pathToMember' | 'newInWindow';
 
 type TagFilterState = Record<string, string[]>;
 
@@ -121,6 +131,32 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
   const [data, setData] = useState<GrowthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [openList, setOpenList] = useState<ListKey | null>(null);
+
+  // Plugin simples: desenha o valor acima de cada ponto/barrinha
+  const valueLabelsPlugin = useMemo(
+    () => ({
+      id: 'growthValueLabels',
+      afterDatasetsDraw: (chart: { ctx: CanvasRenderingContext2D; data: { datasets: { data: (number | null)[] }[] }; getDatasetMeta: (i: number) => { hidden?: boolean; data: { x: number; y: number }[] } }) => {
+        const { ctx } = chart;
+        chart.data.datasets.forEach((ds, i) => {
+          const meta = chart.getDatasetMeta(i);
+          if (meta.hidden) return;
+          meta.data.forEach((el, j) => {
+            const val = ds.data[j];
+            if (val == null) return;
+            ctx.save();
+            ctx.font = '600 10px system-ui, sans-serif';
+            ctx.fillStyle = '#334155';
+            ctx.textAlign = 'center';
+            ctx.fillText(String(val), el.x, el.y - 6);
+            ctx.restore();
+          });
+        });
+      },
+    }),
+    []
+  );
 
   const tagFilterActive = Object.values(tagFilter).some((v) => v.length > 0);
 
@@ -202,7 +238,7 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
               Crescimento do grupo
             </h2>
             <p className="text-sm text-muted-foreground">
-              Como o grupo está evoluindo: pessoas novas, quem voltou e quem ficou.
+              Como o grupo está evoluindo nos últimos {windowMonths} meses: pessoas novas, quem voltou e quem ficou.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -326,12 +362,15 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
             </CardContent>
           </Card>
 
-          {/* Cartões de resumo */}
+          {/* Cartões de resumo (clicáveis: mostram quem está em cada número) */}
           <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
-            <Card>
+            <Card
+              className="cursor-pointer transition-colors hover:border-primary/60"
+              onClick={() => setOpenList('peopleEver')}
+            >
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Pessoas no grupo</CardTitle>
-                <InfoTooltip content={<p>Todas as pessoas já registradas desde o início: membros (ativos e inativos) + visitantes únicos.</p>} />
+                <InfoTooltip content={<p>Todas as pessoas já registradas desde o início: membros (ativos e inativos) + visitantes únicos. Clique para ver a lista.</p>} />
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
@@ -339,10 +378,13 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
                 <p className="text-xs text-muted-foreground mt-1">desde o início do grupo</p>
               </CardContent>
             </Card>
-            <Card>
+            <Card
+              className="cursor-pointer transition-colors hover:border-primary/60"
+              onClick={() => setOpenList('visitors')}
+            >
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Visitantes únicos</CardTitle>
-                <InfoTooltip content={<p>Quantas pessoas diferentes já visitaram o grupo, contadas uma vez só.</p>} />
+                <InfoTooltip content={<p>Quantas pessoas diferentes já visitaram o grupo, contadas uma vez só. Clique para ver a lista.</p>} />
                 <UserPlus className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
@@ -350,10 +392,13 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
                 <p className="text-xs text-muted-foreground mt-1">já passaram por aqui</p>
               </CardContent>
             </Card>
-            <Card>
+            <Card
+              className="cursor-pointer transition-colors hover:border-primary/60"
+              onClick={() => setOpenList('membersActive')}
+            >
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Membros ativos</CardTitle>
-                <InfoTooltip content={<p>Membros participantes ativos hoje.</p>} />
+                <InfoTooltip content={<p>Membros participantes ativos hoje. Clique para ver a lista.</p>} />
                 <UserCheck className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
@@ -361,18 +406,24 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
                 <p className="text-xs text-muted-foreground mt-1">fazem parte do grupo hoje</p>
               </CardContent>
             </Card>
-            <Card>
+            <Card
+              className="cursor-pointer transition-colors hover:border-primary/60"
+              onClick={() => setOpenList('pathToMember')}
+            >
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Viraram membros</CardTitle>
-                <InfoTooltip content={<p>Visitantes que se tornaram membros do grupo.</p>} />
+                <CardTitle className="text-sm font-medium text-muted-foreground">Viraram membros (ou voltaram)</CardTitle>
+                <InfoTooltip content={<p>Regra reduzida: visitantes que já voltaram (2 ou mais presenças) ou que foram convertidos a membros. Clique para ver a lista.</p>} />
                 <Repeat className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <p className="text-3xl font-bold">{totals?.convertedTotal ?? 0}</p>
+                <p className="text-3xl font-bold">{data?.lists.pathToMember.length ?? 0}</p>
                 <p className="text-xs text-muted-foreground mt-1">de visitante para membro</p>
               </CardContent>
             </Card>
-            <Card className={newTrend !== null && newTrend < 0 ? 'border-red-200' : 'border-green-200'}>
+            <Card
+              className="cursor-pointer transition-colors hover:border-primary/60"
+              onClick={() => setOpenList('newInWindow')}
+            >
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
                   Novos nos últimos {windowMonths} meses
@@ -550,23 +601,108 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
             <CardHeader>
               <CardTitle className="text-base">Total de pessoas ao longo do tempo</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Soma acumulada de todos os registros (membros + visitantes) mês a mês.
+                Quantas pessoas já estavam registradas ao fim de cada mês (membros + visitantes). A linha sempre sobe —
+                o que importa é o ritmo.
               </p>
             </CardHeader>
             <CardContent>
-              <div className="h-64">
+              <div className="h-72">
                 <Line
                   data={{
                     labels: data.cumulativeByMonth.map((m) => m.label),
                     datasets: [
-                      { label: 'Pessoas no total', data: data.cumulativeByMonth.map((m) => m.total), borderColor: COLORS.blue, backgroundColor: 'rgba(37, 99, 235, 0.15)', fill: true, tension: 0.3, pointRadius: 3 },
+                      { label: 'Pessoas no total', data: data.cumulativeByMonth.map((m) => m.total), borderColor: COLORS.blue, backgroundColor: 'rgba(37, 99, 235, 0.15)', fill: true, tension: 0.3, pointRadius: 4 },
                     ],
                   }}
-                  options={lineOptions}
+                  options={{ ...lineOptions, plugins: { ...lineOptions.plugins, legend: { display: false } } }}
+                  plugins={[valueLabelsPlugin as never]}
                 />
               </div>
             </CardContent>
           </Card>
+
+          {/* Dialog: quem está em cada número */}
+          <Dialog open={openList !== null} onOpenChange={(o) => !o && setOpenList(null)}>
+            <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>
+                  {openList === 'peopleEver' && 'Pessoas no grupo (desde o início)'}
+                  {openList === 'visitors' && 'Visitantes únicos'}
+                  {openList === 'membersActive' && 'Membros ativos hoje'}
+                  {openList === 'pathToMember' && 'Viraram membros (ou voltaram)'}
+                  {openList === 'newInWindow' && `Novos nos últimos ${windowMonths} meses`}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-1.5">
+                {openList === 'peopleEver' &&
+                  (data.lists.peopleEver.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Ninguém registrado ainda.</p>
+                  ) : (
+                    data.lists.peopleEver.map((p, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+                        <span className="text-sm truncate">{p.name}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <Badge variant="secondary">{p.kind}</Badge>
+                          {!p.active && <Badge variant="destructive">Inativo</Badge>}
+                        </div>
+                      </div>
+                    ))
+                  ))}
+                {openList === 'visitors' &&
+                  (data.lists.visitors.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Nenhum visitante registrado ainda.</p>
+                  ) : (
+                    data.lists.visitors.map((v, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+                        <span className="text-sm truncate">{v.name}</span>
+                        <Badge variant="secondary" className="shrink-0">
+                          {v.presences} presença{v.presences !== 1 ? 's' : ''}
+                        </Badge>
+                      </div>
+                    ))
+                  ))}
+                {openList === 'membersActive' &&
+                  (data.lists.membersActive.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Nenhum membro ativo.</p>
+                  ) : (
+                    data.lists.membersActive.map((name, i) => (
+                      <div key={i} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                        <span className="text-sm">{name}</span>
+                      </div>
+                    ))
+                  ))}
+                {openList === 'pathToMember' &&
+                  (data.lists.pathToMember.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Ninguém ainda — a lista reúne quem voltou (2+ presenças) ou virou membro.
+                    </p>
+                  ) : (
+                    data.lists.pathToMember.map((p, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+                        <span className="text-sm truncate">{p.name}</span>
+                        <Badge variant="secondary" className="shrink-0">
+                          {p.kind} · {p.presences} presença{p.presences !== 1 ? 's' : ''}
+                        </Badge>
+                      </div>
+                    ))
+                  ))}
+                {openList === 'newInWindow' &&
+                  (data.lists.newInWindow.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Nenhuma pessoa nova no período.</p>
+                  ) : (
+                    data.lists.newInWindow.map((p, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+                        <span className="text-sm truncate">{p.name}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <Badge variant="secondary">{p.kind}</Badge>
+                          <span className="text-xs text-muted-foreground">1ª vez em {p.label}</span>
+                        </div>
+                      </div>
+                    ))
+                  ))}
+              </div>
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>

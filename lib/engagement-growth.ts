@@ -110,6 +110,13 @@ export interface GrowthResult {
   cumulativeByMonth: { month: string; label: string; total: number }[];
   availableTags: { key: string; values: string[] }[];
   tagFilterActive: boolean;
+  lists: {
+    peopleEver: { name: string; kind: string; active: boolean }[];
+    visitors: { name: string; presences: number; firstDate: string }[];
+    membersActive: string[];
+    pathToMember: { name: string; kind: string; presences: number }[];
+    newInWindow: { name: string; kind: string; date: string; label: string }[];
+  };
 }
 
 export interface GrowthComputeInput {
@@ -120,6 +127,7 @@ export interface GrowthComputeInput {
   guestRows: GrowthGuestRow[];
   visitorCount: number;
   guestCreatedAts: string[];
+  guestNames: { id: string; full_name: string; created_at: string }[];
   tagRows: GrowthTagRow[];
   meetingsInWindow: GrowthMeetingRow[];
 }
@@ -195,23 +203,31 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
     if (!cur || row.meeting_date < cur) guestFirstPresent.set(row.guest_id, row.meeting_date);
   }
 
-  // ── Série por encontro: presença e novas pessoas ──
+  // ── Janela de tempo ──
+  const today = new Date();
+  const windowStart = addMonths(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)), -(windowMonths - 1));
+  const windowStartIso = windowStart.toISOString().slice(0, 10);
+  const prevWindowStartIso = addMonths(windowStart, -windowMonths).toISOString().slice(0, 10);
+  const prevWindowEndIso = new Date(windowStart.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+  // ── Série por encontro: presença e novas pessoas (apenas encontros da janela) ──
+  const inWindowMeetings = meetingsInWindow.filter((m) => m.meeting_date >= windowStartIso);
   const attendanceByMeeting = new Map<string, { member_id: string; is_present: boolean }[]>();
   for (const row of attendanceRows) {
-    if (!meetingsInWindow.some((m) => m.id === row.meeting_id)) continue;
+    if (!inWindowMeetings.some((m) => m.id === row.meeting_id)) continue;
     let arr = attendanceByMeeting.get(row.meeting_id);
     if (!arr) { arr = []; attendanceByMeeting.set(row.meeting_id, arr); }
     arr.push({ member_id: row.member_id, is_present: row.is_present });
   }
   const guestsByMeeting = new Map<string, string[]>();
   for (const row of guestRows) {
-    if (!meetingsInWindow.some((m) => m.id === row.meeting_id)) continue;
+    if (!inWindowMeetings.some((m) => m.id === row.meeting_id)) continue;
     let arr = guestsByMeeting.get(row.meeting_id);
     if (!arr) { arr = []; guestsByMeeting.set(row.meeting_id, arr); }
     arr.push(row.guest_id);
   }
 
-  const perMeeting: GrowthPerMeetingPoint[] = meetingsInWindow.map((m) => {
+  const perMeeting: GrowthPerMeetingPoint[] = inWindowMeetings.map((m) => {
     const att = attendanceByMeeting.get(m.id) ?? [];
     const guests = guestsByMeeting.get(m.id) ?? [];
     const membersPresent = att.filter((a) => a.is_present && memberAllowed(a.member_id)).length;
@@ -233,12 +249,6 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
     };
   });
 
-  // ── Séries mensais ──
-  const today = new Date();
-  const windowStart = addMonths(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)), -(windowMonths - 1));
-  const windowStartIso = windowStart.toISOString().slice(0, 10);
-  const prevWindowStartIso = addMonths(windowStart, -windowMonths).toISOString().slice(0, 10);
-  const prevWindowEndIso = new Date(windowStart.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10);
 
   const monthKeys: string[] = [];
   for (let i = 0; i < windowMonths; i++) {
@@ -394,6 +404,79 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
     return { month: k, label: growthMonthLabel(k), total: membersAt + guestsAt };
   });
 
+  // ── Regra reduzida de "virar membro": conversões manuais + visitantes que voltaram ──
+  const memberPresences = new Map<string, number>();
+  for (const row of attendanceRows) {
+    if (!row.is_present) continue;
+    memberPresences.set(row.member_id, (memberPresences.get(row.member_id) ?? 0) + 1);
+  }
+  const memberById = new Map(members.map((m) => [m.id, m]));
+  const pathSeen = new Set<string>();
+  const pathToMember: { name: string; kind: string; presences: number }[] = [];
+  for (const m of members) {
+    if (m.integration_stage === 'membro') {
+      if (memberAllowed(m.id)) {
+        pathToMember.push({ name: m.full_name, kind: 'Membro', presences: memberPresences.get(m.id) ?? 0 });
+      }
+      pathSeen.add(m.id);
+    }
+  }
+  for (const m of members) {
+    if (pathSeen.has(m.id) || m.member_type !== 'visitor' || !m.is_active || !memberAllowed(m.id)) continue;
+    const presences = memberPresences.get(m.id) ?? 0;
+    if (presences < 2) continue;
+    const kind = m.integration_stage === 'integrando' ? 'Em integração' : 'Voltou';
+    pathToMember.push({ name: m.full_name, kind, presences });
+    pathSeen.add(m.id);
+  }
+  pathToMember.sort((a, b) => b.presences - a.presences || a.name.localeCompare(b.name));
+
+  // ── Listas para os cartões clicáveis ──
+  const guestNameById = new Map(input.guestNames.map((g) => [g.id, g.full_name]));
+  const peopleEver = [
+    ...members
+      .slice()
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((m) => ({
+        name: m.full_name,
+        kind: m.member_type === 'participant' ? 'Membro' : 'Visitante',
+        active: m.is_active,
+      })),
+    ...input.guestNames
+      .slice()
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((g) => ({ name: g.full_name, kind: 'Visitante', active: true })),
+  ];
+
+  const visitors = [...guestFirstPresent.entries()]
+    .map(([guestId, firstDate]) => ({
+      name: guestNameById.get(guestId) ?? 'Visitante',
+      presences: guestAttendanceCount.get(guestId) ?? 0,
+      firstDate,
+    }))
+    .sort((a, b) => b.presences - a.presences || a.name.localeCompare(b.name));
+
+  const membersActiveNames = members
+    .filter((m) => m.is_active && m.member_type === 'participant' && memberAllowed(m.id))
+    .map((m) => m.full_name)
+    .sort((a, b) => a.localeCompare(b));
+
+  const newInWindowList: { name: string; kind: string; date: string; label: string }[] = [];
+  for (const [memberId, firstDate] of memberFirstPresent) {
+    if (!memberAllowed(memberId) || firstDate < windowStartIso) continue;
+    newInWindowList.push({
+      name: memberById.get(memberId)?.full_name ?? 'Pessoa',
+      kind: memberById.get(memberId)?.member_type === 'participant' ? 'Membro' : 'Visitante',
+      date: firstDate,
+      label: growthShortDate(firstDate),
+    });
+  }
+  for (const [guestId, firstDate] of guestFirstPresent) {
+    if (firstDate < windowStartIso) continue;
+    newInWindowList.push({ name: guestNameById.get(guestId) ?? 'Visitante', kind: 'Visitante', date: firstDate, label: growthShortDate(firstDate) });
+  }
+  newInWindowList.sort((a, b) => b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
+
   // ── Tags disponíveis para o filtro ──
   const tagOptionsMap = new Map<string, Set<string>>();
   for (const row of tagRows) {
@@ -427,5 +510,12 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
     cumulativeByMonth,
     availableTags,
     tagFilterActive,
+    lists: {
+      peopleEver,
+      visitors,
+      membersActive: membersActiveNames,
+      pathToMember,
+      newInWindow: newInWindowList,
+    },
   };
 }
