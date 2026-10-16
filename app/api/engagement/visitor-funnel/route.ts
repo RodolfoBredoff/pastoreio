@@ -1,32 +1,23 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
-import { queryMany, queryOne } from '@/lib/db/postgres';
+import { queryMany } from '@/lib/db/postgres';
+import { computeVisitorFunnel, type FunnelResult } from '@/lib/visitor-funnel';
 
-export interface VisitorFunnelStage {
-  stage: 'visit_1' | 'visit_2' | 'visit_3' | 'visit_4' | 'converted';
-  label: string;
-  count: number;
-  percentage: number; // % do stage anterior
-  dropoff: number; // % que não passou para próximo stage
-  memberIds: string[];
-  benchmark: number; // % esperado baseado em benchmarks
-}
-
-export interface VisitorFunnel {
-  stages: VisitorFunnelStage[];
-  total_visitors: number;
-  conversion_rate: number; // % que chegou a converted
-  avg_visits_to_conversion: number;
-  period_days: number;
-}
+export type { FunnelResult };
 
 /**
  * GET /api/engagement/visitor-funnel
- * 
- * Retorna funil de conversão de visitantes:
- * 1ª visita → 2ª visita → 3ª visita → 4ª visita → Conversão (virou participante)
- * 
+ *
+ * Funil de conversão de visitantes:
+ * 1ª visita → 2ª visita → 3ª visita → 4ª visita → Convertidos
+ *
+ * Regras (alinhadas com a seção Crescimento do grupo):
+ *  - Presença real como fonte da verdade (contagem de presenças).
+ *  - Visitantes não cadastrados (guest_visitors) também entram no funil.
+ *  - Regra reduzida de conversão: integration_stage 'membro' OU participante
+ *    com 4+ presenças. Visitantes não cadastrados nunca aparecem como convertidos.
+ *
  * Query params:
  * - period: '90' | '180' | '365' (dias) - default 180
  */
@@ -43,194 +34,50 @@ export async function GET(request: Request) {
     const periodDays = parseInt(searchParams.get('period') || '180', 10);
 
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - periodDays);
-    const startDateStr = startDate.toISOString().split('T')[0];
+    startDate.setUTCDate(startDate.getUTCDate() - periodDays);
+    const startDateStr = startDate.toISOString().slice(0, 10);
 
-    // Buscar visitantes e contar suas visitas
-    const visitorVisitsQuery = `
-      WITH visitor_visits AS (
-        SELECT 
-          m.id,
-          m.full_name,
-          m.member_type,
-          m.created_at,
-          COUNT(DISTINCT CASE WHEN a.is_present THEN mt.id END) as visit_count,
-          MIN(CASE WHEN a.is_present THEN mt.meeting_date END) as first_visit_date,
-          MAX(CASE WHEN a.is_present THEN mt.meeting_date END) as last_visit_date
-        FROM members m
-        LEFT JOIN attendance a ON a.member_id = m.id
-        LEFT JOIN meetings mt ON mt.id = a.meeting_id
-        WHERE m.group_id = $1
-          AND m.member_type IN ('visitor', 'participant')
-          AND m.created_at >= $2
-          AND (mt.is_cancelled = FALSE OR mt.id IS NULL)
-        GROUP BY m.id, m.full_name, m.member_type, m.created_at
+    const [members, memberAttendance, guests, guestAttendance] = await Promise.all([
+      queryMany<{ id: string; full_name: string; member_type: string; integration_stage: string; created_at: string }>(
+        `SELECT id, full_name, member_type, integration_stage, created_at::text as created_at
+         FROM members
+         WHERE group_id = $1 AND created_at >= $2::date`,
+        [leader.group_id, startDateStr]
       ),
-      classified_visitors AS (
-        SELECT 
-          id,
-          full_name,
-          member_type,
-          visit_count,
-          first_visit_date,
-          last_visit_date,
-          CASE 
-            WHEN member_type = 'participant' AND visit_count >= 4 THEN 'converted'
-            WHEN visit_count >= 4 THEN 'visit_4'
-            WHEN visit_count = 3 THEN 'visit_3'
-            WHEN visit_count = 2 THEN 'visit_2'
-            WHEN visit_count = 1 THEN 'visit_1'
-            ELSE 'visit_0'
-          END as stage
-        FROM visitor_visits
-        WHERE first_visit_date IS NOT NULL
-      )
-      SELECT 
-        stage,
-        COUNT(*)::int as count,
-        ARRAY_AGG(id) as member_ids
-      FROM classified_visitors
-      WHERE stage != 'visit_0'
-      GROUP BY stage
-    `;
+      queryMany<{ member_id: string; meeting_id: string; is_present: boolean; meeting_date: string }>(
+        `SELECT a.member_id, a.meeting_id, a.is_present, meetings.meeting_date::text as meeting_date
+         FROM attendance a
+         JOIN meetings ON meetings.id = a.meeting_id
+         JOIN members m ON m.id = a.member_id
+         WHERE m.group_id = $1 AND m.created_at >= $2::date
+           AND meetings.is_cancelled = FALSE`,
+        [leader.group_id, startDateStr]
+      ),
+      queryMany<{ id: string; full_name: string; created_at: string }>(
+        `SELECT id, full_name, created_at::text as created_at
+         FROM guest_visitors
+         WHERE group_id = $1 AND created_at >= $2::date`,
+        [leader.group_id, startDateStr]
+      ),
+      queryMany<{ guest_id: string; meeting_id: string; meeting_date: string }>(
+        `SELECT ag.guest_id, ag.meeting_id, meetings.meeting_date::text as meeting_date
+         FROM attendance_guests ag
+         JOIN meetings ON meetings.id = ag.meeting_id
+         JOIN guest_visitors g ON g.id = ag.guest_id
+         WHERE g.group_id = $1 AND g.created_at >= $2::date
+           AND meetings.is_cancelled = FALSE`,
+        [leader.group_id, startDateStr]
+      ),
+    ]);
 
-    const results = await queryMany<{
-      stage: string;
-      count: number;
-      member_ids: string[];
-    }>(visitorVisitsQuery, [leader.group_id, startDateStr]);
-
-    // Calcular estatísticas de conversão
-    const conversionStatsQuery = `
-      WITH visitor_visits AS (
-        SELECT 
-          m.id,
-          m.member_type,
-          COUNT(DISTINCT CASE WHEN a.is_present THEN mt.id END) as visit_count
-        FROM members m
-        LEFT JOIN attendance a ON a.member_id = m.id
-        LEFT JOIN meetings mt ON mt.id = a.meeting_id
-        WHERE m.group_id = $1
-          AND m.created_at >= $2
-          AND (mt.is_cancelled = FALSE OR mt.id IS NULL)
-        GROUP BY m.id, m.member_type
-        HAVING COUNT(DISTINCT CASE WHEN a.is_present THEN mt.id END) > 0
-      )
-      SELECT 
-        COUNT(*)::int as total,
-        COUNT(*) FILTER (WHERE member_type = 'participant' AND visit_count >= 4)::int as converted,
-        ROUND(AVG(CASE WHEN member_type = 'participant' AND visit_count >= 4 THEN visit_count END), 1) as avg_visits
-      FROM visitor_visits
-    `;
-
-    const stats = await queryOne<{
-      total: number;
-      converted: number;
-      avg_visits: number;
-    }>(conversionStatsQuery, [leader.group_id, startDateStr]);
-
-    // Mapear resultados
-    const stageMap = new Map(results.map((r) => [r.stage, r]));
-
-    const visit1Data = stageMap.get('visit_1');
-    const visit2Data = stageMap.get('visit_2');
-    const visit3Data = stageMap.get('visit_3');
-    const visit4Data = stageMap.get('visit_4');
-    const convertedData = stageMap.get('converted');
-
-    const visit1Count = (visit1Data?.count || 0) + 
-                        (visit2Data?.count || 0) + 
-                        (visit3Data?.count || 0) + 
-                        (visit4Data?.count || 0) + 
-                        (convertedData?.count || 0);
-    
-    const visit2Count = (visit2Data?.count || 0) + 
-                        (visit3Data?.count || 0) + 
-                        (visit4Data?.count || 0) + 
-                        (convertedData?.count || 0);
-    
-    const visit3Count = (visit3Data?.count || 0) + 
-                        (visit4Data?.count || 0) + 
-                        (convertedData?.count || 0);
-    
-    const visit4Count = (visit4Data?.count || 0) + 
-                        (convertedData?.count || 0);
-    
-    const convertedCount = convertedData?.count || 0;
-
-    const stages: VisitorFunnelStage[] = [
-      {
-        stage: 'visit_1',
-        label: '1ª Visita',
-        count: visit1Count,
-        percentage: 100,
-        dropoff: visit2Count > 0 ? Math.round((100 * (visit1Count - visit2Count)) / visit1Count) : 0,
-        memberIds: [
-          ...(visit1Data?.member_ids || []),
-          ...(visit2Data?.member_ids || []),
-          ...(visit3Data?.member_ids || []),
-          ...(visit4Data?.member_ids || []),
-          ...(convertedData?.member_ids || []),
-        ],
-        benchmark: 100, // Base
-      },
-      {
-        stage: 'visit_2',
-        label: '2ª Visita',
-        count: visit2Count,
-        percentage: visit1Count > 0 ? Math.round((100 * visit2Count) / visit1Count) : 0,
-        dropoff: visit3Count > 0 ? Math.round((100 * (visit2Count - visit3Count)) / visit2Count) : 0,
-        memberIds: [
-          ...(visit2Data?.member_ids || []),
-          ...(visit3Data?.member_ids || []),
-          ...(visit4Data?.member_ids || []),
-          ...(convertedData?.member_ids || []),
-        ],
-        benchmark: 40, // 40% dos visitantes devem retornar (benchmark de mercado)
-      },
-      {
-        stage: 'visit_3',
-        label: '3ª Visita',
-        count: visit3Count,
-        percentage: visit2Count > 0 ? Math.round((100 * visit3Count) / visit2Count) : 0,
-        dropoff: visit4Count > 0 ? Math.round((100 * (visit3Count - visit4Count)) / visit3Count) : 0,
-        memberIds: [
-          ...(visit3Data?.member_ids || []),
-          ...(visit4Data?.member_ids || []),
-          ...(convertedData?.member_ids || []),
-        ],
-        benchmark: 60, // 60% dos que voltaram 2x devem voltar 3x
-      },
-      {
-        stage: 'visit_4',
-        label: '4ª Visita',
-        count: visit4Count,
-        percentage: visit3Count > 0 ? Math.round((100 * visit4Count) / visit3Count) : 0,
-        dropoff: convertedCount > 0 ? Math.round((100 * (visit4Count - convertedCount)) / visit4Count) : 0,
-        memberIds: [
-          ...(visit4Data?.member_ids || []),
-          ...(convertedData?.member_ids || []),
-        ],
-        benchmark: 70, // 70% dos que voltaram 3x devem voltar 4x
-      },
-      {
-        stage: 'converted',
-        label: 'Convertidos',
-        count: convertedCount,
-        percentage: visit4Count > 0 ? Math.round((100 * convertedCount) / visit4Count) : 0,
-        dropoff: 0,
-        memberIds: convertedData?.member_ids || [],
-        benchmark: 20, // 20% do total inicial deve converter (benchmark de mercado)
-      },
-    ];
-
-    const funnel: VisitorFunnel = {
-      stages,
-      total_visitors: visit1Count,
-      conversion_rate: visit1Count > 0 ? Math.round((100 * convertedCount) / visit1Count) : 0,
-      avg_visits_to_conversion: stats?.avg_visits || 0,
-      period_days: periodDays,
-    };
+    const funnel = computeVisitorFunnel({
+      periodDays,
+      today: new Date(),
+      members,
+      memberAttendance,
+      guests,
+      guestAttendance,
+    });
 
     return NextResponse.json(funnel);
   } catch (error) {

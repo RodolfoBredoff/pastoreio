@@ -6,8 +6,13 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { UserPlus, TrendingDown, Eye } from 'lucide-react';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
-import { MetricMembersList } from '@/components/dashboard/metric-members-list';
-import { fetchMembersByIds, type MetricMember } from '@/lib/api/fetch-members-by-ids';
+
+interface FunnelPerson {
+  id: string;
+  name: string;
+  kind: 'member' | 'guest';
+  visits: number;
+}
 
 interface VisitorFunnelStage {
   stage: 'visit_1' | 'visit_2' | 'visit_3' | 'visit_4' | 'converted';
@@ -16,6 +21,7 @@ interface VisitorFunnelStage {
   percentage: number;
   dropoff: number;
   memberIds: string[];
+  people: FunnelPerson[];
   benchmark: number;
 }
 
@@ -36,9 +42,6 @@ export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) 
   const [loading, setLoading] = useState(true);
   const [selectedStage, setSelectedStage] = useState<VisitorFunnelStage | null>(null);
   const [showDialog, setShowDialog] = useState(false);
-  const [members, setMembers] = useState<MetricMember[]>([]);
-  const [membersLoading, setMembersLoading] = useState(false);
-  const [membersError, setMembersError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -60,22 +63,9 @@ export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) 
     fetchData();
   }, [periodDays]);
 
-  const handleStageClick = async (stage: VisitorFunnelStage) => {
+  const handleStageClick = (stage: VisitorFunnelStage) => {
     setSelectedStage(stage);
     setShowDialog(true);
-    setMembers([]);
-    setMembersError(null);
-    setMembersLoading(true);
-
-    try {
-      const membersData = await fetchMembersByIds(stage.memberIds || []);
-      setMembers(membersData);
-    } catch (error) {
-      console.error('Erro ao buscar visitantes:', error);
-      setMembersError('Não foi possível carregar os visitantes desta etapa.');
-    } finally {
-      setMembersLoading(false);
-    }
   };
 
   if (loading || !data) {
@@ -144,7 +134,7 @@ export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) 
               />
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {data.total_visitors} visitantes nos últimos {periodDays} dias
+              {data.total_visitors} visitantes nos últimos {periodDays} dias (inclui visitantes sem cadastro)
             </p>
           </div>
         </div>
@@ -294,15 +284,30 @@ export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) 
 
             <div>
               <h4 className="font-medium mb-2 text-sm">
-                Visitantes nesta etapa ({selectedStage?.count}):
+                Pessoas nesta etapa ({selectedStage?.count}):
               </h4>
-              <MetricMembersList
-                members={members}
-                loading={membersLoading}
-                error={membersError}
-                loadingLabel="Carregando visitantes..."
-                emptyLabel="Nenhum visitante nesta etapa."
-              />
+              {!selectedStage || selectedStage.people.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Nenhuma pessoa nesta etapa.</p>
+              ) : (
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {selectedStage.people.map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between gap-2 p-3 rounded-lg border bg-white dark:bg-card"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-medium truncate">{p.name}</span>
+                        {p.kind === 'guest' && (
+                          <Badge variant="secondary" className="shrink-0">Visitante (sem cadastro)</Badge>
+                        )}
+                      </div>
+                      <Badge variant="outline" className="shrink-0">
+                        {p.visits} visita{p.visits !== 1 ? 's' : ''}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </DialogContent>
