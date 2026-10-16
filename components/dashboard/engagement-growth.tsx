@@ -66,6 +66,24 @@ interface GrowthData {
   totals: GrowthTotals;
   perMeeting: PerMeetingPoint[];
   months: MonthPoint[];
+  growthTrend: {
+    recentAvg: number | null;
+    prevAvg: number | null;
+    delta: number | null;
+    recentCount: number;
+    prevCount: number;
+  };
+  memberFrequency: {
+    totalMeetings: number;
+    consideredMembers: number;
+    buckets: { key: string; label: string; count: number }[];
+  } | null;
+  newVisitorReturn: {
+    newVisitors: number;
+    returned: number;
+    rate: number | null;
+  };
+  cumulativeByMonth: { month: string; label: string; total: number }[];
   availableTags: { key: string; values: string[] }[];
   tagFilterActive: boolean;
 }
@@ -86,6 +104,7 @@ const COLORS = {
   amber: '#d97706',
   slate: '#94a3b8',
   violet: '#7c3aed',
+  red: '#dc2626',
 };
 
 function pctChange(cur: number, prev: number): number | null {
@@ -276,6 +295,37 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
         </div>
       ) : (
         <>
+          {/* Destaque: o grupo está crescendo? */}
+          <Card className={(() => {
+            const t = data.growthTrend;
+            if (t.delta === null) return '';
+            return t.delta > 0 ? 'border-green-300 bg-green-50' : t.delta < 0 ? 'border-red-200 bg-red-50' : '';
+          })()}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-green-600" />
+                O grupo está crescendo?
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {data.growthTrend.delta === null ? (
+                <p className="text-sm text-muted-foreground">
+                  Ainda não há encontros suficientes nesta janela para comparar (precisa de pelo menos 6 encontros com registro).
+                </p>
+              ) : (
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                  <p className="text-2xl font-bold">
+                    {data.growthTrend.recentAvg} presentes
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    em média nos últimos 3 encontros, contra {data.growthTrend.prevAvg} nos 3 anteriores
+                    {' '}({data.growthTrend.delta !== null && data.growthTrend.delta > 0 ? '+' : ''}{data.growthTrend.delta} por encontro)
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Cartões de resumo */}
           <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
             <Card>
@@ -412,6 +462,104 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
                       { label: 'Total presente', data: data.perMeeting.map((m) => m.totalPresent), borderColor: COLORS.green, backgroundColor: COLORS.green, tension: 0.3, pointRadius: 3 },
                       { label: 'Membros', data: data.perMeeting.map((m) => m.membersPresent), borderColor: COLORS.blue, backgroundColor: COLORS.blue, tension: 0.3, pointRadius: 2, borderDash: [5, 5] },
                       { label: 'Visitantes', data: data.perMeeting.map((m) => m.guestsPresent), borderColor: COLORS.amber, backgroundColor: COLORS.amber, tension: 0.3, pointRadius: 2, borderDash: [5, 5] },
+                    ],
+                  }}
+                  options={lineOptions}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Frequência dos membros + retorno de visitantes novos */}
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Como está a frequência dos membros</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Em quantos dos {data.memberFrequency?.totalMeetings ?? 0} encontros do período cada membro esteve presente.
+                </p>
+              </CardHeader>
+              <CardContent>
+                {data.memberFrequency ? (
+                  <>
+                    <div className="h-56">
+                      <Bar
+                        data={{
+                          labels: data.memberFrequency.buckets.map((b) => b.label),
+                          datasets: [
+                            {
+                              label: 'Pessoas',
+                              data: data.memberFrequency.buckets.map((b) => b.count),
+                              backgroundColor: [
+                                COLORS.green,
+                                COLORS.blue,
+                                COLORS.amber,
+                                COLORS.red,
+                                COLORS.slate,
+                              ],
+                            },
+                          ],
+                        }}
+                        options={{
+                          ...monthOptions,
+                          indexAxis: 'y' as const,
+                          plugins: { legend: { display: false } },
+                        }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {data.memberFrequency.consideredMembers} membros ativos considerados.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Sem encontros no período.</p>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Visitantes novos que voltaram</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Dos visitantes que apareceram pela primeira vez neste período, quantos já voltaram pelo menos uma vez.
+                </p>
+              </CardHeader>
+              <CardContent>
+                {data.newVisitorReturn.rate === null ? (
+                  <p className="text-sm text-muted-foreground">Nenhum visitante novo no período ainda.</p>
+                ) : (
+                  <>
+                    <p className="text-4xl font-bold text-green-700">{data.newVisitorReturn.rate}%</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {data.newVisitorReturn.returned} de {data.newVisitorReturn.newVisitors}{' '}
+                      {data.newVisitorReturn.newVisitors === 1 ? 'visitante novo' : 'visitantes novos'} voltaram.
+                    </p>
+                    <div className="mt-3 h-3 w-full rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-green-600"
+                        style={{ width: `${Math.min(100, data.newVisitorReturn.rate)}%` }}
+                      />
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Gráfico: total de pessoas ao longo do tempo */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Total de pessoas ao longo do tempo</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Soma acumulada de todos os registros (membros + visitantes) mês a mês.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="h-64">
+                <Line
+                  data={{
+                    labels: data.cumulativeByMonth.map((m) => m.label),
+                    datasets: [
+                      { label: 'Pessoas no total', data: data.cumulativeByMonth.map((m) => m.total), borderColor: COLORS.blue, backgroundColor: 'rgba(37, 99, 235, 0.15)', fill: true, tension: 0.3, pointRadius: 3 },
                     ],
                   }}
                   options={lineOptions}

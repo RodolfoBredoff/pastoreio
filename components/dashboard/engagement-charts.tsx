@@ -216,7 +216,7 @@ export function EngagementPeriodCharts({
             const index = items[0]?.dataIndex;
             const point = index !== undefined ? data[index] : null;
             if (!point) return '';
-            return `${point.meetingCount} encontro${point.meetingCount !== 1 ? 's' : ''} · Taxa ${point.taxa}%`;
+            return `${point.meetingCount} encontro${point.meetingCount !== 1 ? 's' : ''} · Taxa ${point.taxa}%\nInclui visitantes não cadastrados marcados como presentes`;
           },
         },
       },

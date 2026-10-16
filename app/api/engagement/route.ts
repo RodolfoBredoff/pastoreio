@@ -659,7 +659,10 @@ export async function GET(request: Request) {
     ]);
 
     const guestCountByMeeting = new Map(guestCounts.map((r) => [r.meeting_id, r.cnt]));
-    const includeGuestsInPeriod = memberFilter === 'total' || memberFilter === 'visitors';
+    // Visitantes não cadastrados registrados como presentes SEMPRE contam como
+    // presentes nos gráficos de período (Presentes × Ausentes), independentemente
+    // do filtro de tipo de pessoa.
+    const includeGuestsInPeriod = true;
 
     const attendanceByType =
       memberFilter === 'participants'
