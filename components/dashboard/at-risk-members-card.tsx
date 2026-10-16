@@ -138,9 +138,9 @@ export function AtRiskMembersCard({ memberFilter, periodDays = 90 }: AtRiskMembe
                       Membros são considerados em risco quando apresentam:
                     </p>
                     <ul className="list-disc list-inside space-y-1 text-xs">
-                      <li>2+ ausências consecutivas</li>
-                      <li>Frequência de presença {'<'} 60%</li>
-                      <li>Mais de 30 dias sem presença</li>
+                      <li>3+ ausências consecutivas (2 seguidas é ritmo normal)</li>
+                      <li>Frequência de presença {'<'} 40% (crítica {'<'} 25%)</li>
+                      <li>Mais de 60 dias sem presença — ou nenhuma no período</li>
                     </ul>
                     <p className="mt-2 text-xs text-muted-foreground">
                       Benchmark: {'<'}{benchmark}% do grupo (ideal: 0%)
