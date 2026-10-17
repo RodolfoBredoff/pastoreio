@@ -6,6 +6,13 @@ import type { TagFiltersPayload } from '@/lib/member-tags-filter';
  *
  * Linguagem simples nos rótulos: os números alimentam gráficos para pessoas
  * não técnicas (crescimento, retorno, frequência).
+ *
+ * Regras de progressão (por presença real, não por estágio — estágios podem ficar
+ * defasados porque a conversão automática transforma guest em member na 2ª presença):
+ *  - "Voltou" = 2ª presença da pessoa (guest avulso OU membro tipo visitante),
+ *    contada no mês em que ocorreu.
+ *  - "Virou membro" = 5ª presença da pessoa (regra do grupo), contada no mês em que
+ *    completou — vale retroativamente para quem já completou.
  */
 
 export interface GrowthMemberRow {
@@ -121,6 +128,10 @@ export interface GrowthResult {
 
 export interface GrowthComputeInput {
   windowMonths: number;
+  /** Janela explícita (opcional): 1º dia do 1º mês e último dia do último mês (YYYY-MM-DD).
+   *  Usada quando a página filtra por mês/trimestre/semestre específico. */
+  windowFromIso?: string;
+  windowToIso?: string;
   tags: TagFiltersPayload | null;
   members: GrowthMemberRow[];
   attendanceRows: GrowthAttendanceRow[];
@@ -156,6 +167,19 @@ function addMonths(date: Date, n: number): Date {
 function lastDayOfMonthIso(key: string): string {
   const [y, m] = key.split('-').map(Number);
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+function nextMonthKey(key: string): string {
+  const [y, m] = key.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+}
+
+function monthsBetweenInclusive(fromIso: string, toIso: string): number {
+  const fy = Number(fromIso.slice(0, 4));
+  const fm = Number(fromIso.slice(5, 7));
+  const ty = Number(toIso.slice(0, 4));
+  const tm = Number(toIso.slice(5, 7));
+  return (ty - fy) * 12 + (tm - fm) + 1;
 }
 
 function avg(values: number[]): number | null {
@@ -203,15 +227,23 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
     if (!cur || row.meeting_date < cur) guestFirstPresent.set(row.guest_id, row.meeting_date);
   }
 
-  // ── Janela de tempo ──
+  // ── Janela de tempo: explícita (from/to, quando a página filtra mês/trimestre/semestre)
+  //    ou relativa a hoje (windowMonths) ──
   const today = new Date();
-  const windowStart = addMonths(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)), -(windowMonths - 1));
-  const windowStartIso = windowStart.toISOString().slice(0, 10);
-  const prevWindowStartIso = addMonths(windowStart, -windowMonths).toISOString().slice(0, 10);
-  const prevWindowEndIso = new Date(windowStart.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const explicitWindow = !!(input.windowFromIso && input.windowToIso);
+  const windowStartIso = explicitWindow
+    ? input.windowFromIso!
+    : addMonths(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)), -(windowMonths - 1)).toISOString().slice(0, 10);
+  const windowEndIso = explicitWindow
+    ? input.windowToIso!
+    : lastDayOfMonthIso(monthKey(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)).toISOString().slice(0, 10)));
+  const windowSpanMonths = Math.max(1, monthsBetweenInclusive(windowStartIso, windowEndIso));
+  const windowStartDate = new Date(`${windowStartIso}T00:00:00Z`);
+  const prevWindowStartIso = addMonths(windowStartDate, -windowSpanMonths).toISOString().slice(0, 10);
+  const prevWindowEndIso = new Date(windowStartDate.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10);
 
   // ── Série por encontro: presença e novas pessoas (apenas encontros da janela) ──
-  const inWindowMeetings = meetingsInWindow.filter((m) => m.meeting_date >= windowStartIso);
+  const inWindowMeetings = meetingsInWindow.filter((m) => m.meeting_date >= windowStartIso && m.meeting_date <= windowEndIso);
   const attendanceByMeeting = new Map<string, { member_id: string; is_present: boolean }[]>();
   for (const row of attendanceRows) {
     if (!inWindowMeetings.some((m) => m.id === row.meeting_id)) continue;
@@ -251,8 +283,13 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
 
 
   const monthKeys: string[] = [];
-  for (let i = 0; i < windowMonths; i++) {
-    monthKeys.push(monthKey(addMonths(windowStart, i).toISOString().slice(0, 10)));
+  {
+    let cur = monthKey(windowStartIso);
+    const endKey = monthKey(windowEndIso);
+    while (cur <= endKey) {
+      monthKeys.push(cur);
+      cur = nextMonthKey(cur);
+    }
   }
 
   const newMembersByMonth = new Map<string, number>();
@@ -267,30 +304,61 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
     newGuestsByMonth.set(k, (newGuestsByMonth.get(k) ?? 0) + 1);
   }
 
-  // Visitantes que voltaram: presença em M com presença anterior
-  const returnedByMonth = new Map<string, Set<string>>();
+  // ── Visitantes: presenças reais combinando as duas fontes ──
+  // A conversão automática transforma o guest em member (tipo visitante) na 2ª
+  // presença e apaga os registros de guest — quem volta costuma aparecer como
+  // member, não como guest. Por isso retorno e conversão usam as duas fontes
+  // somadas, sempre por presença real (não por estágio de integração).
   const guestAttendanceCount = new Map<string, number>();
   for (const row of guestRows) {
     guestAttendanceCount.set(row.guest_id, (guestAttendanceCount.get(row.guest_id) ?? 0) + 1);
   }
+  const guestPresenceDates = new Map<string, string[]>();
   for (const row of guestRows) {
-    const first = guestFirstPresent.get(row.guest_id);
-    if (!first || row.meeting_date <= first) continue;
-    const k = monthKey(row.meeting_date);
-    let set = returnedByMonth.get(k);
-    if (!set) { set = new Set(); returnedByMonth.set(k, set); }
-    set.add(row.guest_id);
+    let arr = guestPresenceDates.get(row.guest_id);
+    if (!arr) { arr = []; guestPresenceDates.set(row.guest_id, arr); }
+    arr.push(row.meeting_date);
+  }
+  const visitorMemberIds = new Set(
+    members.filter((m) => m.member_type === 'visitor' && memberAllowed(m.id)).map((m) => m.id)
+  );
+  const visitorMemberPresenceDates = new Map<string, string[]>();
+  for (const row of attendanceRows) {
+    if (!row.is_present || !visitorMemberIds.has(row.member_id)) continue;
+    let arr = visitorMemberPresenceDates.get(row.member_id);
+    if (!arr) { arr = []; visitorMemberPresenceDates.set(row.member_id, arr); }
+    arr.push(row.meeting_date);
   }
 
-  // Visitantes que viraram membros (o member é criado na conversão)
+  // "Voltou": 2ª presença da pessoa — contada uma vez, no mês em que ocorreu
+  const returnedByMonth = new Map<string, Set<string>>();
+  const addReturnAt = (personKey: string, dates: string[]) => {
+    const ds = [...new Set(dates)].sort();
+    if (ds.length < 2) return;
+    const k = monthKey(ds[1]);
+    let set = returnedByMonth.get(k);
+    if (!set) { set = new Set(); returnedByMonth.set(k, set); }
+    set.add(personKey);
+  };
+  for (const [guestId, dates] of guestPresenceDates) addReturnAt(`g:${guestId}`, dates);
+  for (const [memberId, dates] of visitorMemberPresenceDates) addReturnAt(`m:${memberId}`, dates);
+
+  // "Virou membro": 5ª presença da pessoa (regra do grupo) — contada no mês em que
+  // completou, valendo também para quem já completou antes (cálculo retroativo).
+  // Membros participantes não entram: eles já eram membros.
   const conversionsByMonth = new Map<string, number>();
   let convertedTotal = 0;
   for (const m of members) {
-    if (m.integration_stage !== 'membro') continue;
-    convertedTotal++;
-    const k = monthKey(m.created_at.slice(0, 10));
-    conversionsByMonth.set(k, (conversionsByMonth.get(k) ?? 0) + 1);
+    if (m.integration_stage === 'membro') convertedTotal++;
   }
+  const addConversionAt = (dates: string[]) => {
+    const ds = [...new Set(dates)].sort();
+    if (ds.length < 5) return;
+    const k = monthKey(ds[4]);
+    conversionsByMonth.set(k, (conversionsByMonth.get(k) ?? 0) + 1);
+  };
+  for (const dates of guestPresenceDates.values()) addConversionAt(dates);
+  for (const dates of visitorMemberPresenceDates.values()) addConversionAt(dates);
 
   const months: GrowthMonthPoint[] = monthKeys.map((k) => ({
     month: k,
@@ -309,8 +377,8 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
   const firstGuestDates = [...guestFirstPresent.values()];
 
   const newInWindow =
-    firstMemberDates.filter((d) => d >= windowStartIso).length +
-    firstGuestDates.filter((d) => d >= windowStartIso).length;
+    firstMemberDates.filter((d) => d >= windowStartIso && d <= windowEndIso).length +
+    firstGuestDates.filter((d) => d >= windowStartIso && d <= windowEndIso).length;
   const newInPrevWindow =
     firstMemberDates.filter((d) => d >= prevWindowStartIso && d <= prevWindowEndIso).length +
     firstGuestDates.filter((d) => d >= prevWindowStartIso && d <= prevWindowEndIso).length;
@@ -383,13 +451,20 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
     };
   }
 
-  // ── Visitantes novos que voltaram ──
-  const newVisitorsInWindow = firstGuestDates.filter((d) => d >= windowStartIso).length;
-  let returnedOfNew = 0;
-  for (const [guestId, first] of guestFirstPresent) {
-    if (first < windowStartIso) continue;
-    if ((guestAttendanceCount.get(guestId) ?? 0) >= 2) returnedOfNew++;
-  }
+  // ── Visitantes novos que voltaram (guests avulsos + membros tipo visitante) ──
+  const newVisitorCandidates: string[][] = [
+    ...[...guestPresenceDates.values()],
+    ...[...visitorMemberPresenceDates.values()],
+  ];
+  const uniqueSorted = (dates: string[]) => [...new Set(dates)].sort();
+  const isFirstInWindow = (dates: string[]) => {
+    const first = uniqueSorted(dates)[0];
+    return first >= windowStartIso && first <= windowEndIso;
+  };
+  const newVisitorsInWindow = newVisitorCandidates.filter(isFirstInWindow).length;
+  const returnedOfNew = newVisitorCandidates.filter(
+    (dates) => isFirstInWindow(dates) && uniqueSorted(dates).length >= 2
+  ).length;
   const newVisitorReturn: GrowthNewVisitorReturn = {
     newVisitors: newVisitorsInWindow,
     returned: returnedOfNew,
@@ -397,7 +472,22 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
   };
 
   // ── Total de pessoas ao longo do tempo (acumulado por mês) ──
-  const cumulativeByMonth = monthKeys.map((k) => {
+  // Quando a janela é curta (1–2 meses, ex.: filtro de um mês específico), estende a
+  // exibição 5 meses para trás para dar contexto — o valor é o acumulado desde o
+  // início do grupo, então os pontos extras são válidos.
+  const cumulativeKeys: string[] = [];
+  {
+    const endKey = monthKey(windowEndIso);
+    const startKey = monthKeys.length <= 2
+      ? monthKey(addMonths(windowStartDate, -5).toISOString().slice(0, 10))
+      : monthKey(windowStartIso);
+    let cur = startKey;
+    while (cur <= endKey) {
+      cumulativeKeys.push(cur);
+      cur = nextMonthKey(cur);
+    }
+  }
+  const cumulativeByMonth = cumulativeKeys.map((k) => {
     const end = lastDayOfMonthIso(k);
     const membersAt = members.filter((m) => m.created_at.slice(0, 10) <= end).length;
     const guestsAt = guestCreatedAts.filter((d) => d.slice(0, 10) <= end).length;
@@ -489,7 +579,7 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
     .sort((a, b) => a.key.localeCompare(b.key));
 
   return {
-    windowMonths,
+    windowMonths: explicitWindow ? windowSpanMonths : windowMonths,
     totals: {
       peopleEver: membersAll + visitorCount,
       uniqueVisitorsEver: visitorCount,

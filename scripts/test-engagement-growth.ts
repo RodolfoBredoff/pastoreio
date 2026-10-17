@@ -97,8 +97,8 @@ check('totals.membersActive', r1.totals.membersActive, 4);
 check('totals.convertedTotal', r1.totals.convertedTotal, 1);
 check('totals.attendedEver', r1.totals.attendedEver, 5);
 check('totals.newInWindow', r1.totals.newInWindow, 4);
-check('totals.returnedInWindow', r1.totals.returnedInWindow, 1);
-check('totals.conversionsInWindow', r1.totals.conversionsInWindow, 1);
+check('totals.returnedInWindow', r1.totals.returnedInWindow, 2);
+check('totals.conversionsInWindow', r1.totals.conversionsInWindow, 0);
 
 const byId = new Map(r1.perMeeting.map((p) => [p.meeting_id, p]));
 const m1 = byId.get('m1')!;
@@ -113,8 +113,8 @@ check('m2.newPeople', m2.newPeople, 0);
 const curMonth = r1.months[r1.months.length - 1];
 const prevMonth = r1.months[r1.months.length - 2];
 check('mes atual newPeople', curMonth.newPeople, 0);
-check('mes atual returnedVisitors', curMonth.returnedVisitors, 1);
-check('mes atual conversions', curMonth.conversions, 1);
+check('mes atual returnedVisitors', curMonth.returnedVisitors, 2);
+check('mes atual conversions', curMonth.conversions, 0);
 check('mes anterior newPeople', prevMonth.newPeople, 4);
 check('mes anterior newGuests', prevMonth.newGuests, 2);
 check('mes anterior newMembers', prevMonth.newMembers, 2);
@@ -130,9 +130,9 @@ check('frequencia.assiduo', bucketOf('assiduo'), 1);
 check('frequencia.afastado', bucketOf('afastado'), 1);
 check('frequencia.ausente_total', bucketOf('ausente_total'), 2);
 
-check('retorno.rate', r1.newVisitorReturn.rate, 50);
-check('retorno.returned', r1.newVisitorReturn.returned, 1);
-check('retorno.newVisitors', r1.newVisitorReturn.newVisitors, 2);
+check('retorno.rate', r1.newVisitorReturn.rate, 67);
+check('retorno.returned', r1.newVisitorReturn.returned, 2);
+check('retorno.newVisitors', r1.newVisitorReturn.newVisitors, 3);
 
 const lastCumulative = r1.cumulativeByMonth[r1.cumulativeByMonth.length - 1];
 check('acumulado final = peopleEver', lastCumulative.total, 8);
@@ -178,6 +178,122 @@ check('janela3: trend delta nulo (<6 encontros)', r4.growthTrend.delta, null);
 // ── Janela com poucos encontros: trend nulo ──
 const r3 = computeGrowthMetrics({ ...baseInput, meetingsInWindow: meetings.slice(0, 2) });
 check('janela curta: trend delta nulo', r3.growthTrend.delta, null);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Cenários com JANELA EXPLÍDITA (from/to) e datas fixas — para filtro de mês/
+// trimestre da página. Datas escolhidas sem depender de "hoje".
+// ══════════════════════════════════════════════════════════════════════════════
+
+const wMembers: GrowthMemberRow[] = [
+  // P1: participante com 5 presenças — NÃO conta como "virou membro" (já era membro)
+  { id: 'P1', member_type: 'participant', integration_stage: 'novo_visitante', is_active: true, created_at: '2026-01-05T10:00:00Z', full_name: 'Paulo' },
+  // V1: visitante cadastrado — 2ª presença em março (volta em março)
+  { id: 'V1', member_type: 'visitor', integration_stage: 'retornou', is_active: true, created_at: '2026-02-12T10:00:00Z', full_name: 'Vera' },
+  // V2: visitante cadastrado — 5ª presença em 29/03 (vira membro em março, regra das 5)
+  { id: 'V2', member_type: 'visitor', integration_stage: 'integrando', is_active: true, created_at: '2026-01-12T10:00:00Z', full_name: 'Vitor' },
+];
+
+const wMeetings: GrowthMeetingRow[] = [
+  { id: 'wfeb', meeting_date: '2026-02-10', title: 'Fev', meeting_type: 'regular' },
+  { id: 'wmar1', meeting_date: '2026-03-05', title: 'Mar 1', meeting_type: 'regular' },
+  { id: 'wmar2', meeting_date: '2026-03-15', title: 'Mar 2', meeting_type: 'regular' },
+  { id: 'wmar3', meeting_date: '2026-03-29', title: 'Mar 3', meeting_type: 'regular' },
+  // abril NÃO pertence à janela — precisa ser excluído pelo limite superior
+  { id: 'wapr', meeting_date: '2026-04-02', title: 'Abr', meeting_type: 'regular' },
+];
+
+const wAttendance: GrowthAttendanceRow[] = [
+  { member_id: 'P1', meeting_id: 'wfeb', is_present: true, meeting_date: '2026-02-10' },
+  { member_id: 'P1', meeting_id: 'wmar1', is_present: true, meeting_date: '2026-03-05' },
+  { member_id: 'P1', meeting_id: 'wmar2', is_present: true, meeting_date: '2026-03-15' },
+  { member_id: 'P1', meeting_id: 'wmar3', is_present: true, meeting_date: '2026-03-29' },
+  { member_id: 'P1', meeting_id: 'wapr', is_present: true, meeting_date: '2026-04-02' },
+  // V1: 1ª presença 10/02; 2ª em 05/03 (voltou em março)
+  { member_id: 'V1', meeting_id: 'wfeb', is_present: true, meeting_date: '2026-02-10' },
+  { member_id: 'V1', meeting_id: 'wmar1', is_present: true, meeting_date: '2026-03-05' },
+  { member_id: 'V1', meeting_id: 'wmar2', is_present: true, meeting_date: '2026-03-20' },
+  // V2: 1ª 10/01 (fora das reuniões listadas), 2ª 10/02, 3ª-5ª em março; 5ª em 29/03
+  { member_id: 'V2', meeting_id: 'wjan', is_present: true, meeting_date: '2026-01-10' },
+  { member_id: 'V2', meeting_id: 'wfeb', is_present: true, meeting_date: '2026-02-10' },
+  { member_id: 'V2', meeting_id: 'wmar1', is_present: true, meeting_date: '2026-03-05' },
+  { member_id: 'V2', meeting_id: 'wmar2', is_present: true, meeting_date: '2026-03-15' },
+  { member_id: 'V2', meeting_id: 'wmar3', is_present: true, meeting_date: '2026-03-29' },
+];
+
+const wGuests: GrowthGuestRow[] = [
+  // G1: novo em março, voltou em abril (2ª presença fora da janela)
+  { guest_id: 'g1', meeting_id: 'wmar1', meeting_date: '2026-03-05' },
+  { guest_id: 'g1', meeting_id: 'wapr', meeting_date: '2026-04-02' },
+  // G2: novo em março, só 1 presença
+  { guest_id: 'g2', meeting_id: 'wmar1', meeting_date: '2026-03-05' },
+  // G3: primeira (e única) presença em abril — fora da janela
+  { guest_id: 'g3', meeting_id: 'wapr', meeting_date: '2026-04-02' },
+];
+
+const wBase = {
+  windowMonths: 6,
+  tags: null,
+  members: wMembers,
+  attendanceRows: wAttendance,
+  guestRows: wGuests,
+  visitorCount: 3,
+  guestCreatedAts: ['2026-03-01T10:00:00Z', '2026-03-01T10:00:00Z', '2026-04-01T10:00:00Z'],
+  guestNames: [
+    { id: 'g1', full_name: 'G1', created_at: '2026-03-01T10:00:00Z' },
+    { id: 'g2', full_name: 'G2', created_at: '2026-03-01T10:00:00Z' },
+    { id: 'g3', full_name: 'G3', created_at: '2026-04-01T10:00:00Z' },
+  ],
+  tagRows: [],
+  meetingsInWindow: wMeetings,
+};
+
+// ── Janela explícita: só março/2026 ──
+const w1 = computeGrowthMetrics({ ...wBase, windowFromIso: '2026-03-01', windowToIso: '2026-03-31' });
+
+check('janela-explícita: months = 1 mês', w1.months.length, 1);
+check('janela-explícita: month key', w1.months[0].month, '2026-03');
+check('janela-explícita: perMeeting exclui fev/abr', w1.perMeeting.length, 3);
+check('janela-explícita: windowMonths = span', w1.windowMonths, 1);
+check('janela-explícita: perMeeting sem encontro de abril', w1.perMeeting.some((p) => p.meeting_id === 'wapr'), false);
+
+const wMar = w1.months[0];
+check('janela-explícita: mar newPeople (G1+G2)', wMar.newPeople, 2);
+check('janela-explícita: mar newGuests', wMar.newGuests, 2);
+check('janela-explícita: mar newMembers', wMar.newMembers, 0);
+check('janela-explícita: mar voltou (V1, 2ª presença 05/03)', wMar.returnedVisitors, 1);
+check('janela-explícita: mar virou membro (V2, 5ª presença 29/03)', wMar.conversions, 1);
+
+check('janela-explícita: totals.newInWindow', w1.totals.newInWindow, 2);
+check('janela-explícita: returnedInWindow', w1.totals.returnedInWindow, 1);
+check('janela-explícita: conversionsInWindow', w1.totals.conversionsInWindow, 1);
+check('janela-explícita: retorno newVisitors (G1+G2)', w1.newVisitorReturn.newVisitors, 2);
+check('janela-explícita: retorno returned (G1)', w1.newVisitorReturn.returned, 1);
+check('janela-explícita: retorno rate', w1.newVisitorReturn.rate, 50);
+check('janela-explícita: trend nulo (3 encontros)', w1.growthTrend.delta, null);
+
+// Acumulado em janela curta: estende 5 meses para trás (out/2025..mar/2026)
+check('janela-explícita: cumulativo estendido (6 pontos)', w1.cumulativeByMonth.length, 6);
+check('janela-explícita: cumulativo primeiro mês', w1.cumulativeByMonth[0].month, '2025-10');
+// G3 (criada em abril) ainda não existia no fim de março: 5, não peopleEver(6)
+check('janela-explícita: cumulativo final (sem G3 de abril)', w1.cumulativeByMonth[w1.cumulativeByMonth.length - 1].total, 5);
+
+// ── Janela explícita: fev + mar/2026 (dois meses) ──
+const w2 = computeGrowthMetrics({ ...wBase, windowFromIso: '2026-02-01', windowToIso: '2026-03-31' });
+check('janela-2-meses: months = 2', w2.months.length, 2);
+check('janela-2-meses: perMeeting = 4 (fev + 3 de março)', w2.perMeeting.length, 4);
+check('janela-2-meses: fev voltou (V2, 2ª presença 10/02)', w2.months[0].returnedVisitors, 1);
+check('janela-2-meses: fev virou membro', w2.months[0].conversions, 0);
+check('janela-2-meses: mar voltou', w2.months[1].returnedVisitors, 1);
+check('janela-2-meses: mar virou membro', w2.months[1].conversions, 1);
+check('janela-2-meses: newInWindow (P1+V1+G1+G2)', w2.totals.newInWindow, 4);
+check('janela-2-meses: cumulativo estendido (7 pontos)', w2.cumulativeByMonth.length, 7);
+
+// ── Janela explícita: só abril/2026 — primeiro encontro (wapr) entra, nenhum "novo" ──
+const w3 = computeGrowthMetrics({ ...wBase, windowFromIso: '2026-04-01', windowToIso: '2026-04-30' });
+check('janela-abril: perMeeting = 1', w3.perMeeting.length, 1);
+check('janela-abril: newPeople = 1 (G3)', w3.months[0].newPeople, 1);
+check('janela-abril: G3 conta como novo (1ª presença em abril)', w3.totals.newInWindow, 1);
+check('janela-abril: voltou = 1 (G1, 2ª presença em abril)', w3.months[0].returnedVisitors, 1);
 
 if (failures > 0) {
   console.log(`\n${failures} falha(s)`);

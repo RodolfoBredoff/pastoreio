@@ -22,7 +22,11 @@ import { computeGrowthMetrics } from '@/lib/engagement-growth';
  *  - Filtro por tags (aplica-se às métricas de membros; visitantes não têm tags).
  *
  * Parâmetros:
- *  - months=3|6|12 (padrão 6): janela das séries temporais.
+ *  - months=3|6|12 (padrão 6): janela das séries temporais (usada quando não há
+ *    from_month/to_month explícitos).
+ *  - from_month=YYYY-MM & to_month=YYYY-MM (opcionais): janela explícita — usada
+ *    quando a página de engajamento filtra por mês/trimestre/semestre específico.
+ *    Ignora o parâmetro months quando presentes.
  *  - tags={"Chave":["valor", ...]}: filtro de tags (OR entre valores).
  *  - public_token / group_id: mesmas regras da rota /api/engagement.
  */
@@ -41,6 +45,24 @@ export async function GET(request: Request) {
     const monthsRaw = Number(searchParams.get('months')) || 6;
     const windowMonths = [3, 6, 12].includes(monthsRaw) ? monthsRaw : 6;
     const tags = parseTagFiltersJson(searchParams.get('tags'));
+
+    // Janela explícita (filtro da página): from_month/to_month em YYYY-MM
+    const ymPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
+    const fromMonthRaw = searchParams.get('from_month')?.trim() || '';
+    const toMonthRaw = searchParams.get('to_month')?.trim() || '';
+    let windowFromIso: string | null = null;
+    let windowToIso: string | null = null;
+    if (ymPattern.test(fromMonthRaw) && ymPattern.test(toMonthRaw) && fromMonthRaw <= toMonthRaw) {
+      const [fy, fm] = fromMonthRaw.split('-').map(Number);
+      const [ty, tm] = toMonthRaw.split('-').map(Number);
+      // Clamp de segurança: máximo de 36 meses por requisição
+      const spanMonths = (ty - fy) * 12 + (tm - fm) + 1;
+      const effFrom = spanMonths > 36
+        ? `${ty + Math.floor((tm - 1 - 35) / 12)}-${String((((tm - 1 - 35) % 12) + 12) % 12 + 1).padStart(2, '0')}`
+        : fromMonthRaw;
+      windowFromIso = `${effFrom}-01`;
+      windowToIso = new Date(Date.UTC(ty, tm, 0)).toISOString().slice(0, 10);
+    }
 
     // ── Autorização (mesmas regras de /api/engagement, simplificadas) ──
     let groupId: string | null = null;
@@ -83,6 +105,9 @@ export async function GET(request: Request) {
     const windowStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
     windowStart.setUTCMonth(windowStart.getUTCMonth() - (windowMonths - 1));
     const windowStartIso = windowStart.toISOString().slice(0, 10);
+    // Limite superior: explicitamente o fim do mês "to", ou o fim do mês corrente
+    const windowEndIso = windowToIso
+      ?? new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
 
     // ── Dados brutos (sem alias para `meetings`, pois a regra de visibilidade
     //    referencia `meetings.id` diretamente) ──
@@ -124,14 +149,17 @@ export async function GET(request: Request) {
          FROM meetings
          WHERE group_id = $1 AND is_cancelled = FALSE
            AND meeting_date >= $2::date
+           AND meeting_date <= $3::date
            AND ${MEETING_VISIBILITY}
          ORDER BY meeting_date ASC`,
-        [groupId, windowStartIso]
+        [groupId, windowStartIso, windowEndIso]
       ),
     ]);
 
     const result = computeGrowthMetrics({
       windowMonths,
+      windowFromIso: windowFromIso ?? undefined,
+      windowToIso: windowToIso ?? undefined,
       tags,
       members,
       attendanceRows,

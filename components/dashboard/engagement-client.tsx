@@ -58,6 +58,13 @@ interface MemberStat {
   taxa: number;
 }
 
+interface PresenceBreakdown {
+  members: number;
+  visitors: number;
+  membersList: { name: string; presences: number }[];
+  visitorsList: { name: string; presences: number; kind: 'cadastrado' | 'avulso' }[];
+}
+
 interface MeetingItem {
   id: string;
   meeting_date: string;
@@ -114,13 +121,16 @@ function StatsCards({
   perfectAttendance,
   memberStats,
   presenceFilter,
+  presenceBreakdown,
 }: {
   summary: EngagementSummary;
   periodData: PeriodDataPoint[];
   perfectAttendance: string[];
   memberStats: MemberStat[];
   presenceFilter?: PresenceFilter;
+  presenceBreakdown?: PresenceBreakdown | null;
 }) {
+  const [presenceListOpen, setPresenceListOpen] = useState(false);
   const trend = periodData.length >= 2
     ? periodData[periodData.length - 1].taxa - periodData[periodData.length - 2].taxa : 0;
   const totalRecords = summary.totalPresentes + summary.totalAusentes;
@@ -232,15 +242,35 @@ function StatsCards({
           <p className="text-xs text-muted-foreground mt-1">inativos no grupo</p>
         </CardContent>
       </Card>
-      <Card>
+      <Card
+        className="cursor-pointer transition-colors hover:border-primary/60"
+        onClick={() => setPresenceListOpen(true)}
+      >
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Total de Presenças</CardTitle>
+          <div className="flex items-center gap-1.5">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total de Presenças</CardTitle>
+            <InfoTooltip
+              content={
+                <div>
+                  <p className="font-semibold mb-1">Presenças por tipo de pessoa</p>
+                  <p className="mb-2">
+                    Presenças nos encontros do período filtrado, separadas entre membros cadastrados e
+                    visitantes (avulsos e visitantes cadastrados). Clique para ver quem esteve presente.
+                  </p>
+                </div>
+              }
+              side="right"
+            />
+          </div>
           <CheckCircle className="h-4 w-4 text-green-600" />
         </CardHeader>
         <CardContent>
           <p className="text-3xl font-bold text-green-600">{summary.totalPresentes}</p>
           <p className="text-xs text-muted-foreground mt-1">
-            {summary.meetingCount} encontro{summary.meetingCount !== 1 ? 's' : ''} no período
+            Membros: {presenceBreakdown?.members ?? 0} · Visitantes: {presenceBreakdown?.visitors ?? 0}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {summary.meetingCount} encontro{summary.meetingCount !== 1 ? 's' : ''} no período — clique para ver quem
           </p>
         </CardContent>
       </Card>
@@ -254,6 +284,59 @@ function StatsCards({
           <p className="text-xs text-muted-foreground mt-1">registros de falta</p>
         </CardContent>
       </Card>
+
+      <Dialog open={presenceListOpen} onOpenChange={setPresenceListOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Quem esteve presente no período</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Membros ({presenceBreakdown?.members ?? 0} presenças)
+              </p>
+              {(presenceBreakdown?.membersList.length ?? 0) === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhuma presença de membro no período.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {presenceBreakdown!.membersList.map((m, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+                      <span className="truncate text-sm">{m.name}</span>
+                      <Badge variant="secondary" className="shrink-0">
+                        {m.presences} presença{m.presences !== 1 ? 's' : ''}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Visitantes ({presenceBreakdown?.visitors ?? 0} presenças)
+              </p>
+              {(presenceBreakdown?.visitorsList.length ?? 0) === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhuma presença de visitante no período.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {presenceBreakdown!.visitorsList.map((v, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm">{v.name}</span>
+                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                          {v.kind === 'cadastrado' ? 'Cadastrado' : 'Avulso'}
+                        </Badge>
+                      </div>
+                      <Badge variant="secondary" className="shrink-0">
+                        {v.presences} presença{v.presences !== 1 ? 's' : ''}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1297,6 +1380,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
     periodAvgRate: 0,
   });
   const [memberStats, setMemberStats] = useState<MemberStat[]>([]);
+  const [presenceBreakdown, setPresenceBreakdown] = useState<PresenceBreakdown | null>(null);
   const [meetingList, setMeetingList] = useState<MeetingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
@@ -1356,6 +1440,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
         periodAvgRate: 0,
       });
       setMemberStats(data.memberStats ?? []);
+      setPresenceBreakdown(data.presenceBreakdown ?? null);
       setMeetingList(data.meetingList ?? []);
       setHasData((data.periodData ?? []).length > 0 || (data.meetingList ?? []).length > 0);
     } finally { setLoading(false); }
@@ -1503,7 +1588,13 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
 
       <DataInterpretationGuide />
 
-      <EngagementGrowth apiSuffix={apiSuffix} />
+      <EngagementGrowth
+        apiSuffix={apiSuffix}
+        period={view}
+        monthFilter={selectedMonth}
+        quarterFilter={selectedQuarters}
+        semesterFilter={selectedSemesters}
+      />
 
       {view === 'title_group' ? (
         <>
@@ -1532,6 +1623,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
             perfectAttendance={perfectAttendance}
             memberStats={filteredMemberStats}
             presenceFilter={presenceFilter}
+            presenceBreakdown={presenceBreakdown}
           />
 
           <PeriodSummaryBreakdown

@@ -623,13 +623,14 @@ export async function GET(request: Request) {
         },
         memberStats: [],
         meetingList: [],
+        presenceBreakdown: { members: 0, visitors: 0, membersList: [], visitorsList: [] },
       });
     }
 
     const meetingIds = meetings.map((m) => m.id);
 
     // Buscar todas as presenças (membros) e contagem de visitantes por encontro
-    const [attendance, guestCounts, memberCounts] = await Promise.all([
+    const [attendance, guestCounts, guestNameRows, memberCounts] = await Promise.all([
       queryMany<{
         meeting_id: string;
         member_id: string;
@@ -650,6 +651,13 @@ export async function GET(request: Request) {
       ),
       queryMany<{ meeting_id: string; cnt: number }>(
         `SELECT meeting_id, COUNT(*)::int as cnt FROM attendance_guests WHERE meeting_id = ANY($1::uuid[]) GROUP BY meeting_id`,
+        [meetingIds]
+      ),
+      queryMany<{ guest_id: string; full_name: string }>(
+        `SELECT ag.guest_id, g.full_name
+         FROM attendance_guests ag
+         JOIN guest_visitors g ON g.id = ag.guest_id
+         WHERE ag.meeting_id = ANY($1::uuid[])`,
         [meetingIds]
       ),
       queryOne<{ inactive: number }>(
@@ -717,6 +725,38 @@ export async function GET(request: Request) {
       periodAvgRate,
     };
 
+    // Quebra do total de presenças por tipo de pessoa (independente do member_filter:
+    // é um total do período). Membros = participants; Visitantes = visitantes
+    // cadastrados (member_type=visitor) + visitantes avulsos (attendance_guests).
+    const presenceMembersMap = new Map<string, { name: string; presences: number }>();
+    const presenceVisitorMembersMap = new Map<string, { name: string; presences: number }>();
+    for (const att of attendance) {
+      if (!att.is_present) continue;
+      const target = att.member_type === 'participant' ? presenceMembersMap : presenceVisitorMembersMap;
+      const cur = target.get(att.member_id);
+      if (cur) cur.presences++;
+      else target.set(att.member_id, { name: att.member_name, presences: 1 });
+    }
+    const guestPresenceMap = new Map<string, { name: string; presences: number }>();
+    for (const row of guestNameRows) {
+      const cur = guestPresenceMap.get(row.guest_id);
+      if (cur) cur.presences++;
+      else guestPresenceMap.set(row.guest_id, { name: row.full_name, presences: 1 });
+    }
+    const byPresences = (a: { name: string; presences: number }, b: { name: string; presences: number }) =>
+      b.presences - a.presences || a.name.localeCompare(b.name);
+    const presenceMembersList = [...presenceMembersMap.values()].sort(byPresences);
+    const presenceVisitorsList = [
+      ...[...presenceVisitorMembersMap.values()].map((v) => ({ name: v.name, presences: v.presences, kind: 'cadastrado' as const })),
+      ...[...guestPresenceMap.values()].map((v) => ({ name: v.name, presences: v.presences, kind: 'avulso' as const })),
+    ].sort((a, b) => b.presences - a.presences || a.name.localeCompare(b.name));
+    const presenceBreakdown = {
+      members: presenceMembersList.reduce((s, m) => s + m.presences, 0),
+      visitors: presenceVisitorsList.reduce((s, m) => s + m.presences, 0),
+      membersList: presenceMembersList,
+      visitorsList: presenceVisitorsList,
+    };
+
     // Estatísticas por membro (todo o período), já filtrado por tipo
     const memberMap = new Map<string, { name: string; type: string; presences: number; absences: number }>();
 
@@ -767,6 +807,7 @@ export async function GET(request: Request) {
       summary,
       memberStats,
       meetingList,
+      presenceBreakdown,
     });
   } catch (error) {
     console.error('Erro ao buscar dados de engajamento:', error);

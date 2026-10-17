@@ -122,9 +122,132 @@ function pctChange(cur: number, prev: number): number | null {
   return Math.round(((cur - prev) / prev) * 100);
 }
 
+// ─── Janela a partir dos filtros da página ────────────────────────────────────
+// Traduz o filtro ativo (mês específico, trimestre, semestre, cartões de período)
+// em uma janela from/to (YYYY-MM). null = sem filtro: usa os botões 3/6/12 da seção.
+interface WindowSpec {
+  from: string; // YYYY-MM
+  to: string; // YYYY-MM
+  label: string; // rótulo legível para o chip
+}
+
+const YM_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function ymOf(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function ymAdd(ym: string, n: number): string {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return ymOf(d);
+}
+
+function monthLabelLong(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+function quarterMonths(q: string): [string, string] {
+  const [year, qn] = q.split('-Q'); // "2026-Q3"
+  const qi = Math.min(4, Math.max(1, Number(qn)));
+  const first = `${year}-${String((qi - 1) * 3 + 1).padStart(2, '0')}`;
+  const last = `${year}-${String(qi * 3).padStart(2, '0')}`;
+  return [first, last];
+}
+
+function semesterMonths(s: string): [string, string] {
+  const [year, sn] = s.split('-S'); // "2026-S1"
+  const first = sn === '2' ? `${year}-07` : `${year}-01`;
+  const last = sn === '2' ? `${year}-12` : `${year}-06`;
+  return [first, last];
+}
+
+function quarterShortLabel(q: string): string {
+  const [year, qn] = q.split('-Q');
+  return `T${qn}/${year.slice(-2)}`;
+}
+
+function semesterShortLabel(s: string): string {
+  const [year, sn] = s.split('-S');
+  return `S${sn}/${year.slice(-2)}`;
+}
+
+function computeWindowSpec(
+  period: string | undefined,
+  monthFilter: string | null | undefined,
+  quarterFilter: string[] | null | undefined,
+  semesterFilter: string[] | null | undefined,
+): WindowSpec | null {
+  const today = new Date();
+  const curYm = ymOf(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)));
+
+  // Filtro de mês específico (visão mensal): janela = só aquele mês
+  if (monthFilter && YM_RE.test(monthFilter)) {
+    return { from: monthFilter, to: monthFilter, label: monthLabelLong(monthFilter) };
+  }
+
+  if (period === 'quarterly') {
+    if (quarterFilter && quarterFilter.length > 0) {
+      const sorted = [...quarterFilter].sort();
+      const [fFirst] = quarterMonths(sorted[0]);
+      const [, fLast] = quarterMonths(sorted[sorted.length - 1]);
+      const label = sorted.length === 1
+        ? quarterShortLabel(sorted[0])
+        : `${quarterShortLabel(sorted[0])} – ${quarterShortLabel(sorted[sorted.length - 1])}`;
+      return { from: fFirst, to: fLast, label };
+    }
+    // Últimos 4 trimestres (incluindo o atual)
+    const [curFirst, curLast] = quarterMonths(`${today.getUTCFullYear()}-Q${Math.floor(today.getUTCMonth() / 3) + 1}`);
+    const first = ymAdd(curFirst, -9);
+    return { from: first, to: curLast, label: 'Últimos 4 trimestres' };
+  }
+
+  if (period === 'semiannual') {
+    if (semesterFilter && semesterFilter.length > 0) {
+      const sorted = [...semesterFilter].sort();
+      const [fFirst] = semesterMonths(sorted[0]);
+      const [, fLast] = semesterMonths(sorted[sorted.length - 1]);
+      const label = sorted.length === 1
+        ? semesterShortLabel(sorted[0])
+        : `${semesterShortLabel(sorted[0])} – ${semesterShortLabel(sorted[sorted.length - 1])}`;
+      return { from: fFirst, to: fLast, label };
+    }
+    // Últimos 4 semestres (incluindo o atual)
+    const curSemFirst = today.getUTCMonth() < 6 ? `${today.getUTCFullYear()}-01` : `${today.getUTCFullYear()}-07`;
+    const first = ymAdd(curSemFirst, -18);
+    const last = ymAdd(curSemFirst, 5);
+    return { from: first, to: last, label: 'Últimos 4 semestres' };
+  }
+
+  if (period === 'yearly') {
+    return { from: `${today.getUTCFullYear() - 2}-01`, to: curYm, label: 'Últimos 3 anos' };
+  }
+
+  if (period === 'weekly') {
+    const eightWeeksAgo = new Date(today.getTime() - 8 * 7 * 24 * 3600 * 1000);
+    return { from: ymOf(new Date(Date.UTC(eightWeeksAgo.getUTCFullYear(), eightWeeksAgo.getUTCMonth(), 1))), to: curYm, label: 'Últimas 8 semanas' };
+  }
+
+  return null; // mensal sem mês escolhido, por encontro, por nome: janela própria
+}
+
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
+export function EngagementGrowth({
+  apiSuffix = '',
+  period,
+  monthFilter,
+  quarterFilter,
+  semesterFilter,
+}: {
+  apiSuffix?: string;
+  /** Filtros da página de engajamento: quando ativos, definem a janela da seção. */
+  period?: string;
+  monthFilter?: string | null;
+  quarterFilter?: string[] | null;
+  semesterFilter?: string[] | null;
+}) {
   const [windowMonths, setWindowMonths] = useState(6);
   const [tagFilter, setTagFilter] = useState<TagFilterState>({});
   const [tagPanelOpen, setTagPanelOpen] = useState(false);
@@ -160,11 +283,18 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
 
   const tagFilterActive = Object.values(tagFilter).some((v) => v.length > 0);
 
+  const windowSpec = useMemo(
+    () => computeWindowSpec(period, monthFilter, quarterFilter, semesterFilter),
+    [period, monthFilter, quarterFilter, semesterFilter]
+  );
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      let url = `/api/engagement/growth?months=${windowMonths}`;
+      let url = windowSpec
+        ? `/api/engagement/growth?from_month=${windowSpec.from}&to_month=${windowSpec.to}`
+        : `/api/engagement/growth?months=${windowMonths}`;
       if (apiSuffix) url += `&${apiSuffix}`;
       if (tagFilterActive) url += `&tags=${encodeURIComponent(JSON.stringify(tagFilter))}`;
       const res = await fetch(url, { cache: 'no-store' });
@@ -176,7 +306,7 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
     } finally {
       setLoading(false);
     }
-  }, [windowMonths, apiSuffix, tagFilter, tagFilterActive]);
+  }, [windowMonths, apiSuffix, tagFilter, tagFilterActive, windowSpec?.from, windowSpec?.to]);
 
   useEffect(() => {
     void fetchData();
@@ -238,24 +368,32 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
               Crescimento do grupo
             </h2>
             <p className="text-sm text-muted-foreground">
-              Como o grupo está evoluindo nos últimos {windowMonths} meses: pessoas novas, quem voltou e quem ficou.
+              {windowSpec
+                ? `Como o grupo está evoluindo em ${windowSpec.label}: pessoas novas, quem voltou e quem ficou.`
+                : `Como o grupo está evoluindo nos últimos ${windowMonths} meses: pessoas novas, quem voltou e quem ficou.`}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => void fetchData()} title="Atualizar">
               <RefreshCw className="h-3.5 w-3.5" />
             </Button>
-            {WINDOW_OPTIONS.map((opt) => (
-              <Button
-                key={opt.value}
-                variant={windowMonths === opt.value ? 'default' : 'outline'}
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => setWindowMonths(opt.value)}
-              >
-                {opt.label}
-              </Button>
-            ))}
+            {windowSpec ? (
+              <Badge variant="secondary" className="h-8 whitespace-nowrap px-3 text-xs">
+                Período: {windowSpec.label}
+              </Badge>
+            ) : (
+              WINDOW_OPTIONS.map((opt) => (
+                <Button
+                  key={opt.value}
+                  variant={windowMonths === opt.value ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => setWindowMonths(opt.value)}
+                >
+                  {opt.label}
+                </Button>
+              ))
+            )}
           </div>
         </div>
 
@@ -426,7 +564,11 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
             >
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Novos nos últimos {windowMonths} meses
+                  {windowSpec
+                    ? windowSpec.from === windowSpec.to
+                      ? `Novos em ${windowSpec.label}`
+                      : 'Novos no período'
+                    : `Novos nos últimos ${windowMonths} meses`}
                 </CardTitle>
                 {newTrend !== null && (
                   newTrend >= 0
@@ -439,9 +581,11 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
                 <p className="text-xs text-muted-foreground mt-1">
                   {newTrend === null
                     ? 'sem período anterior para comparar'
-                    : newTrend >= 0
-                      ? `+${newTrend}% em relação aos ${windowMonths} meses anteriores`
-                      : `${newTrend}% em relação aos ${windowMonths} meses anteriores`}
+                    : windowSpec
+                      ? `${newTrend >= 0 ? '+' : ''}${newTrend}% em relação ao período anterior`
+                      : newTrend >= 0
+                        ? `+${newTrend}% em relação aos ${windowMonths} meses anteriores`
+                        : `${newTrend}% em relação aos ${windowMonths} meses anteriores`}
                 </p>
               </CardContent>
             </Card>
@@ -476,7 +620,7 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
             <CardHeader>
               <CardTitle className="text-base">Novas, voltaram e viraram membros (por mês)</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Pessoas novas no mês, visitantes que voltaram depois da 1ª visita e quem se tornou membro.
+                Pessoas novas no mês, visitantes na 2ª visita (voltaram) e quem completou 5 presenças — a régua do grupo para virar membro.
               </p>
             </CardHeader>
             <CardContent>
@@ -571,7 +715,7 @@ export function EngagementGrowth({ apiSuffix = '' }: { apiSuffix?: string }) {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Visitantes novos que voltaram</CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  Dos visitantes que apareceram pela primeira vez neste período, quantos já voltaram pelo menos uma vez.
+                  Dos visitantes novos do período (avulsos ou já cadastrados), quantos já voltaram pelo menos uma vez.
                 </p>
               </CardHeader>
               <CardContent>
