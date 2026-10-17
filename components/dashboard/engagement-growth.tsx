@@ -13,6 +13,8 @@ import {
   Legend,
   type ChartDataset,
   type ChartOptions,
+  type ChartEvent,
+  type ActiveElement,
 } from 'chart.js';
 import { Bar, Line } from 'react-chartjs-2';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -93,6 +95,8 @@ interface GrowthData {
     membersActive: string[];
     pathToMember: { name: string; kind: string; presences: number }[];
     newInWindow: { name: string; kind: string; date: string; label: string }[];
+    returned: { name: string; kind: string; date: string; label: string }[];
+    converted: { name: string; kind: string; date: string; label: string }[];
   };
 }
 
@@ -255,6 +259,11 @@ export function EngagementGrowth({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openList, setOpenList] = useState<ListKey | null>(null);
+  const [chartList, setChartList] = useState<{
+    title: string;
+    emptyText: string;
+    items: { name: string; kind: string; detail: string }[];
+  } | null>(null);
 
   // Plugin simples: desenha o valor acima de cada ponto/barrinha
   const valueLabelsPlugin = useMemo(
@@ -335,6 +344,45 @@ export function EngagementGrowth({
   const clearTagFilter = () => setTagFilter({});
 
   const appliedTagsCount = Object.entries(tagFilter).reduce((n, [, vals]) => n + vals.length, 0);
+
+  // Clique nos gráficos: mostra quem está atrás de cada barra/ponto
+  const handlePerMeetingClick = (_evt: ChartEvent, els: ActiveElement[]) => {
+    if (!data || !els || els.length === 0) return;
+    const meeting = data.perMeeting[els[0].index];
+    if (!meeting) return;
+    const items = data.lists.newInWindow
+      .filter((p) => p.date === meeting.date)
+      .map((p) => ({ name: p.name, kind: p.kind, detail: `1ª vez em ${p.label}` }));
+    setChartList({
+      title: `Pessoas novas — ${meeting.title ? `${meeting.title} · ` : ''}${meeting.label}`,
+      emptyText: 'Nenhuma pessoa nova neste encontro.',
+      items,
+    });
+  };
+
+  const handleMonthClick = (_evt: ChartEvent, els: ActiveElement[]) => {
+    if (!data || !els || els.length === 0) return;
+    const el = els[0];
+    const month = data.months[el.index];
+    if (!month) return;
+    const mesLabel = monthLabelLong(month.month);
+    if (el.datasetIndex === 0) {
+      const items = data.lists.newInWindow
+        .filter((p) => p.date.slice(0, 7) === month.month)
+        .map((p) => ({ name: p.name, kind: p.kind, detail: `1ª vez em ${p.label}` }));
+      setChartList({ title: `Novas pessoas — ${mesLabel}`, emptyText: 'Nenhuma pessoa nova neste mês.', items });
+    } else if (el.datasetIndex === 1) {
+      const items = (data.lists.returned ?? [])
+        .filter((p) => p.date.slice(0, 7) === month.month)
+        .map((p) => ({ name: p.name, kind: p.kind, detail: `voltou em ${p.label}` }));
+      setChartList({ title: `Visitantes que voltaram — ${mesLabel}`, emptyText: 'Nenhum retorno neste mês.', items });
+    } else if (el.datasetIndex === 2) {
+      const items = (data.lists.converted ?? [])
+        .filter((p) => p.date.slice(0, 7) === month.month)
+        .map((p) => ({ name: p.name, kind: p.kind, detail: `5ª presença em ${p.label}` }));
+      setChartList({ title: `Viraram membros — ${mesLabel}`, emptyText: 'Ninguém completou 5 presenças neste mês.', items });
+    }
+  };
 
   const barOptions: ChartOptions<'bar'> = {
     responsive: true,
@@ -596,7 +644,7 @@ export function EngagementGrowth({
             <CardHeader>
               <CardTitle className="text-base">Pessoas novas por encontro</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Quantas pessoas apareceram pela primeira vez em cada encontro.
+                Quantas pessoas apareceram pela primeira vez em cada encontro. Clique numa barra para ver quem são.
               </p>
             </CardHeader>
             <CardContent>
@@ -609,7 +657,7 @@ export function EngagementGrowth({
                       { label: 'Novos visitantes', data: data.perMeeting.map((m) => m.newGuests), backgroundColor: COLORS.green, stack: 's' },
                     ],
                   }}
-                  options={barOptions}
+                  options={{ ...barOptions, onClick: handlePerMeetingClick }}
                 />
               </div>
             </CardContent>
@@ -620,7 +668,8 @@ export function EngagementGrowth({
             <CardHeader>
               <CardTitle className="text-base">Novas, voltaram e viraram membros (por mês)</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Pessoas novas no mês, visitantes na 2ª visita (voltaram) e quem completou 5 presenças — a régua do grupo para virar membro.
+                Pessoas novas no mês, visitantes na 2ª visita (voltaram) e quem completou 5 presenças — a régua do grupo
+                para virar membro. Clique numa barra (ou no ponto roxo) para ver quem são.
               </p>
             </CardHeader>
             <CardContent>
@@ -631,10 +680,10 @@ export function EngagementGrowth({
                     datasets: [
                       { label: 'Novas pessoas', data: data.months.map((m) => m.newPeople), backgroundColor: COLORS.blue },
                       { label: 'Visitantes que voltaram', data: data.months.map((m) => m.returnedVisitors), backgroundColor: COLORS.amber },
-                      { label: 'Viraram membros', data: data.months.map((m) => m.conversions), type: 'line', borderColor: COLORS.violet, backgroundColor: COLORS.violet, tension: 0.3, pointRadius: 3 } as unknown as ChartDataset<'bar', number[]>,
+                      { label: 'Viraram membros', data: data.months.map((m) => m.conversions), type: 'line', borderColor: COLORS.violet, backgroundColor: COLORS.violet, tension: 0.3, pointRadius: 3, pointHitRadius: 12 } as unknown as ChartDataset<'bar', number[]>,
                     ],
                   }}
-                  options={monthOptions}
+                  options={{ ...monthOptions, onClick: handleMonthClick }}
                 />
               </div>
             </CardContent>
@@ -844,6 +893,34 @@ export function EngagementGrowth({
                       </div>
                     ))
                   ))}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Dialog: quem está atrás da barra/ponto clicado nos gráficos */}
+          <Dialog open={chartList !== null} onOpenChange={(o) => !o && setChartList(null)}>
+            <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>{chartList?.title}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-1.5">
+                {chartList && (chartList.items.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{chartList.emptyText}</p>
+                ) : (
+                  chartList.items.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm">{p.name}</span>
+                        {p.kind && (
+                          <Badge variant="outline" className="shrink-0 text-[10px]">
+                            {p.kind}
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="shrink-0 text-xs text-muted-foreground">{p.detail}</span>
+                    </div>
+                  ))
+                ))}
               </div>
             </DialogContent>
           </Dialog>

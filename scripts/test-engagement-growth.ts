@@ -151,6 +151,10 @@ check('lists.pathToMember tam', r1.lists.pathToMember.length, 2);
 check('lists.pathToMember[0]', r1.lists.pathToMember[0], { name: 'Felipe', kind: 'Voltou', presences: 2 });
 check('lists.pathToMember inclui membro', r1.lists.pathToMember.some((p) => p.name === 'Eva' && p.kind === 'Membro'), true);
 check('lists.newInWindow tam', r1.lists.newInWindow.length, 4);
+check('lists.returned tam (v2 avulso + Felipe cadastrado)', r1.lists.returned.length, 2);
+check('lists.returned Felipe', r1.lists.returned.some((p) => p.name === 'Felipe' && p.kind === 'Cadastrado'), true);
+check('lists.returned v2 avulso', r1.lists.returned.some((p) => p.name === 'Visitante 2' && p.kind === 'Avulso'), true);
+check('lists.converted tam (ninguem com 5 presencas)', r1.lists.converted.length, 0);
 
 // ── Com filtro de tags (só B) ──
 const r2 = computeGrowthMetrics({ ...baseInput, tags: { 'célula': ['joão'] } });
@@ -294,6 +298,17 @@ check('janela-abril: perMeeting = 1', w3.perMeeting.length, 1);
 check('janela-abril: newPeople = 1 (G3)', w3.months[0].newPeople, 1);
 check('janela-abril: G3 conta como novo (1ª presença em abril)', w3.totals.newInWindow, 1);
 check('janela-abril: voltou = 1 (G1, 2ª presença em abril)', w3.months[0].returnedVisitors, 1);
+
+// ── Listas clicáveis dos gráficos (returned/converted) nas janelas explícitas ──
+check('listas w1: returned = só Vera (2ª presença 05/03)', w1.lists.returned.map((p) => p.name), ['Vera']);
+check('listas w1: returned kind', w1.lists.returned[0].kind, 'Cadastrado');
+check('listas w1: returned label', w1.lists.returned[0].label, '05/03');
+check('listas w1: converted = só Vitor (5ª presença 29/03)', w1.lists.converted.map((p) => p.name), ['Vitor']);
+check('listas w1: converted exclui participante P1', w1.lists.converted.some((p) => p.name === 'Paulo'), false);
+check('listas w2: returned = Vera (mar) + Vitor (fev), data desc', w2.lists.returned.map((p) => p.name), ['Vera', 'Vitor']);
+check('listas w2: converted = Vitor', w2.lists.converted.map((p) => p.name), ['Vitor']);
+check('listas w3: returned = G1 avulso (2ª em abril)', w3.lists.returned.map((p) => [p.name, p.kind]), [['G1', 'Avulso']]);
+check('listas w3: converted vazio', w3.lists.converted.length, 0);
 
 if (failures > 0) {
   console.log(`\n${failures} falha(s)`);

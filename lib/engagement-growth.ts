@@ -123,6 +123,10 @@ export interface GrowthResult {
     membersActive: string[];
     pathToMember: { name: string; kind: string; presences: number }[];
     newInWindow: { name: string; kind: string; date: string; label: string }[];
+    /** Pessoas cuja 2ª presença caiu na janela (gráfico mensal clicável). */
+    returned: { name: string; kind: string; date: string; label: string }[];
+    /** Pessoas cuja 5ª presença caiu na janela (gráfico mensal clicável). */
+    converted: { name: string; kind: string; date: string; label: string }[];
   };
 }
 
@@ -553,7 +557,7 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
 
   const newInWindowList: { name: string; kind: string; date: string; label: string }[] = [];
   for (const [memberId, firstDate] of memberFirstPresent) {
-    if (!memberAllowed(memberId) || firstDate < windowStartIso) continue;
+    if (!memberAllowed(memberId) || firstDate < windowStartIso || firstDate > windowEndIso) continue;
     newInWindowList.push({
       name: memberById.get(memberId)?.full_name ?? 'Pessoa',
       kind: memberById.get(memberId)?.member_type === 'participant' ? 'Membro' : 'Visitante',
@@ -562,10 +566,46 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
     });
   }
   for (const [guestId, firstDate] of guestFirstPresent) {
-    if (firstDate < windowStartIso) continue;
+    if (firstDate < windowStartIso || firstDate > windowEndIso) continue;
     newInWindowList.push({ name: guestNameById.get(guestId) ?? 'Visitante', kind: 'Visitante', date: firstDate, label: growthShortDate(firstDate) });
   }
   newInWindowList.sort((a, b) => b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
+
+  // ── Listas por mês para os gráficos clicáveis ("Voltou" = 2ª presença,
+  //    "Virou membro" = 5ª presença) — limitadas à janela, cobrindo todo clique ──
+  const isInWindow = (d: string) => d >= windowStartIso && d <= windowEndIso;
+  const presenceListEntry = (
+    name: string, kind: string, ds: string[], nth: number
+  ): { name: string; kind: string; date: string; label: string } => ({
+    name,
+    kind,
+    date: ds[nth],
+    label: growthShortDate(ds[nth]),
+  });
+  const returnedList: { name: string; kind: string; date: string; label: string }[] = [];
+  for (const [guestId, dates] of guestPresenceDates) {
+    const ds = uniqueSorted(dates);
+    if (ds.length >= 2 && isInWindow(ds[1])) returnedList.push(presenceListEntry(guestNameById.get(guestId) ?? 'Visitante', 'Avulso', ds, 1));
+  }
+  for (const [memberId, dates] of visitorMemberPresenceDates) {
+    const ds = uniqueSorted(dates);
+    if (ds.length >= 2 && isInWindow(ds[1])) {
+      returnedList.push(presenceListEntry(memberById.get(memberId)?.full_name ?? 'Visitante', 'Cadastrado', ds, 1));
+    }
+  }
+  const convertedList: { name: string; kind: string; date: string; label: string }[] = [];
+  for (const [guestId, dates] of guestPresenceDates) {
+    const ds = uniqueSorted(dates);
+    if (ds.length >= 5 && isInWindow(ds[4])) convertedList.push(presenceListEntry(guestNameById.get(guestId) ?? 'Visitante', 'Avulso', ds, 4));
+  }
+  for (const [memberId, dates] of visitorMemberPresenceDates) {
+    const ds = uniqueSorted(dates);
+    if (ds.length >= 5 && isInWindow(ds[4])) {
+      convertedList.push(presenceListEntry(memberById.get(memberId)?.full_name ?? 'Visitante', 'Cadastrado', ds, 4));
+    }
+  }
+  returnedList.sort((a, b) => b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
+  convertedList.sort((a, b) => b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
 
   // ── Tags disponíveis para o filtro ──
   const tagOptionsMap = new Map<string, Set<string>>();
@@ -606,6 +646,8 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
       membersActive: membersActiveNames,
       pathToMember,
       newInWindow: newInWindowList,
+      returned: returnedList,
+      converted: convertedList,
     },
   };
 }
