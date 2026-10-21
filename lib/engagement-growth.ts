@@ -95,7 +95,9 @@ export interface GrowthTrend {
 }
 
 export interface GrowthFrequencyBuckets {
+  /** Encontros da janela COM chamada registrada (≥1 registro de membro ou visitante). */
   totalMeetings: number;
+  /** Participantes ativos com pelo menos 1 encontro (com chamada) desde o seu cadastro. */
   consideredMembers: number;
   buckets: { key: string; label: string; count: number }[];
 }
@@ -413,14 +415,34 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
   };
 
   // ── Frequência dos membros no período (assinatura de participação) ──
-  const windowMeetingIds = new Set(meetingsInWindow.map((m) => m.id));
-  const totalMeetings = meetingsInWindow.length;
+  // Regras de correção do gráfico "Como está a frequência dos membros":
+  //  1. Denominador = encontros da janela COM chamada registrada (≥1 registro
+  //     de presença/ausência de membro ou de visitante avulso). Encontro
+  //     passado sem chamada nenhuma não pode ter "presença" — contá-lo no
+  //     denominador deflava a taxa de todos os membros.
+  //  2. Cada membro é medido apenas pelos encontros desde o seu cadastro
+  //     (created_at): quem entrou no meio do período não é punido pelos
+  //     encontros que antecederam sua chegada.
+  //  3. Quem ainda não teve nenhum encontro (com chamada) desde que entrou
+  //     fica fora da conta — não há o que medir.
+  const inWindowMeetingIds = new Set(inWindowMeetings.map((m) => m.id));
+  const recordedMeetingIds = new Set<string>();
+  for (const row of attendanceRows) {
+    if (inWindowMeetingIds.has(row.meeting_id)) recordedMeetingIds.add(row.meeting_id);
+  }
+  for (const row of guestRows) {
+    if (inWindowMeetingIds.has(row.meeting_id)) recordedMeetingIds.add(row.meeting_id);
+  }
+  const recordedMeetings = inWindowMeetings.filter((m) => recordedMeetingIds.has(m.id));
+  const totalMeetings = recordedMeetings.length;
   let memberFrequency: GrowthFrequencyBuckets | null = null;
   if (totalMeetings > 0) {
-    const presencesInWindow = new Map<string, number>();
+    const presentDatesByMember = new Map<string, string[]>();
     for (const row of attendanceRows) {
-      if (!windowMeetingIds.has(row.meeting_id) || !row.is_present) continue;
-      presencesInWindow.set(row.member_id, (presencesInWindow.get(row.member_id) ?? 0) + 1);
+      if (!recordedMeetingIds.has(row.meeting_id) || !row.is_present) continue;
+      let arr = presentDatesByMember.get(row.member_id);
+      if (!arr) { arr = []; presentDatesByMember.set(row.member_id, arr); }
+      arr.push(row.meeting_date);
     }
     const bucketsMap: Record<string, number> = {
       assiduo: 0,
@@ -433,9 +455,12 @@ export function computeGrowthMetrics(input: GrowthComputeInput): GrowthResult {
     for (const m of members) {
       if (!m.is_active || m.member_type !== 'participant') continue;
       if (!memberAllowed(m.id)) continue;
+      const createdDate = m.created_at.slice(0, 10);
+      const eligibleMeetings = recordedMeetings.filter((rm) => rm.meeting_date >= createdDate);
+      if (eligibleMeetings.length === 0) continue;
       considered++;
-      const p = presencesInWindow.get(m.id) ?? 0;
-      const rate = p / totalMeetings;
+      const p = (presentDatesByMember.get(m.id) ?? []).filter((d) => d >= createdDate).length;
+      const rate = p / eligibleMeetings.length;
       if (p === 0) bucketsMap.ausente_total++;
       else if (rate >= 0.75) bucketsMap.assiduo++;
       else if (rate >= 0.5) bucketsMap.regular++;

@@ -8,5 +8,5 @@ export default async function EngajamentoAnalisesPage() {
     return <div>Grupo não encontrado.</div>;
   }
 
-  return <EngagementAnalisesClient />;
+  return <EngagementAnalisesClient groupId={leader.group_id} />;
 }

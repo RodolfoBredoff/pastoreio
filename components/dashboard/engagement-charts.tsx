@@ -459,6 +459,9 @@ interface PeriodSummaryBreakdownProps {
   periodLabel: string;
   breakdownGranularity: string | null;
   chartGranularity: string;
+  /** Linha "Total" consolidada só aparece com recorte explícito
+   *  (mês/trimestre/semestre selecionado) — sem filtro, o acumulado confunde. */
+  showTotals?: boolean;
 }
 
 export function PeriodSummaryBreakdown({
@@ -467,6 +470,7 @@ export function PeriodSummaryBreakdown({
   periodLabel,
   breakdownGranularity,
   chartGranularity,
+  showTotals = true,
 }: PeriodSummaryBreakdownProps) {
   const subLabel = breakdownGranularity
     ? BREAKDOWN_LABELS[breakdownGranularity] ?? breakdownGranularity
@@ -481,8 +485,9 @@ export function PeriodSummaryBreakdown({
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Resumo do período — {periodLabel}</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Total consolidado do filtro selecionado
-          {breakdownGranularity ? `, com detalhamento por ${subLabel.toLowerCase()}` : ''}
+          {showTotals
+            ? `Total consolidado do filtro selecionado${breakdownGranularity ? `, com detalhamento por ${subLabel.toLowerCase()}` : ''}`
+            : `Detalhamento por ${subLabel.toLowerCase()} do filtro selecionado`}
         </p>
       </CardHeader>
       <CardContent>
@@ -498,13 +503,15 @@ export function PeriodSummaryBreakdown({
               </tr>
             </thead>
             <tbody>
-              <tr className="border-b bg-muted/40 font-semibold">
-                <td className="py-2.5 pr-4">Total ({periodLabel})</td>
-                <td className="py-2.5 pr-4 text-right">{summary.meetingCount}</td>
-                <td className="py-2.5 pr-4 text-right text-green-700">{summary.totalPresentes}</td>
-                <td className="py-2.5 pr-4 text-right text-red-700">{summary.totalAusentes}</td>
-                <td className="py-2.5 text-right">{summary.taxaGeral}%</td>
-              </tr>
+              {showTotals && (
+                <tr className="border-b bg-muted/40 font-semibold">
+                  <td className="py-2.5 pr-4">Total ({periodLabel})</td>
+                  <td className="py-2.5 pr-4 text-right">{summary.meetingCount}</td>
+                  <td className="py-2.5 pr-4 text-right text-green-700">{summary.totalPresentes}</td>
+                  <td className="py-2.5 pr-4 text-right text-red-700">{summary.totalAusentes}</td>
+                  <td className="py-2.5 text-right">{summary.taxaGeral}%</td>
+                </tr>
+              )}
               {showSubRows && breakdownRows.map((row) => (
                 <tr key={row.periodStart} className="border-b last:border-b-0 text-muted-foreground">
                   <td className="py-2 pr-4 pl-3">{row.period}</td>
@@ -517,7 +524,7 @@ export function PeriodSummaryBreakdown({
             </tbody>
           </table>
         </div>
-        {summary.periodAvgRate !== summary.taxaGeral && breakdownRows.length > 1 && (
+        {showTotals && summary.periodAvgRate !== summary.taxaGeral && breakdownRows.length > 1 && (
           <p className="text-xs text-muted-foreground mt-3">
             Média aritmética por {subLabel.toLowerCase()}: {summary.periodAvgRate}% —
             pode diferir da taxa geral ({summary.taxaGeral}%) quando os períodos têm volumes diferentes.

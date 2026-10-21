@@ -4,21 +4,19 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { TrendingUp, TrendingDown, Award, CalendarSearch, Loader2, Users, CheckCircle, XCircle, Star, List, Share2, Link2, UserPlus, Printer, HelpCircle, ChevronDown, ChevronUp, UserX } from 'lucide-react';
+import { TrendingUp, TrendingDown, Award, CalendarSearch, Loader2, Users, CheckCircle, XCircle, Star, List, Share2, Link2, Printer, HelpCircle, ChevronDown, ChevronUp, UserX } from 'lucide-react';
 import {
   EngagementPeriodCharts,
-  MemberDistributionChart,
-  DiscipleshipBarChart,
   PeriodSummaryBreakdown,
   type PeriodDataPoint,
 } from '@/components/dashboard/engagement-charts';
+import type { MemberStat } from '@/components/dashboard/member-presence-absence-distribution';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { MemberAttendanceStats } from '@/components/pessoas/member-attendance-stats';
 import type { Period, MemberFilter, PresenceFilter } from '@/components/dashboard/engagement-filter-controls';
 import {
   PERIOD_OPTIONS,
@@ -48,15 +46,6 @@ const CHART_GRANULARITY_LABELS: Record<string, string> = {
   semiannual: 'Semestre',
   yearly: 'Ano',
 };
-
-interface MemberStat {
-  id?: string;
-  name: string;
-  type: string;
-  presences: number;
-  absences: number;
-  taxa: number;
-}
 
 interface PresenceBreakdown {
   members: number;
@@ -101,18 +90,6 @@ interface TitleGroup {
   latest_date: string;
 }
 
-interface DiscipleshipStats {
-  totalMembers: number;
-  totalLinked: number;
-  totalUnlinked: number;
-  byDiscipulador: {
-    discipuladorId: string;
-    discipuladorName: string;
-    count: number;
-    members: { id: string; full_name: string }[];
-  }[];
-}
-
 // ─── Componentes internos ─────────────────────────────────────────────────────
 
 function StatsCards({
@@ -122,6 +99,7 @@ function StatsCards({
   memberStats,
   presenceFilter,
   presenceBreakdown,
+  showTotals,
 }: {
   summary: EngagementSummary;
   periodData: PeriodDataPoint[];
@@ -129,6 +107,9 @@ function StatsCards({
   memberStats: MemberStat[];
   presenceFilter?: PresenceFilter;
   presenceBreakdown?: PresenceBreakdown | null;
+  /** Totais de presenças/ausências só aparecem com recorte explícito
+   *  (mês/trimestre/semestre selecionado) — sem filtro, o acumulado confunde. */
+  showTotals: boolean;
 }) {
   const [presenceListOpen, setPresenceListOpen] = useState(false);
   const trend = periodData.length >= 2
@@ -136,7 +117,7 @@ function StatsCards({
   const totalRecords = summary.totalPresentes + summary.totalAusentes;
 
   return (
-    <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className={`grid gap-4 grid-cols-2 ${showTotals ? 'lg:grid-cols-3 xl:grid-cols-6' : 'lg:grid-cols-4'}`}>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <div className="flex items-center gap-1.5">
@@ -242,6 +223,8 @@ function StatsCards({
           <p className="text-xs text-muted-foreground mt-1">inativos no grupo</p>
         </CardContent>
       </Card>
+      {showTotals && (
+        <>
       <Card
         className="cursor-pointer transition-colors hover:border-primary/60"
         onClick={() => setPresenceListOpen(true)}
@@ -284,6 +267,8 @@ function StatsCards({
           <p className="text-xs text-muted-foreground mt-1">registros de falta</p>
         </CardContent>
       </Card>
+        </>
+      )}
 
       <Dialog open={presenceListOpen} onOpenChange={setPresenceListOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
@@ -338,176 +323,6 @@ function StatsCards({
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-const CHART_LIMIT_OPTIONS = [5, 10, 15, 20] as const;
-
-function MemberPresenceAbsenceDistribution({
-  stats,
-  groupId,
-}: {
-  stats: MemberStat[];
-  groupId?: string | null;
-}) {
-  const [mode, setMode] = useState<'absences' | 'presences'>('absences');
-  const [chartLimit, setChartLimit] = useState<number>(10);
-  const [selectedMember, setSelectedMember] = useState<{ id: string; name: string } | null>(null);
-
-  const fullData = [...stats]
-    .map((m) => ({
-      id: m.id,
-      name: m.name,
-      presences: m.presences,
-      absences: m.absences,
-    }))
-    .filter((m) => (mode === 'absences' ? m.absences > 0 : m.presences > 0))
-    .sort((a, b) => (mode === 'absences' ? b.absences - a.absences : b.presences - a.presences));
-
-  const chartData = chartLimit > 0 ? fullData.slice(0, chartLimit) : fullData;
-  const isAbsences = mode === 'absences';
-  const barHeight = 32;
-  const chartHeight = Math.max(180, chartData.length * barHeight);
-  const chartContainerMaxHeight = 420;
-  const chartScrollable = chartHeight > chartContainerMaxHeight;
-
-  const handleSelectMember = (id: string | undefined, name: string) => {
-    if (id) setSelectedMember({ id, name });
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          {isAbsences ? (
-            <>
-              <TrendingDown className="h-5 w-5 text-red-600" />
-              Faltas por Pessoa
-            </>
-          ) : (
-            <>
-              <TrendingUp className="h-5 w-5 text-green-600" />
-              Presenças por Pessoa
-            </>
-          )}
-        </CardTitle>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <span className="text-sm text-muted-foreground self-center">Ordenar por:</span>
-          <Button
-            size="sm"
-            variant={isAbsences ? 'default' : 'outline'}
-            onClick={() => setMode('absences')}
-          >
-            Número de faltas
-          </Button>
-          <Button
-            size="sm"
-            variant={!isAbsences ? 'default' : 'outline'}
-            onClick={() => setMode('presences')}
-          >
-            Número de presenças
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground mt-1">
-          Lista em ordem decrescente, do mais {isAbsences ? 'ausente' : 'presente'} ao menos {isAbsences ? 'ausente' : 'presente'}.
-          Clique no nome (lista ou gráfico) para ver em quais encontros a pessoa esteve presente ou ausente.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {fullData.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nenhum dado suficiente para montar o ranking com o filtro atual.
-          </p>
-        ) : (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-muted-foreground">Exibir no gráfico:</span>
-              {CHART_LIMIT_OPTIONS.map((n) => (
-                <Button
-                  key={n}
-                  size="sm"
-                  variant={chartLimit === n ? 'default' : 'outline'}
-                  onClick={() => setChartLimit(n)}
-                >
-                  Top {n}
-                </Button>
-              ))}
-              <Button
-                size="sm"
-                variant={chartLimit === 0 ? 'default' : 'outline'}
-                onClick={() => setChartLimit(0)}
-              >
-                Todos ({fullData.length})
-              </Button>
-            </div>
-            <div
-              className="w-full overflow-x-auto"
-              style={
-                chartScrollable
-                  ? { maxHeight: chartContainerMaxHeight, overflowY: 'auto' as const }
-                  : undefined
-              }
-            >
-              <MemberDistributionChart
-                chartData={chartData.map((m) => ({
-                  name: m.name,
-                  value: isAbsences ? m.absences : m.presences,
-                  id: m.id,
-                }))}
-                isAbsences={isAbsences}
-                chartHeight={chartHeight}
-                onSelectMember={handleSelectMember}
-              />
-            </div>
-            <div className="space-y-0 max-h-64 overflow-y-auto rounded-md border">
-              {fullData.map((m, index) => (
-                <button
-                  type="button"
-                  key={m.id ?? m.name + index}
-                  onClick={() => handleSelectMember(m.id, m.name)}
-                  disabled={!m.id}
-                  className={`flex w-full items-center justify-between py-2 px-3 text-left transition-colors hover:bg-muted/60 disabled:cursor-default disabled:opacity-70 disabled:hover:bg-transparent ${m.id ? 'cursor-pointer' : ''} border-b last:border-b-0`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className={`inline-flex shrink-0 items-center justify-center w-6 h-6 rounded-full text-xs font-semibold ${
-                        isAbsences ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                      }`}
-                    >
-                      {index + 1}
-                    </span>
-                    <span className="text-sm truncate">{m.name}</span>
-                  </div>
-                  <span
-                    className={`text-sm font-medium shrink-0 ml-2 ${
-                      isAbsences ? 'text-red-700' : 'text-green-700'
-                    }`}
-                  >
-                    {isAbsences ? `${m.absences} falta${m.absences !== 1 ? 's' : ''}` : `${m.presences} presença${m.presences !== 1 ? 's' : ''}`}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </CardContent>
-      <Dialog open={!!selectedMember} onOpenChange={(open) => !open && setSelectedMember(null)}>
-        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {selectedMember ? `Presença — ${selectedMember.name}` : 'Presença em encontros'}
-            </DialogTitle>
-          </DialogHeader>
-          {selectedMember && (
-            <MemberAttendanceStats
-              memberId={selectedMember.id}
-              embedded
-              groupId={groupId}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </Card>
   );
 }
 
@@ -1243,106 +1058,6 @@ function DataInterpretationGuide() {
   );
 }
 
-// ─── Gráfico e filtro por discipulador ───────────────────────────────────────
-
-function DiscipleshipCard({ apiSuffix }: { apiSuffix: string }) {
-  const [stats, setStats] = useState<DiscipleshipStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [filterDiscipuladorId, setFilterDiscipuladorId] = useState<string>('');
-
-  useEffect(() => {
-    setLoading(true);
-    const url = apiSuffix ? `/api/discipleship?${apiSuffix}` : '/api/discipleship';
-    fetch(url, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setStats)
-      .finally(() => setLoading(false));
-  }, [apiSuffix]);
-
-  if (loading || !stats) {
-    return (
-      <Card>
-        <CardContent className="py-8 flex items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const list = filterDiscipuladorId
-    ? stats.byDiscipulador.filter((d) => d.discipuladorId === filterDiscipuladorId)
-    : stats.byDiscipulador;
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <UserPlus className="h-5 w-5" />
-          Pessoas vinculadas a um discipulador
-        </CardTitle>
-        <p className="text-sm text-muted-foreground">
-          {stats.totalLinked} de {stats.totalMembers} pessoas com discipulador definido
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-muted-foreground">Filtrar por discipulador:</span>
-          <select
-            value={filterDiscipuladorId}
-            onChange={(e) => setFilterDiscipuladorId(e.target.value)}
-            className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm min-w-[180px]"
-          >
-            <option value="">Todos</option>
-            {stats.byDiscipulador.map((d) => (
-              <option key={d.discipuladorId} value={d.discipuladorId}>
-                {d.discipuladorName} ({d.count})
-              </option>
-            ))}
-          </select>
-        </div>
-        {list.length > 0 ? (
-          <>
-            <DiscipleshipBarChart
-              labels={list.map((d) => d.discipuladorName)}
-              values={list.map((d) => d.count)}
-            />
-            <div className="text-sm text-muted-foreground">
-              {list.map((d) => (
-                <div key={d.discipuladorId} className="flex justify-between py-0.5">
-                  <span>{d.discipuladorName}</span>
-                  <span className="font-medium">{d.count} pessoa{d.count !== 1 ? 's' : ''}</span>
-                </div>
-              ))}
-            </div>
-            {/* Lista de pessoas vinculadas a cada discipulador */}
-            <div className="border-t pt-4 space-y-4">
-              <h4 className="text-sm font-medium text-foreground">Pessoas vinculadas a cada discipulador</h4>
-              {list.map((d) => {
-                const members = d.members ?? [];
-                if (members.length === 0) return null;
-                return (
-                  <div key={d.discipuladorId} className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
-                    <p className="text-sm font-medium">
-                      {d.discipuladorName} — {members.length} pessoa{members.length !== 1 ? 's' : ''}
-                    </p>
-                    <ul className="text-sm text-muted-foreground list-disc list-inside space-y-0.5">
-                      {members.map((m) => (
-                        <li key={m.id}>{m.full_name}</li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">Nenhum vínculo com discipulador cadastrado.</p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 interface EngagementClientProps {
@@ -1493,6 +1208,14 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
         : memberStats;
   const perfectAttendance = filteredMemberStats.filter((m) => m.presences > 0 && m.absences === 0).map((m) => m.name);
 
+  // Recorte explícito escolhido (mês, trimestres ou semestres): os cards de
+  // Total de Presenças/Ausências e a linha consolidada do resumo só aparecem
+  // com período delimitado — sem filtro, o total acumulado confunde.
+  const hasExplicitCut =
+    (view === 'monthly' && !!selectedMonth) ||
+    (view === 'quarterly' && selectedQuarters.length > 0) ||
+    (view === 'semiannual' && selectedSemesters.length > 0);
+
   const handlePeriodClick = (periodData: PeriodDataPoint) => {
     setSelectedPeriodData(periodData);
     setPeriodDialogOpen(true);
@@ -1597,10 +1320,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
       />
 
       {view === 'title_group' ? (
-        <>
-          <TitleGroupView apiSuffix={apiSuffix} memberFilter={memberFilter} presenceFilter={presenceFilter} refreshKey={refreshNonce} />
-          <DiscipleshipCard apiSuffix={apiSuffix} />
-        </>
+        <TitleGroupView apiSuffix={apiSuffix} memberFilter={memberFilter} presenceFilter={presenceFilter} refreshKey={refreshNonce} />
       ) : loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -1611,10 +1331,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
           <p className="text-sm text-muted-foreground mt-1">Registre presenças na página de Chamada para ver as análises aqui.</p>
         </div>
       ) : view === 'meeting' ? (
-        <>
-          <MeetingDetailView meetings={meetingList} memberFilter={memberFilter} presenceFilter={presenceFilter} apiSuffix={apiSuffix} />
-          <DiscipleshipCard apiSuffix={apiSuffix} />
-        </>
+        <MeetingDetailView meetings={meetingList} memberFilter={memberFilter} presenceFilter={presenceFilter} apiSuffix={apiSuffix} />
       ) : (
         <>
           <StatsCards
@@ -1624,6 +1341,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
             memberStats={filteredMemberStats}
             presenceFilter={presenceFilter}
             presenceBreakdown={presenceBreakdown}
+            showTotals={hasExplicitCut}
           />
 
           <PeriodSummaryBreakdown
@@ -1632,6 +1350,7 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
             periodLabel={periodLabel}
             breakdownGranularity={breakdownGranularity}
             chartGranularity={chartGranularity}
+            showTotals={hasExplicitCut}
           />
           <EngagementPeriodCharts
             data={chartData}
@@ -1640,8 +1359,6 @@ export function EngagementClient({ groupId, publicToken }: EngagementClientProps
             onPeriodClick={handlePeriodClick}
             presenceFilter={presenceFilter}
           />
-          <MemberPresenceAbsenceDistribution stats={filteredMemberStats} groupId={groupId} />
-          <DiscipleshipCard apiSuffix={apiSuffix} />
           <PeriodDetailDialog
             open={periodDialogOpen}
             onOpenChange={setPeriodDialogOpen}

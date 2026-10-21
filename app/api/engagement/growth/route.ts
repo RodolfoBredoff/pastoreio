@@ -104,7 +104,11 @@ export async function GET(request: Request) {
     const today = new Date();
     const windowStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
     windowStart.setUTCMonth(windowStart.getUTCMonth() - (windowMonths - 1));
-    const windowStartIso = windowStart.toISOString().slice(0, 10);
+    // Início da janela no SQL: com from_month/to_month explícitos (filtros da
+    // página), o início É o "from". Antes usávamos sempre a janela relativa
+    // (ex.: 6 meses), o que cortava encontros anteriores ao limite em
+    // períodos longos (trimestres/semestres/anos) e esvaziava meses antigos.
+    const windowStartIso = windowFromIso ?? windowStart.toISOString().slice(0, 10);
     // Limite superior: explicitamente o fim do mês "to", ou o fim do mês corrente
     const windowEndIso = windowToIso
       ?? new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);

@@ -720,7 +720,7 @@ export function EngagementGrowth({
               <CardHeader>
                 <CardTitle className="text-base">Como está a frequência dos membros</CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  Em quantos dos {data.memberFrequency?.totalMeetings ?? 0} encontros do período cada membro esteve presente.
+                  Em quantos dos {data.memberFrequency?.totalMeetings ?? 0} encontros com chamada registrada cada membro esteve presente.
                 </p>
               </CardHeader>
               <CardContent>
@@ -752,11 +752,11 @@ export function EngagementGrowth({
                       />
                     </div>
                     <p className="text-xs text-muted-foreground mt-2">
-                      {data.memberFrequency.consideredMembers} membros ativos considerados.
+                      {data.memberFrequency.consideredMembers} membros ativos considerados — cada um medido pelos encontros desde o seu cadastro.
                     </p>
                   </>
                 ) : (
-                  <p className="text-sm text-muted-foreground">Sem encontros no período.</p>
+                  <p className="text-sm text-muted-foreground">Sem encontros com chamada registrada no período.</p>
                 )}
               </CardContent>
             </Card>

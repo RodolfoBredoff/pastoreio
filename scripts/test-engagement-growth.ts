@@ -281,6 +281,12 @@ check('janela-explícita: cumulativo primeiro mês', w1.cumulativeByMonth[0].mon
 // G3 (criada em abril) ainda não existia no fim de março: 5, não peopleEver(6)
 check('janela-explícita: cumulativo final (sem G3 de abril)', w1.cumulativeByMonth[w1.cumulativeByMonth.length - 1].total, 5);
 
+// Frequência na janela explícita: denominador = encontros COM chamada DA janela
+// (lib refiltra; wfeb/wapr estão fora e não podem contar)
+check('janela-explícita: frequencia.totalMeetings (só os 3 de março)', w1.memberFrequency?.totalMeetings, 3);
+check('janela-explícita: frequencia.considered (só P1; V1/V2 são visitantes)', w1.memberFrequency?.consideredMembers, 1);
+check('janela-explícita: frequencia.assiduo (P1 3/3)', w1.memberFrequency?.buckets.find((b) => b.key === 'assiduo')?.count, 1);
+
 // ── Janela explícita: fev + mar/2026 (dois meses) ──
 const w2 = computeGrowthMetrics({ ...wBase, windowFromIso: '2026-02-01', windowToIso: '2026-03-31' });
 check('janela-2-meses: months = 2', w2.months.length, 2);
@@ -309,6 +315,63 @@ check('listas w2: returned = Vera (mar) + Vitor (fev), data desc', w2.lists.retu
 check('listas w2: converted = Vitor', w2.lists.converted.map((p) => p.name), ['Vitor']);
 check('listas w3: returned = G1 avulso (2ª em abril)', w3.lists.returned.map((p) => [p.name, p.kind]), [['G1', 'Avulso']]);
 check('listas w3: converted vazio', w3.lists.converted.length, 0);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Frequência — correções de consistência (datas fixas):
+//  - encontro sem chamada registrada NÃO entra no denominador;
+//  - membro criado no meio da janela é medido desde o cadastro;
+//  - membro criado depois do último encontro fica fora da conta.
+// ════════════════════════════════════════════════════════════════════════════════
+
+const fMembers: GrowthMemberRow[] = [
+  // M1: cadastrado antes da janela; 2 presenças em 3 encontros com chamada → regular
+  { id: 'M1', member_type: 'participant', integration_stage: 'novo_visitante', is_active: true, created_at: '2025-12-01T10:00:00Z', full_name: 'Marcos' },
+  // M2: cadastrado no meio da janela; 2 presenças em 2 encontros desde o cadastro → assíduo
+  { id: 'M2', member_type: 'participant', integration_stage: 'novo_visitante', is_active: true, created_at: '2026-02-20T10:00:00Z', full_name: 'Mário' },
+  // M3: cadastrado depois do último encontro com chamada → fica fora da conta
+  { id: 'M3', member_type: 'participant', integration_stage: 'novo_visitante', is_active: true, created_at: '2026-03-20T10:00:00Z', full_name: 'Mel' },
+  // VIS: visitante cadastrado — não entra nos buckets (só participantes)
+  { id: 'VIS', member_type: 'visitor', integration_stage: 'novo_visitante', is_active: true, created_at: '2025-11-01T10:00:00Z', full_name: 'Vito' },
+];
+
+const fMeetings: GrowthMeetingRow[] = [
+  { id: 'fjan1', meeting_date: '2026-01-10', title: 'Jan 1', meeting_type: 'regular' },
+  // fjan2: encontro SEM chamada registrada — não pode deflacionar a taxa de ninguém
+  { id: 'fjan2', meeting_date: '2026-01-24', title: 'Jan 2', meeting_type: 'regular' },
+  { id: 'ffeb', meeting_date: '2026-02-25', title: 'Fev', meeting_type: 'regular' },
+  { id: 'fmar', meeting_date: '2026-03-10', title: 'Mar', meeting_type: 'regular' },
+];
+
+const fAttendance: GrowthAttendanceRow[] = [
+  { member_id: 'M1', meeting_id: 'fjan1', is_present: true, meeting_date: '2026-01-10' },
+  { member_id: 'M1', meeting_id: 'ffeb', is_present: true, meeting_date: '2026-02-25' },
+  { member_id: 'M1', meeting_id: 'fmar', is_present: false, meeting_date: '2026-03-10' },
+  { member_id: 'M2', meeting_id: 'ffeb', is_present: true, meeting_date: '2026-02-25' },
+  { member_id: 'M2', meeting_id: 'fmar', is_present: true, meeting_date: '2026-03-10' },
+  { member_id: 'VIS', meeting_id: 'fjan1', is_present: true, meeting_date: '2026-01-10' },
+];
+
+const f1 = computeGrowthMetrics({
+  windowMonths: 6,
+  tags: null,
+  members: fMembers,
+  attendanceRows: fAttendance,
+  guestRows: [],
+  visitorCount: 0,
+  guestCreatedAts: [],
+  guestNames: [],
+  tagRows: [],
+  meetingsInWindow: fMeetings,
+  windowFromIso: '2026-01-01',
+  windowToIso: '2026-03-31',
+});
+
+check('freq: totalMeetings = encontros com chamada (3, não 4)', f1.memberFrequency?.totalMeetings, 3);
+check('freq: considered (M1+M2; M3 sem encontros desde o cadastro)', f1.memberFrequency?.consideredMembers, 2);
+const fb = (key: string) => f1.memberFrequency?.buckets.find((b) => b.key === key)?.count;
+check('freq: assiduo (M2: 2/2 desde o cadastro, não 2/4)', fb('assiduo'), 1);
+check('freq: regular (M1: 2/3)', fb('regular'), 1);
+check('freq: ausente_total vazio', fb('ausente_total'), 0);
 
 if (failures > 0) {
   console.log(`\n${failures} falha(s)`);

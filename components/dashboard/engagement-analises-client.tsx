@@ -9,6 +9,8 @@ import { FrequencyDistributionCard } from '@/components/dashboard/frequency-dist
 import { VisitorFunnelCard } from '@/components/dashboard/visitor-funnel-card';
 import { RetentionMetricsCard } from '@/components/dashboard/retention-metrics-card';
 import { MemberRankings, type RankingMemberStat } from '@/components/dashboard/member-rankings';
+import { MemberPresenceAbsenceDistribution } from '@/components/dashboard/member-presence-absence-distribution';
+import { DiscipleshipCard } from '@/components/dashboard/discipleship-card';
 import {
   PERIOD_OPTIONS,
   MemberFilterSelector,
@@ -19,11 +21,19 @@ import {
 } from '@/components/dashboard/engagement-filter-controls';
 
 /**
- * Análises avançadas de engajamento (funil, retenção, frequência, risco e rankings).
+ * Análises avançadas de engajamento (funil, retenção, frequência, risco,
+ * rankings, faltas/presenças por pessoa e discipuladores).
  * Ficam em uma página separada para manter a página principal de engajamento
  * simples e focada em crescimento.
  */
-export function EngagementAnalisesClient({ apiSuffix = '' }: { apiSuffix?: string }) {
+export function EngagementAnalisesClient({
+  apiSuffix = '',
+  groupId,
+}: {
+  apiSuffix?: string;
+  /** Grupo do líder — usado no histórico de presença por pessoa (dialog). */
+  groupId?: string | null;
+}) {
   const [period, setPeriod] = useState<Period>('monthly');
   const [memberFilter, setMemberFilter] = useState<MemberFilter>('total');
   const [presenceFilter, setPresenceFilter] = useState<PresenceFilter>('all');
@@ -115,7 +125,9 @@ export function EngagementAnalisesClient({ apiSuffix = '' }: { apiSuffix?: strin
             <VisitorFunnelCard periodDays={180} />
             <RetentionMetricsCard memberFilter={memberFilter} />
           </div>
+          <MemberPresenceAbsenceDistribution stats={filteredStats} groupId={groupId} />
           <MemberRankings topPresent={topPresent} topAbsent={topAbsent} perfectAttendance={perfectAttendance} />
+          <DiscipleshipCard apiSuffix={apiSuffix} />
         </>
       )}
     </div>
