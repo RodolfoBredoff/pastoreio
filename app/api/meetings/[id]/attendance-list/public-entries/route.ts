@@ -12,6 +12,7 @@ import {
   type AttendanceListMode,
 } from '@/lib/attendance-list-public';
 import { getMeetingExtraFields, normalizeExtraValues } from '@/lib/attendance-list-extra';
+import { scheduleAttendanceSnapshotSync } from '@/lib/attendance-snapshot';
 
 /**
  * POST /api/meetings/[id]/attendance-list/public-entries
@@ -112,6 +113,7 @@ export async function POST(
       [id, meetingId, fn, ln, em, ph, meeting.attendance_list_require_rg ? rgVal : null, JSON.stringify(extraValues)]
     );
 
+    scheduleAttendanceSnapshotSync(meetingId);
     return NextResponse.json({ ok: true, id });
   } catch (error) {
     console.error('Erro ao adicionar entrada pública:', error);

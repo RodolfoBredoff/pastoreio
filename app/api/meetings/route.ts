@@ -5,6 +5,7 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { normalizeExtraFieldConfigs } from '@/lib/attendance-list-extra';
+import { scheduleAttendanceSnapshotSync } from '@/lib/attendance-snapshot';
 
 function slugify(input: string): string {
   return input
@@ -216,6 +217,8 @@ export async function POST(request: Request) {
         );
       }
     }
+
+    if (withList) scheduleAttendanceSnapshotSync(String(row.id));
 
     return NextResponse.json(row, { status: 201 });
   } catch (error) {

@@ -5,6 +5,7 @@ import { query, queryOne } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { isValidRg, normalizeRg } from '@/lib/attendance-list-public';
 import { getMeetingExtraFields, normalizeExtraValues } from '@/lib/attendance-list-extra';
+import { scheduleAttendanceSnapshotSync } from '@/lib/attendance-snapshot';
 
 /**
  * PATCH /api/meetings/[id]/attendance-list/public-entries/[entryId]
@@ -102,6 +103,7 @@ export async function PATCH(
         : [fn, ln, em, ph, meeting.attendance_list_require_rg ? rgVal : null, entryId]
     );
 
+    scheduleAttendanceSnapshotSync(meetingId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Erro ao editar entrada pública:', error);
@@ -152,6 +154,7 @@ export async function DELETE(
       [entryId]
     );
 
+    scheduleAttendanceSnapshotSync(meetingId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Erro ao remover entrada pública:', error);

@@ -4,6 +4,7 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryOne } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { getMeetingExtraFields, normalizeExtraValues } from '@/lib/attendance-list-extra';
+import { scheduleAttendanceSnapshotSync } from '@/lib/attendance-snapshot';
 
 /**
  * PATCH /api/meetings/[id]/attendance-list/guests/[guestId]
@@ -103,6 +104,7 @@ export async function PATCH(
       );
     }
 
+    scheduleAttendanceSnapshotSync(meetingId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Erro ao editar visitante da lista:', error);
@@ -165,6 +167,7 @@ export async function DELETE(
       [guestId, meetingId]
     );
 
+    scheduleAttendanceSnapshotSync(meetingId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Erro ao remover visitante da lista:', error);

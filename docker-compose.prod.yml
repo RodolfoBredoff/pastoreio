@@ -28,6 +28,11 @@ services:
       - S3_BUCKET=${S3_BUCKET}
       - PEQUENOS_GRUPOS_BUCKET=${PEQUENOS_GRUPOS_BUCKET}
       - INVITE_COVERS_PUBLIC_BASE_URL=${INVITE_COVERS_PUBLIC_BASE_URL}
+      # Snapshot público da lista de presença no S3 (desligado por padrão).
+      # Ver docs/DESIGN_LISTA_PRESENCA_OFFLINE.md
+      - ATTENDANCE_SNAPSHOT_ENABLED=${ATTENDANCE_SNAPSHOT_ENABLED:-false}
+      # Segredo exclusivo da rota de backfill (vazio = rota responde 503)
+      - ATTENDANCE_SNAPSHOT_SECRET=${ATTENDANCE_SNAPSHOT_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
