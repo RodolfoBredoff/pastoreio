@@ -5,6 +5,7 @@ import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { normalizeInternalChecks } from '@/lib/attendance-list-internal';
 import { getMeetingExtraFields, normalizeExtraValues } from '@/lib/attendance-list-extra';
+import { scheduleAttendanceSnapshotSync } from '@/lib/attendance-snapshot';
 
 type AuthError = { message: string; status: number };
 type MeetingAuth =
@@ -385,6 +386,7 @@ export async function PATCH(
       }
     }
 
+    scheduleAttendanceSnapshotSync(meetingId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Erro ao atualizar confirmação:', error);
@@ -430,6 +432,7 @@ export async function DELETE(
       [meetingId, member_id]
     );
 
+    scheduleAttendanceSnapshotSync(meetingId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Erro ao resetar confirmação:', error);

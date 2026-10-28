@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPublicAttendanceList, publicConfirmPrefilledByPhoneOrEmail, publicCreateOpenEntry } from '@/lib/attendance-list-public';
+import { scheduleAttendanceSnapshotSyncForIdentifier } from '@/lib/attendance-snapshot';
 
 /**
  * GET /api/lista-presenca/[slug]
@@ -59,6 +60,7 @@ export async function POST(
         extra_values,
       });
       if ('error' in res) return NextResponse.json({ error: res.error }, { status: res.status });
+      scheduleAttendanceSnapshotSyncForIdentifier(slug);
       return NextResponse.json({ ok: true }, { status: 201 });
     }
 
@@ -66,6 +68,7 @@ export async function POST(
     const { phone, email, extra_values } = body as { phone?: string; email?: string; extra_values?: unknown };
     const res = await publicConfirmPrefilledByPhoneOrEmail({ identifier: slug, phone, email, extra_values });
     if ('error' in res) return NextResponse.json({ error: res.error }, { status: res.status });
+    scheduleAttendanceSnapshotSyncForIdentifier(slug);
     return NextResponse.json({ ok: true }, { status: 200 });
   } catch (error) {
     console.error('Erro ao registrar confirmação pública:', error);

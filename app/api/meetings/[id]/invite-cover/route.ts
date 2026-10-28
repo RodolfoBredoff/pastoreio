@@ -5,6 +5,7 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryOne } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { getS3Client } from '@/lib/aws/s3-client';
+import { scheduleAttendanceSnapshotSync } from '@/lib/attendance-snapshot';
 
 /**
  * PUT /api/meetings/[id]/invite-cover
@@ -67,6 +68,7 @@ export async function PUT(
         `UPDATE meetings SET invite_cover_image_url = NULL, invite_cover_image_key = NULL WHERE id = $1`,
         [meetingId]
       );
+      scheduleAttendanceSnapshotSync(meetingId);
       return NextResponse.json({ ok: true, invite_cover_image_url: null });
     }
 
@@ -98,6 +100,7 @@ export async function PUT(
       [meetingId, urlVal, keyVal]
     );
 
+    scheduleAttendanceSnapshotSync(meetingId);
     return NextResponse.json({
       ok: true,
       invite_cover_image_url: result.rows[0]?.invite_cover_image_url ?? null,

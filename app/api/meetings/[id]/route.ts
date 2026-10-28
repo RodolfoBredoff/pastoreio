@@ -4,6 +4,7 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { normalizeExtraFieldConfigs, type ExtraFieldConfigInput } from '@/lib/attendance-list-extra';
+import { scheduleAttendanceSnapshotSync } from '@/lib/attendance-snapshot';
 
 /**
  * PUT /api/meetings/[id]
@@ -207,6 +208,7 @@ export async function PUT(
       `SELECT * FROM meetings WHERE id = $1`,
       [id]
     );
+    if (updated?.attendance_list_token) scheduleAttendanceSnapshotSync(id);
     return NextResponse.json(updated);
   } catch (error) {
     console.error('Erro ao atualizar reunião:', error);
@@ -242,8 +244,14 @@ export async function DELETE(
 
     const { id } = await params;
 
-    const existing = await queryOne<{ id: string; group_id: string }>(
-      `SELECT id, group_id FROM meetings WHERE id = $1`,
+    const existing = await queryOne<{
+      id: string;
+      group_id: string;
+      attendance_list_slug: string | null;
+      attendance_list_token: string | null;
+    }>(
+      `SELECT id, group_id, attendance_list_slug, attendance_list_token::text AS attendance_list_token
+       FROM meetings WHERE id = $1`,
       [id]
     );
 
@@ -252,6 +260,11 @@ export async function DELETE(
     }
 
     await query(`DELETE FROM meetings WHERE id = $1`, [id]);
+
+    // Remove o snapshot público (o encontro não existe mais no banco)
+    if (existing.attendance_list_token || existing.attendance_list_slug) {
+      scheduleAttendanceSnapshotSync(id, [existing.attendance_list_slug, existing.attendance_list_token]);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

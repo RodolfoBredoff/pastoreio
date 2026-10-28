@@ -9,6 +9,7 @@ import {
   type AttendanceListMode,
 } from '@/lib/attendance-list-public';
 import { getMeetingExtraFields, normalizeExtraValues } from '@/lib/attendance-list-extra';
+import { scheduleAttendanceSnapshotSync } from '@/lib/attendance-snapshot';
 
 /**
  * POST /api/meetings/[id]/attendance-list/guests
@@ -99,6 +100,7 @@ export async function POST(
     );
 
     const guestId = row?.id;
+    scheduleAttendanceSnapshotSync(meetingId);
     return NextResponse.json({ ok: true, id: guestId });
   } catch (error) {
     console.error('Erro ao adicionar visitante (líder):', error);
