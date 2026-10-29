@@ -1,6 +1,10 @@
 #!/bin/bash
 # =============================================================================
 # backup-to-s3.sh — Backup automático do PostgreSQL para o Amazon S3
+#
+# SUBSTITUÍDO por scripts/install-db-backup-timer.sh (backup diário via systemd,
+# pg_dump dentro do container). Este script não alcança o Postgres em produção:
+# o container não publica a porta 5432 no host. Mantido só como referência.
 # =============================================================================
 # Uso: ./backup-to-s3.sh
 # Recomendação: agendar via crontab na EC2 (ex: diário às 03:00)
