@@ -6,11 +6,18 @@
 # roteamentos da lista de presença estática. Não altera nenhum roteamento,
 # origin ou configuração que já exista. Ver docs/DESIGN_LISTA_PRESENCA_OFFLINE.md.
 #
+# O plano gratuito do CloudFront aceita no máximo 5 roteamentos. Por isso a página,
+# os arquivos e o snapshot passam por um único roteamento, e a CloudFront Function
+# mapeia cada caminho para o objeto certo no S3.
+#
 # Estágios:
-#   test    -> /snapshots/*          → S3 (JSON do snapshot)
-#              /lista-presenca-app/* → S3 + CloudFront Function (página de teste)
-#   public  -> test + /lista-presenca/* → S3 + Function (troca o link real)
-#   rollback-public -> remove só /lista-presenca/* (volta o link para a EC2)
+#   test    -> /lista-presenca-app/* → S3 + CloudFront Function (página de teste)
+#              (remove o antigo /snapshots/*, se existir)
+#   public  -> troca /lista-presenca-app/* por /lista-presenca* (cobre o link real
+#              /lista-presenca/<slug> e os arquivos em /lista-presenca-app/)
+#   rollback-public -> volta para /lista-presenca-app/* (link real de volta à EC2)
+#   offline-api     -> origin da Lambda (OAC) + /offline-api/* (confirmações sem EC2)
+#   rollback-offline-api -> remove o roteamento /offline-api/* e o origin da Lambda
 #
 # Padrão é DRY-RUN (só mostra o diff). Para alterar, passe --apply.
 #
@@ -18,6 +25,10 @@
 #   ./scripts/cloudfront-lista-presenca-behaviors.sh --stage test \
 #     --function-arn "$(terraform -chdir=aws/terraform-lista-presenca output -raw rewrite_function_arn)"
 #   ... --apply
+#
+#   ./scripts/cloudfront-lista-presenca-behaviors.sh --stage offline-api \
+#     --lambda-domain "$(terraform -chdir=aws/terraform-lista-presenca output -raw offline_lambda_origin_domain)" \
+#     --lambda-oac-id "$(terraform -chdir=aws/terraform-lista-presenca output -raw offline_lambda_oac_id)"
 # =============================================================================
 set -euo pipefail
 
@@ -25,6 +36,9 @@ PROFILE="pastoreio"
 DISTRIBUTION_ID="E18FIBR7JAH4S0"
 S3_ORIGIN_ID="S3-pastoreio"
 FUNCTION_ARN=""
+LAMBDA_DOMAIN=""
+LAMBDA_OAC_ID=""
+LAMBDA_ORIGIN_ID="lambda-lista-presenca-offline"
 STAGE=""
 APPLY=false
 BACKUP_DIR="${HOME}/.pastoreio/cloudfront-backups"
@@ -35,19 +49,24 @@ while [[ $# -gt 0 ]]; do
     --distribution-id)  DISTRIBUTION_ID="$2"; shift 2 ;;
     --s3-origin-id)     S3_ORIGIN_ID="$2"; shift 2 ;;
     --function-arn)     FUNCTION_ARN="$2"; shift 2 ;;
+    --lambda-domain)    LAMBDA_DOMAIN="$2"; shift 2 ;;
+    --lambda-oac-id)    LAMBDA_OAC_ID="$2"; shift 2 ;;
     --stage)            STAGE="$2"; shift 2 ;;
     --apply)            APPLY=true; shift ;;
-    -h|--help)          sed -n '2,22p' "$0"; exit 0 ;;
+    -h|--help)          sed -n '2,28p' "$0"; exit 0 ;;
     *) echo "Argumento desconhecido: $1" >&2; exit 1 ;;
   esac
 done
 
 case "$STAGE" in
-  test|public|rollback-public) ;;
-  *) echo "Informe --stage test | public | rollback-public" >&2; exit 1 ;;
+  test|public|rollback-public|offline-api|rollback-offline-api) ;;
+  *) echo "Informe --stage test | public | rollback-public | offline-api | rollback-offline-api" >&2; exit 1 ;;
 esac
-if [[ "$STAGE" != "rollback-public" && -z "$FUNCTION_ARN" ]]; then
+if [[ ( "$STAGE" == "test" || "$STAGE" == "public" || "$STAGE" == "rollback-public" ) && -z "$FUNCTION_ARN" ]]; then
   echo "Informe --function-arn (saída rewrite_function_arn do Terraform)" >&2; exit 1
+fi
+if [[ "$STAGE" == "offline-api" && ( -z "$LAMBDA_DOMAIN" || -z "$LAMBDA_OAC_ID" ) ]]; then
+  echo "Informe --lambda-domain e --lambda-oac-id (saídas do Terraform)" >&2; exit 1
 fi
 
 WORK=$(mktemp -d)
@@ -62,11 +81,16 @@ aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --profile "$PROFI
   --output json > "$WORK/current.json"
 
 STAGE="$STAGE" FUNCTION_ARN="$FUNCTION_ARN" S3_ORIGIN_ID="$S3_ORIGIN_ID" \
+LAMBDA_DOMAIN="$LAMBDA_DOMAIN" LAMBDA_OAC_ID="$LAMBDA_OAC_ID" LAMBDA_ORIGIN_ID="$LAMBDA_ORIGIN_ID" \
 python3 - "$WORK/current.json" "$WORK/new-config.json" <<'PY'
 import copy, difflib, json, os, sys
 
 src, dst = sys.argv[1], sys.argv[2]
 stage = os.environ["STAGE"]; fn_arn = os.environ["FUNCTION_ARN"]; origin_id = os.environ["S3_ORIGIN_ID"]
+lambda_domain = os.environ["LAMBDA_DOMAIN"]; lambda_oac = os.environ["LAMBDA_OAC_ID"]; lambda_origin_id = os.environ["LAMBDA_ORIGIN_ID"]
+CACHING_DISABLED = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"              # política gerenciada da AWS
+ALL_VIEWER_EXCEPT_HOST = "b689b0a8-53d0-40ab-baf2-68738e2966ac"        # política gerenciada da AWS
+ALL_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
 
 doc = json.load(open(src))
 cfg = doc["DistributionConfig"]
@@ -98,30 +122,64 @@ def behavior(path, with_function):
     )
     return b
 
-managed = {"/snapshots/*", "/lista-presenca-app/*", "/lista-presenca/*"}
+managed = {"/snapshots/*", "/lista-presenca-app/*", "/lista-presenca/*", "/lista-presenca*", "/offline-api/*"}
+remove = set()
 desired = {}
-if stage in ("test", "public"):
-    desired["/snapshots/*"] = behavior("/snapshots/*", False)
+
+# ---- origin da Lambda (só nos estágios offline-api)
+origins = cfg["Origins"]["Items"]
+if stage == "offline-api":
+    model = next((o for o in origins if o.get("CustomOriginConfig")), None)
+    if model is None:
+        sys.exit("ERRO: nenhum origin customizado existente para servir de modelo")
+    lam = copy.deepcopy(model)
+    lam.update({"Id": lambda_origin_id, "DomainName": lambda_domain, "OriginPath": "",
+                "OriginAccessControlId": lambda_oac, "CustomHeaders": {"Quantity": 0}})
+    lam["CustomOriginConfig"].update({"OriginProtocolPolicy": "https-only",
+                                      "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]}})
+    origins = [o for o in origins if o["Id"] != lambda_origin_id] + [lam]
+elif stage == "rollback-offline-api":
+    origins = [o for o in origins if o["Id"] != lambda_origin_id]
+cfg["Origins"] = {"Quantity": len(origins), "Items": origins}
+
+if stage == "offline-api":
+    b = behavior("/offline-api/*", False)
+    b["TargetOriginId"] = lambda_origin_id
+    b["AllowedMethods"] = {"Quantity": len(ALL_METHODS), "Items": ALL_METHODS,
+                           "CachedMethods": {"Quantity": 2, "Items": ["HEAD", "GET"]}}
+    b["CachePolicyId"] = CACHING_DISABLED
+    b["OriginRequestPolicyId"] = ALL_VIEWER_EXCEPT_HOST
+    desired["/offline-api/*"] = b
+if stage == "rollback-offline-api":
+    remove.add("/offline-api/*")
+
+if stage in ("test", "rollback-public"):
     desired["/lista-presenca-app/*"] = behavior("/lista-presenca-app/*", True)
+    remove.update({"/snapshots/*", "/lista-presenca*", "/lista-presenca/*"})
 if stage == "public":
-    desired["/lista-presenca/*"] = behavior("/lista-presenca/*", True)
+    desired["/lista-presenca*"] = behavior("/lista-presenca*", True)
+    remove.update({"/snapshots/*", "/lista-presenca-app/*", "/lista-presenca/*"})
 
 new_items = []
 for b in items:
     p = b["PathPattern"]
     if p in desired:
         new_items.append(desired.pop(p))          # atualiza o nosso, se já existir
-    elif stage == "rollback-public" and p == "/lista-presenca/*":
-        continue                                  # remove só o roteamento do link real
+    elif p in remove:
+        continue                                  # remove só o roteamento pedido
     else:
         new_items.append(b)                       # mantém intacto tudo que não é nosso
 new_items.extend(desired.values())
 
 cfg["CacheBehaviors"] = {"Quantity": len(new_items), "Items": new_items} if new_items else {"Quantity": 0}
 
-# Garantia: nada fora dos nossos roteamentos mudou
-untouched = lambda c: {k: v for k, v in c.items() if k != "CacheBehaviors"}
+# Garantias: nada fora dos nossos roteamentos/origin mudou
+untouched = lambda c: {k: v for k, v in c.items() if k not in ("CacheBehaviors", "Origins")}
 assert untouched(before) == untouched(cfg), "alteração inesperada fora dos roteamentos"
+other_origins = lambda c: [o for o in c["Origins"]["Items"] if o["Id"] != lambda_origin_id]
+assert other_origins(before) == other_origins(cfg), "alteração inesperada em origin existente"
+if any(b["TargetOriginId"] == lambda_origin_id for b in new_items) and lambda_origin_id not in [o["Id"] for o in cfg["Origins"]["Items"]]:
+    sys.exit("ERRO: roteamento apontaria para o origin da Lambda removido")
 ours = lambda c: [b for b in (c.get("CacheBehaviors", {}).get("Items") or []) if b["PathPattern"] not in managed]
 assert ours(before) == ours(cfg), "alteração inesperada em roteamento existente"
 
@@ -130,7 +188,8 @@ json.dump(cfg, open(dst, "w"), indent=2, sort_keys=True)
 def summary(c):
     return [f'{b["PathPattern"]:24} -> {b["TargetOriginId"]}'
             + (" + function" if b.get("FunctionAssociations", {}).get("Quantity") else "")
-            for b in (c.get("CacheBehaviors", {}).get("Items") or [])]
+            for b in (c.get("CacheBehaviors", {}).get("Items") or [])] + \
+           [f'(origin) {o["Id"]} = {o["DomainName"]}' for o in c["Origins"]["Items"] if o["Id"] == lambda_origin_id]
 print("Roteamentos ANTES:");  [print("  ", s) for s in summary(before)]
 print("Roteamentos DEPOIS:"); [print("  ", s) for s in summary(cfg)]
 print()

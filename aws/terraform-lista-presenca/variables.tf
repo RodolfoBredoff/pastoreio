@@ -32,3 +32,27 @@ variable "static_dist_dir" {
   type        = string
   default     = "../../apps/lista-presenca-static/dist"
 }
+
+variable "distribution_id" {
+  description = "Distribuição CloudFront existente do pg.skillia.click (não gerenciada aqui)"
+  type        = string
+  default     = "E18FIBR7JAH4S0"
+}
+
+variable "ec2_role_name" {
+  description = "Role existente da EC2 do app; recebe só o anexo da policy de sync do buffer"
+  type        = string
+  default     = "pequenos-grupos-ec2-role"
+}
+
+variable "buffer_read_capacity" {
+  description = "RCU da tabela de buffer (nível gratuito: 25 por conta)"
+  type        = number
+  default     = 5
+}
+
+variable "buffer_write_capacity" {
+  description = "WCU da tabela de buffer (nível gratuito: 25 por conta)"
+  type        = number
+  default     = 5
+}

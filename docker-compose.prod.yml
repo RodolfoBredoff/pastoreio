@@ -33,6 +33,8 @@ services:
       - ATTENDANCE_SNAPSHOT_ENABLED=${ATTENDANCE_SNAPSHOT_ENABLED:-false}
       # Segredo exclusivo da rota de backfill (vazio = rota responde 503)
       - ATTENDANCE_SNAPSHOT_SECRET=${ATTENDANCE_SNAPSHOT_SECRET:-}
+      # Buffer de confirmações recebidas com a EC2 desligada (aws/terraform-lista-presenca)
+      - ATTENDANCE_BUFFER_TABLE=${ATTENDANCE_BUFFER_TABLE:-pastoreio-attendance-buffer}
     depends_on:
       postgres:
         condition: service_healthy

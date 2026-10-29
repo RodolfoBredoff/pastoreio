@@ -1,4 +1,9 @@
 import { queryMany } from '@/lib/db/postgres';
+import type { AttendanceExtraFieldConfig } from '@/lib/attendance-list-rules';
+
+// Regras puras (sem banco) ficam em attendance-list-rules; reexportadas para manter os imports existentes.
+export { normalizeExtraValues } from '@/lib/attendance-list-rules';
+export type { AttendanceExtraFieldConfig, ExtraValuesEntry } from '@/lib/attendance-list-rules';
 
 /**
  * Campos adicionais obrigatórios da lista de presença.
@@ -8,16 +13,6 @@ import { queryMany } from '@/lib/db/postgres';
  *  - allow_custom: quando há opções, permite também digitar resposta própria
  * Respostas ficam em extra_values (JSONB) como [{ field_id, values[] }].
  */
-
-export type AttendanceExtraFieldConfig = {
-  id: string;
-  label: string;
-  options: string[] | null;
-  allow_custom: boolean;
-  position: number;
-};
-
-export type ExtraValuesEntry = { field_id: string; values: string[] };
 
 export type ExtraFieldConfigInput = {
   id?: string;
@@ -29,7 +24,6 @@ export type ExtraFieldConfigInput = {
 const MAX_EXTRA_FIELDS = 10;
 const MAX_LABEL_LENGTH = 120;
 const MAX_OPTION_LENGTH = 120;
-const MAX_VALUE_LENGTH = 200;
 
 function normalizeLabel(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, MAX_LABEL_LENGTH) : '';
@@ -128,59 +122,6 @@ export async function getMeetingExtraFields(meetingId: string): Promise<Attendan
     [meetingId]
   ).catch(() => []);
   return rows.map(rowToConfig);
-}
-
-/**
- * Valida as respostas dos campos adicionais.
- * Regra (escolha única global): em todo o convite a pessoa fornece EXATAMENTE
- * UM item — uma opção marcada (ou texto próprio) em um único campo, ou o texto
- * de um campo livre. Não pode ficar vazio nem selecionar mais de um.
- */
-export function normalizeExtraValues(
-  fields: AttendanceExtraFieldConfig[],
-  raw: unknown
-): { ok: false; error: string } | { ok: true; values: ExtraValuesEntry[] } {
-  if (fields.length === 0) return { ok: true, values: [] };
-
-  if (!Array.isArray(raw)) {
-    return { ok: false, error: 'Escolha um item para confirmar presença.' };
-  }
-
-  const byId = new Map(fields.map((f) => [f.id, f]));
-  const answers: Array<{ field: AttendanceExtraFieldConfig; value: string }> = [];
-
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const e = item as Record<string, unknown>;
-    if (typeof e.field_id !== 'string' || !Array.isArray(e.values)) continue;
-    const field = byId.get(e.field_id);
-    if (!field) {
-      return { ok: false, error: 'Campo adicional inválido' };
-    }
-    for (const v of e.values) {
-      if (typeof v !== 'string') continue;
-      const trimmed = v.trim().slice(0, MAX_VALUE_LENGTH);
-      if (!trimmed) continue;
-      answers.push({ field, value: trimmed });
-    }
-  }
-
-  if (answers.length === 0) {
-    return { ok: false, error: 'Escolha um item para confirmar presença.' };
-  }
-  if (answers.length > 1) {
-    return { ok: false, error: 'Selecione apenas um item para confirmar presença.' };
-  }
-
-  const { field, value } = answers[0];
-  if (field.options) {
-    const allowed = new Set(field.options.map((o) => o.toLowerCase()));
-    if (!allowed.has(value.toLowerCase()) && !field.allow_custom) {
-      return { ok: false, error: `Escolha uma opção válida em: ${field.label}` };
-    }
-  }
-
-  return { ok: true, values: [{ field_id: field.id, values: [value] }] };
 }
 
 /** Formata os valores de um campo para exibição (tabela interna / CSV). */

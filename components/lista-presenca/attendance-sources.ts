@@ -113,7 +113,9 @@ async function fetchLive(slug: string): Promise<LiveResult> {
 }
 
 async function fetchSnapshot(slug: string): Promise<PublicAttendancePayload> {
-  const res = await fetch(`/snapshots/lista-presenca/${slug}.json`, { cache: 'no-store' });
+  // Passa pelo mesmo roteamento da página; a CloudFront Function mapeia para
+  // snapshots/lista-presenca/<slug>.json no S3 (o plano gratuito limita a 5 roteamentos).
+  const res = await fetch(`/lista-presenca-app/snapshots/${slug}.json`, { cache: 'no-store' });
   // Objeto inexistente no S3 (sem ListBucket) responde 403
   if (res.status === 403 || res.status === 404) throw new Error(NOT_FOUND_MESSAGE);
   if (!res.ok) throw new Error('Erro ao carregar');
@@ -121,6 +123,79 @@ async function fetchSnapshot(slug: string): Promise<PublicAttendancePayload> {
   if (!json?.meeting) throw new Error(NOT_FOUND_MESSAGE);
   return normalizeSnapshot(json);
 }
+
+// Lambda (via CloudFront) que recebe confirmações com a EC2 desligada.
+const OFFLINE_API = '/offline-api/lista-presenca';
+const OFFLINE_TIMEOUT_MS = 8000;
+
+/** Confirmações já aceitas pela Lambda e ainda não sincronizadas com o Postgres. */
+async function fetchPending(
+  slug: string
+): Promise<{ pending_count: number; pending_options_taken: Record<string, Record<string, number>> } | null> {
+  try {
+    const res = await fetch(`${OFFLINE_API}/${slug}`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return typeof json?.pending_count === 'number' ? json : null;
+  } catch {
+    return null;
+  }
+}
+
+function withPending(
+  data: PublicAttendancePayload,
+  pending: Awaited<ReturnType<typeof fetchPending>>
+): PublicAttendancePayload {
+  if (!pending || pending.pending_count <= 0) return data;
+  const taken: Record<string, Record<string, number>> = {};
+  for (const src of [data.extra_options_taken ?? {}, pending.pending_options_taken ?? {}]) {
+    for (const [fieldId, opts] of Object.entries(src)) {
+      taken[fieldId] ??= {};
+      for (const [opt, n] of Object.entries(opts)) taken[fieldId][opt] = (taken[fieldId][opt] ?? 0) + n;
+    }
+  }
+  const count = data.count_confirmed + pending.pending_count;
+  const limit = data.meeting.attendance_list_limit;
+  return {
+    ...data,
+    count_confirmed: count,
+    extra_options_taken: taken,
+    is_limit_reached: limit != null && limit > 0 && count >= limit,
+  };
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function submitOffline(slug: string, body: Record<string, unknown>): Promise<void> {
+  const payload = JSON.stringify(body);
+  let res: Response;
+  try {
+    res = await fetch(`${OFFLINE_API}/${slug}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Exigido pelo CloudFront (OAC) para assinar POST até a Lambda
+        'x-amz-content-sha256': await sha256Hex(payload),
+      },
+      body: payload,
+      signal: AbortSignal.timeout(OFFLINE_TIMEOUT_MS),
+    });
+  } catch {
+    throw new Error(UNAVAILABLE_MESSAGE);
+  }
+  if (res.status >= 500) throw new Error(UNAVAILABLE_MESSAGE);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || 'Erro ao confirmar');
+}
+
+// Se o último carregamento veio ao vivo, a EC2 está no ar e recebe a confirmação.
+const liveBySlug = new Map<string, boolean>();
 
 export const staticAttendanceSource: AttendanceSource = {
   async load(slug) {
@@ -131,15 +206,21 @@ export const staticAttendanceSource: AttendanceSource = {
     );
     const live = await fetchLive(slug);
 
-    if (live.kind === 'ok') return live.data;
+    if (live.kind === 'ok') {
+      liveBySlug.set(slug, true);
+      return live.data;
+    }
     if (live.kind === 'not_found') throw new Error(NOT_FOUND_MESSAGE);
 
+    liveBySlug.set(slug, false);
     const snap = await snapshot;
-    if (snap.ok) return snap.data;
+    if (snap.ok) return withPending(snap.data, await fetchPending(slug));
     throw snap.error instanceof Error ? snap.error : new Error('Erro ao carregar');
   },
 
   async submit(slug, body) {
+    if (!liveBySlug.get(slug)) return submitOffline(slug, body);
+
     let res: Response;
     try {
       res = await fetch(`/api/lista-presenca/${slug}`, {
@@ -149,10 +230,15 @@ export const staticAttendanceSource: AttendanceSource = {
         signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS),
       });
     } catch {
-      throw new Error(UNAVAILABLE_MESSAGE);
+      // A EC2 caiu depois que a página abriu
+      liveBySlug.set(slug, false);
+      return submitOffline(slug, body);
     }
     // 5xx vindos do CloudFront quando a EC2 está desligada (corpo não é JSON)
-    if (res.status >= 500) throw new Error(UNAVAILABLE_MESSAGE);
+    if (res.status >= 500) {
+      liveBySlug.set(slug, false);
+      return submitOffline(slug, body);
+    }
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error || 'Erro ao confirmar');
   },
