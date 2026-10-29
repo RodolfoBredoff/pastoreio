@@ -46,6 +46,7 @@ public/worker-*.js.map
 
 # Build estático da lista de presença (gerado por npm run build:lista-presenca)
 apps/lista-presenca-static/dist/
+aws/terraform-lista-presenca/lambda/dist/
 # AWS & Terraform
 aws/terraform/.terraform/
 aws/terraform/.terraform.lock.hcl

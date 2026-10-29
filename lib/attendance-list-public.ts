@@ -5,6 +5,15 @@ import {
   type AttendanceExtraFieldConfig,
   type ExtraValuesEntry,
 } from '@/lib/attendance-list-extra';
+import {
+  isAttendanceLimitReached,
+  isMeetingExpired,
+  isValidRg,
+  normalizeRg,
+} from '@/lib/attendance-list-rules';
+
+// Reexportadas para manter os imports existentes.
+export { isAttendanceLimitReached, isMeetingExpired, isValidRg, normalizeRg };
 
 export type AttendanceListMode = 'prefilled' | 'open';
 
@@ -47,19 +56,6 @@ type MeetingRow = {
   invite_cover_image_url: string | null;
 };
 
-export function normalizeRg(value: string): string {
-  return value.trim().replace(/\s+/g, ' ');
-}
-
-export function isValidRg(value: string): boolean {
-  const normalized = normalizeRg(value);
-  return normalized.length >= 4 && normalized.length <= 20;
-}
-
-export function isAttendanceLimitReached(count: number, limit: number | null | undefined): boolean {
-  return limit != null && limit > 0 && count >= limit;
-}
-
 export async function getAttendanceConfirmedCount(meetingId: string, mode: AttendanceListMode): Promise<number> {
   if (mode === 'open') {
     const row = await queryOne<{ c: string }>(
@@ -96,14 +92,6 @@ export async function getMeetingBySlugOrToken(identifier: string): Promise<Meeti
     [identifier]
   );
   return meeting ?? null;
-}
-
-export function isMeetingExpired(deadline: string | null): boolean {
-  return (
-    deadline !== null &&
-    !Number.isNaN(new Date(deadline).getTime()) &&
-    new Date() > new Date(deadline)
-  );
 }
 
 /**
@@ -338,4 +326,59 @@ export async function publicCreateOpenEntry(args: {
   );
 
   return { ok: true, status: 201 };
+}
+
+/**
+ * Grava uma confirmação "open" recebida pela Lambda com a EC2 desligada
+ * (buffer DynamoDB → Postgres). Prazo e limite já foram validados no momento
+ * da confirmação, então não são checados de novo aqui; o restante é revalidado.
+ * Idempotente: `entryId` é determinístico e o INSERT usa ON CONFLICT (id) DO NOTHING.
+ */
+export async function insertBufferedOpenEntry(args: {
+  entryId: string;
+  meetingId: string;
+  first_name: string;
+  last_name: string;
+  email?: string | null;
+  phone?: string | null;
+  rg?: string | null;
+  extra_values: unknown;
+  created_at: string;
+}): Promise<{ ok: true; inserted: boolean } | { ok: false; error: string }> {
+  const meeting = await queryOne<{
+    id: string;
+    attendance_list_mode: AttendanceListMode;
+    attendance_list_require_rg: boolean;
+  }>(
+    `SELECT id, COALESCE(attendance_list_mode, 'prefilled') AS attendance_list_mode,
+            COALESCE(attendance_list_require_rg, FALSE) AS attendance_list_require_rg
+     FROM meetings WHERE id = $1`,
+    [args.meetingId]
+  );
+  if (!meeting) return { ok: false, error: 'Encontro não existe mais' };
+  if (meeting.attendance_list_mode !== 'open') return { ok: false, error: 'Lista não está mais no modo aberto' };
+
+  const extraFields = await getMeetingExtraFields(meeting.id);
+  let extraValues: ExtraValuesEntry[] = [];
+  if (extraFields.length > 0) {
+    const res = normalizeExtraValues(extraFields, args.extra_values);
+    if (!res.ok) return { ok: false, error: `Campos adicionais: ${res.error}` };
+    extraValues = res.values;
+  }
+
+  const firstName = (args.first_name ?? '').trim();
+  const lastName = (args.last_name ?? '').trim();
+  const email = args.email?.trim().toLowerCase() || null;
+  const phone = args.phone?.replace(/\D/g, '') || null;
+  if (!firstName || !lastName || (!email && !phone)) return { ok: false, error: 'Dados incompletos' };
+  const rg = meeting.attendance_list_require_rg ? normalizeRg(args.rg ?? '') || null : null;
+
+  const result = await query(
+    `INSERT INTO attendance_list_public_entries
+       (id, meeting_id, first_name, last_name, email, phone, rg, extra_values, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+     ON CONFLICT (id) DO NOTHING`,
+    [args.entryId, meeting.id, firstName, lastName, email, phone, rg, JSON.stringify(extraValues), args.created_at]
+  );
+  return { ok: true, inserted: (result.rowCount ?? 0) > 0 };
 }
