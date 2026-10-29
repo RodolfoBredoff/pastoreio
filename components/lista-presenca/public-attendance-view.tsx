@@ -173,6 +173,8 @@ export function PublicAttendanceView({
     setExtraCustom({});
   };
   const buildExtraValues = (): { ok: false; error: string } | { ok: true; values: Array<{ field_id: string; values: string[] }> } => {
+    // Sem campos adicionais não há item a escolher (mesma regra do servidor)
+    if (extraFields.length === 0) return { ok: true, values: [] };
     const answers: Array<{ field_id: string; value: string }> = [];
     for (const f of extraFields) {
       for (const s of extraSelections[f.id] ?? []) {
