@@ -90,7 +90,7 @@ for k in "${OLD[@]}"; do
 done
 
 TOTAL=$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "$PREFIX/pastoreio_" --region "$REGION" \
-  --query "KeyCount" --output text)
+  --query "length(Contents || \`[]\`)" --output text)
 echo "{\"ok\":true,\"key\":\"$KEY\",\"bytes\":$SIZE,\"tables_with_data\":$TABLES,\"removed\":${#OLD[@]},\"total_backups\":$TOTAL}"
 EOF
 chmod 700 /usr/local/bin/pastoreio-db-backup.sh
