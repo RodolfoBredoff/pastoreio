@@ -94,7 +94,7 @@ export function AdminAddLeaderDialog({
           Novo Líder
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Cadastrar Novo Líder</DialogTitle>
         </DialogHeader>

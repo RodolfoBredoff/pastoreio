@@ -183,7 +183,7 @@ export function MemberPresenceAbsenceDistribution({
         )}
       </CardContent>
       <Dialog open={!!selectedMember} onOpenChange={(open) => !open && setSelectedMember(null)}>
-        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-md max-h-[85dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {selectedMember ? `Presença — ${selectedMember.name}` : 'Presença em encontros'}

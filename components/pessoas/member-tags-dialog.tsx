@@ -26,7 +26,7 @@ export function MemberTagsDialog({
 }: MemberTagsDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-left">
             <Tags className="h-4 w-4 shrink-0" />

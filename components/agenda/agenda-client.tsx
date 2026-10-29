@@ -307,11 +307,11 @@ function EditMeetingDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+      <DialogContent className="max-w-lg max-h-[90dvh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Editar Encontro</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 py-2 overflow-y-auto flex-1 pr-1">
+        <div className="space-y-4 py-2 overflow-y-auto flex-1 min-h-0 pr-1">
           {error && <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">{error}</p>}
           <div className="space-y-2">
             <Label>Capa do convite (opcional)</Label>

@@ -816,7 +816,7 @@ export function EngagementGrowth({
 
           {/* Dialog: quem está em cada número */}
           <Dialog open={openList !== null} onOpenChange={(o) => !o && setOpenList(null)}>
-            <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
+            <DialogContent className="max-h-[80dvh] overflow-y-auto sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>
                   {openList === 'peopleEver' && 'Pessoas no grupo (desde o início)'}
@@ -899,7 +899,7 @@ export function EngagementGrowth({
 
           {/* Dialog: quem está atrás da barra/ponto clicado nos gráficos */}
           <Dialog open={chartList !== null} onOpenChange={(o) => !o && setChartList(null)}>
-            <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
+            <DialogContent className="max-h-[80dvh] overflow-y-auto sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>{chartList?.title}</DialogTitle>
               </DialogHeader>
