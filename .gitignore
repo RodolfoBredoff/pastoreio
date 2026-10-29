@@ -44,6 +44,8 @@ public/sw.js.map
 public/workbox-*.js.map
 public/worker-*.js.map
 
+# Build estático da lista de presença (gerado por npm run build:lista-presenca)
+apps/lista-presenca-static/dist/
 # AWS & Terraform
 aws/terraform/.terraform/
 aws/terraform/.terraform.lock.hcl
@@ -57,6 +59,8 @@ aws/terraform/*.auto.tfvars
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+*.tfplan
+aws/terraform-lista-presenca/tfplan
 
 # AWS credentials (nunca commitar!)
 .aws/

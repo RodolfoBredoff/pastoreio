@@ -1,0 +1,24 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="256" fill="#2D6A4F"/>
+
+  <!-- Cross: vertical bar -->
+  <rect x="229" y="80" width="54" height="230" rx="27" fill="white"/>
+  <!-- Cross: horizontal bar -->
+  <rect x="134" y="148" width="244" height="54" rx="27" fill="white"/>
+
+  <!-- Left person: head -->
+  <circle cx="140" cy="362" r="30" fill="white" fill-opacity="0.85"/>
+  <!-- Left person: body arc -->
+  <path d="M86 450 C86 420 112 396 140 396 C168 396 194 420 194 450" stroke="white" stroke-opacity="0.85" stroke-width="20" stroke-linecap="round" fill="none"/>
+
+  <!-- Center person: head (slightly larger / foreground) -->
+  <circle cx="256" cy="356" r="34" fill="white"/>
+  <!-- Center person: body arc -->
+  <path d="M196 450 C196 418 224 392 256 392 C288 392 316 418 316 450" stroke="white" stroke-width="22" stroke-linecap="round" fill="none"/>
+
+  <!-- Right person: head -->
+  <circle cx="372" cy="362" r="30" fill="white" fill-opacity="0.85"/>
+  <!-- Right person: body arc -->
+  <path d="M318 450 C318 420 344 396 372 396 C400 396 426 420 426 450" stroke="white" stroke-opacity="0.85" stroke-width="20" stroke-linecap="round" fill="none"/>
+</svg>
