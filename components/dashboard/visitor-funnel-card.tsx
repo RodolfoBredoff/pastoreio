@@ -253,7 +253,7 @@ export function VisitorFunnelCard({ periodDays = 180 }: VisitorFunnelCardProps) 
       </CardContent>
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[80dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{selectedStage?.label}</DialogTitle>
             <DialogDescription>

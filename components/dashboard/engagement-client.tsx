@@ -271,7 +271,7 @@ function StatsCards({
       )}
 
       <Dialog open={presenceListOpen} onOpenChange={setPresenceListOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Quem esteve presente no período</DialogTitle>
           </DialogHeader>
@@ -394,7 +394,7 @@ function PeriodDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[85dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Detalhes do Período: {periodData.period}</DialogTitle>
         </DialogHeader>

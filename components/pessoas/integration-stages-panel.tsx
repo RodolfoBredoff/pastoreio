@@ -502,7 +502,7 @@ export function IntegrationStagesPanel({ onListFilterChange, onRequestBroadcast 
 
       {/* Stage members dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[80dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between gap-2 pr-6">
               <span className="truncate">{selectedStageLabel}</span>

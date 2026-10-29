@@ -699,7 +699,7 @@ export function PessoasTagChartsPanel({
 
       {/* Bucket members dialog */}
       <Dialog open={bucketDialogOpen} onOpenChange={setBucketDialogOpen}>
-        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-md max-h-[85dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-left text-base">{bucketTitle}</DialogTitle>
           </DialogHeader>

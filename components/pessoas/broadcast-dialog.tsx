@@ -254,7 +254,7 @@ export function BroadcastDialog({ members, open: openProp, onOpenChange, preSele
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-[525px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[525px] max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Enviar Mensagem via WhatsApp</DialogTitle>
           <DialogDescription>
