@@ -48,6 +48,8 @@ export async function updateSession(request: NextRequest) {
     !pathname.startsWith('/_next') &&
     !pathname.startsWith('/api') &&
     !pathname.startsWith('/sw.js') &&
+    // Scripts importados pelo sw.js (next-pwa): sem eles o service worker não instala
+    !/^\/(workbox|worker)-[\w-]+\.js$/.test(pathname) &&
     !pathname.startsWith('/manifest.json')
   ) {
     const url = request.nextUrl.clone();

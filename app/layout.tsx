@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { InstallPrompt } from '@/components/pwa/install-prompt';
+import { RegisterServiceWorker } from '@/components/pwa/register-service-worker';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -43,6 +44,7 @@ export default function RootLayout({
           {children}
         </div>
         <InstallPrompt />
+        <RegisterServiceWorker />
       </body>
     </html>
   );

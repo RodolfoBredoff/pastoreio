@@ -11,6 +11,14 @@ function base64UrlToUint8Array(base64Url: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+/** serviceWorker.ready nunca resolve se não houver service worker: limita a espera. */
+function swReady(ms = 10000): Promise<ServiceWorkerRegistration> {
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('service worker indisponível')), ms)),
+  ]);
+}
+
 export function useNotifications() {
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [subscription, setSubscription] = useState<PushSubscription | null>(null);
@@ -26,7 +34,7 @@ export function useNotifications() {
     setIsSupported(supported);
     if (!supported) return;
     setPermission(Notification.permission);
-    navigator.serviceWorker.ready
+    swReady()
       .then((reg) => reg.pushManager.getSubscription())
       .then((sub) => {
         setSubscription(sub);
@@ -56,7 +64,7 @@ export function useNotifications() {
       }
       const { key } = (await keyRes.json()) as { key: string };
 
-      const registration = await navigator.serviceWorker.ready;
+      const registration = await swReady();
       const sub =
         (await registration.pushManager.getSubscription()) ??
         (await registration.pushManager.subscribe({
