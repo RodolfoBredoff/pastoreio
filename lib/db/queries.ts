@@ -48,6 +48,11 @@ export interface Meeting {
   notes: string | null;
   meeting_type: 'regular' | 'special_event';
   created_at: string;
+  /** Relatório do encontro (migration 032); privado ao grupo e à coordenação */
+  report_prayer_requests?: string | null;
+  report_offering?: string | null;
+  report_notes?: string | null;
+  report_updated_at?: string | null;
 }
 
 export interface Attendance {
@@ -69,8 +74,9 @@ export interface GuestVisitor {
 export interface Notification {
   id: string;
   group_id: string;
-  notification_type: 'absence_alert' | 'birthday' | 'visitor_dropoff';
+  notification_type: 'absence_alert' | 'birthday' | 'visitor_dropoff' | 'attendance_missing';
   member_id: string | null;
+  meeting_id?: string | null;
   message: string;
   is_read: boolean;
   created_at: string;

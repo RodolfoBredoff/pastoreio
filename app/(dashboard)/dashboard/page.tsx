@@ -4,6 +4,8 @@ import { queryOne } from '@/lib/db/postgres';
 import { StatsCards } from '@/components/dashboard/stats-cards';
 import { Bell } from 'lucide-react';
 import Link from 'next/link';
+import { getPendingAttendance } from '@/lib/attendance-pending';
+import { PendingAttendanceCard } from '@/components/dashboard/pending-attendance-card';
 
 export default async function DashboardPage() {
   const leader = await getCurrentLeader();
@@ -27,12 +29,13 @@ export default async function DashboardPage() {
     );
   }
 
-  const [group, stats] = await Promise.all([
+  const [group, stats, pendingAttendance] = await Promise.all([
     queryOne<{ name: string }>(
       `SELECT name FROM groups WHERE id = $1`,
       [leader.group_id]
     ),
     getGroupStats(),
+    getPendingAttendance({ groupId: leader.group_id }),
   ]);
 
   return (
@@ -51,6 +54,8 @@ export default async function DashboardPage() {
           Alertas
         </Link>
       </div>
+
+      <PendingAttendanceCard items={pendingAttendance} variant="leader" />
 
       <StatsCards
         totalMembers={stats.totalMembers}

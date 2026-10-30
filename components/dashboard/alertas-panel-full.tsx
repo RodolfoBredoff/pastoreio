@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  AlertCircle, Cake, Check, CalendarDays, Users, MessageCircle, UserX, Bell,
+  AlertCircle, Cake, Check, CalendarDays, Users, MessageCircle, UserX, Bell, ClipboardCheck,
 } from 'lucide-react';
 import { NOTIFICATION_TYPES } from '@/lib/constants';
 import { formatDate, isTodayBirthday } from '@/lib/utils';
@@ -19,7 +19,8 @@ type ScopeMode = 'all' | 'custom';
 
 interface Notification {
   id: string;
-  notification_type: 'absence_alert' | 'birthday' | 'visitor_dropoff';
+  notification_type: 'absence_alert' | 'birthday' | 'visitor_dropoff' | 'attendance_missing';
+  meeting_id?: string | null;
   message: string;
   is_read: boolean;
   created_at: string;
@@ -530,6 +531,8 @@ export function AlertasPanelFull({
                       <AlertCircle className="h-5 w-5 text-red-500" />
                     ) : notification.notification_type === NOTIFICATION_TYPES.VISITOR_DROPOFF ? (
                       <UserX className="h-5 w-5 text-orange-500" />
+                    ) : notification.notification_type === NOTIFICATION_TYPES.ATTENDANCE_MISSING ? (
+                      <ClipboardCheck className="h-5 w-5 text-blue-500" />
                     ) : (
                       <Cake className="h-5 w-5 text-yellow-500" />
                     )}
@@ -552,6 +555,15 @@ export function AlertasPanelFull({
                         minute: '2-digit',
                       })}
                     </p>
+                    {notification.notification_type === NOTIFICATION_TYPES.ATTENDANCE_MISSING &&
+                      notification.meeting_id && !notification.is_read && (
+                      <a
+                        href={`/chamada?meeting=${notification.meeting_id}`}
+                        className="inline-flex h-7 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground mr-2"
+                      >
+                        Lançar chamada
+                      </a>
+                    )}
                     {!notification.is_read && (
                       <Button
                         variant="ghost"

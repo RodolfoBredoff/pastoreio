@@ -11,6 +11,16 @@
  *   /pequenos-grupos/push/vapid_private_key (SecureString)
  */
 
+/**
+ * Chave pública VAPID lida em tempo de execução.
+ * Acesso por colchetes: o Next substitui `process.env.NEXT_PUBLIC_X` no build, e a imagem
+ * Docker é gerada sem as chaves.
+ */
+export function getVapidPublicKey(): string | undefined {
+  const env = process.env as Record<string, string | undefined>;
+  return env['VAPID_PUBLIC_KEY'] || env['NEXT_PUBLIC_VAPID_PUBLIC_KEY'] || undefined;
+}
+
 interface PushSubscriptionData {
   endpoint: string;
   p256dh: string;
@@ -22,6 +32,8 @@ interface PushPayload {
   body: string;
   url?: string;
   icon?: string;
+  /** Notificações com a mesma tag substituem a anterior no aparelho */
+  tag?: string;
 }
 
 /**
@@ -32,7 +44,7 @@ export async function sendPushNotification(
   subscriptions: PushSubscriptionData[],
   payload: PushPayload
 ): Promise<{ failedEndpoints: string[] }> {
-  const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const vapidPublicKey = getVapidPublicKey();
   const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
   const vapidSubject = process.env.VAPID_SUBJECT ?? 'mailto:admin@pequenos-grupos.com';
 
@@ -99,5 +111,22 @@ export async function sendPushToLeader(
     }
   } catch (err) {
     console.error('[Push] Erro ao enviar para líder', leaderId, err);
+  }
+}
+
+/**
+ * Envia a notificação para quem cuida do grupo: líder(es) e secretário(a)s.
+ * Não lança erro.
+ */
+export async function sendPushToGroupLeaders(groupId: string, payload: PushPayload): Promise<void> {
+  try {
+    const { queryMany } = await import('@/lib/db/postgres');
+    const leaders = await queryMany<{ id: string }>(
+      `SELECT id FROM leaders WHERE group_id = $1 AND role IN ('leader', 'secretary')`,
+      [groupId]
+    );
+    for (const l of leaders) await sendPushToLeader(l.id, payload);
+  } catch (err) {
+    console.error('[Push] Erro ao enviar para o grupo', groupId, err);
   }
 }

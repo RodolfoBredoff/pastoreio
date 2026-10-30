@@ -5,12 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Users, Group, Calendar, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
+import { getPendingAttendance } from '@/lib/attendance-pending';
+import { PendingAttendanceCard } from '@/components/dashboard/pending-attendance-card';
 
 export default async function CoordinatorDashboardPage() {
   const coordinator = await getCoordinatorSession();
   if (!coordinator) redirect('/login');
 
-  const [org, stats, recentGroups] = await Promise.all([
+  const [org, stats, recentGroups, pendingAttendance] = await Promise.all([
     queryOne<{ name: string }>(
       `SELECT name FROM organizations WHERE id = $1`,
       [coordinator.organization_id]
@@ -48,6 +50,7 @@ export default async function CoordinatorDashboardPage() {
        LIMIT 10`,
       [coordinator.organization_id]
     ),
+    getPendingAttendance({ organizationId: coordinator.organization_id }),
   ]);
 
   return (
@@ -100,6 +103,8 @@ export default async function CoordinatorDashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <PendingAttendanceCard items={pendingAttendance} variant="coordinator" />
 
       <div className="grid gap-4 md:grid-cols-3">
         <Link href="/org/grupos">

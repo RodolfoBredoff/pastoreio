@@ -6,7 +6,7 @@
 import { query, queryMany, queryOne } from '@/lib/db/postgres';
 import { sendEmail, buildBirthdayEmailHtml } from '@/lib/email/sender';
 import { sendWhatsAppTemplateMessage } from '@/lib/whatsapp/sender';
-import { sendPushToLeader } from '@/lib/push/sender';
+import { sendPushToGroupLeaders } from '@/lib/push/sender';
 
 const CONSECUTIVE_ABSENCES_THRESHOLD = 2;
 
@@ -21,10 +21,7 @@ export async function checkConsecutiveAbsences(): Promise<number> {
   let alertsCreated = 0;
 
   for (const group of groups) {
-    const groupLeader = await queryOne<{ id: string; full_name: string; email: string }>(
-      `SELECT id, full_name, email FROM leaders WHERE group_id = $1 LIMIT 1`,
-      [group.id]
-    );
+    const newNames: string[] = [];
 
     const members = await queryMany<{ id: string; full_name: string; phone: string | null }>(
       `SELECT id, full_name, phone FROM members 
@@ -78,16 +75,22 @@ export async function checkConsecutiveAbsences(): Promise<number> {
             });
           }
 
-          // Enviar push notification ao líder
-          if (groupLeader?.id) {
-            await sendPushToLeader(groupLeader.id, {
-              title: 'Alerta de Falta',
-              body: `${member.full_name} tem ${consecutiveAbsences} faltas consecutivas.`,
-              url: '/alertas',
-            });
-          }
+          newNames.push(member.full_name);
         }
       }
+    }
+
+    // Um único push por grupo, para não disparar uma notificação por pessoa
+    if (newNames.length > 0) {
+      await sendPushToGroupLeaders(group.id, {
+        title: 'Alerta de faltas',
+        body:
+          newNames.length === 1
+            ? `${newNames[0]} tem faltas consecutivas. Considere entrar em contato.`
+            : `${newNames.length} pessoas com faltas consecutivas (${newNames.slice(0, 3).join(', ')}${newNames.length > 3 ? '…' : ''}).`,
+        url: '/alertas',
+        tag: 'absence-alerts',
+      });
     }
   }
 
@@ -103,7 +106,6 @@ export async function checkBirthdaysToday(): Promise<number> {
   );
 
   let notificationsCreated = 0;
-  const today = new Date().toISOString().split('T')[0];
 
   for (const group of groups) {
     const birthdays = await queryMany<{ id: string; full_name: string; phone: string }>(
@@ -120,7 +122,8 @@ export async function checkBirthdaysToday(): Promise<number> {
     );
 
     const leader = await queryOne<{ full_name: string; email: string; phone: string | null }>(
-      `SELECT full_name, email, phone FROM leaders WHERE group_id = $1 LIMIT 1`,
+      `SELECT full_name, email, phone FROM leaders WHERE group_id = $1
+       ORDER BY (role = 'leader') DESC LIMIT 1`,
       [group.id]
     );
 
@@ -130,8 +133,8 @@ export async function checkBirthdaysToday(): Promise<number> {
          WHERE group_id = $1 
          AND member_id = $2 
          AND notification_type = 'birthday'
-         AND DATE(created_at) = $3`,
-        [group.id, person.id, today]
+         AND DATE(created_at) = CURRENT_DATE`,
+        [group.id, person.id]
       );
 
       if (existingNotification.rows.length === 0) {
@@ -174,20 +177,12 @@ export async function checkBirthdaysToday(): Promise<number> {
           });
         }
 
-        // Enviar push notification ao líder
-        if (leader) {
-          const leaderRow = await queryOne<{ id: string }>(
-            `SELECT id FROM leaders WHERE email = $1 AND group_id = $2 LIMIT 1`,
-            [leader.email, group.id]
-          );
-          if (leaderRow?.id) {
-            await sendPushToLeader(leaderRow.id, {
-              title: `🎂 Aniversário hoje!`,
-              body: `${person.full_name} faz aniversário hoje. Envie parabéns!`,
-              url: '/alertas',
-            });
-          }
-        }
+        await sendPushToGroupLeaders(group.id, {
+          title: '🎂 Aniversário hoje!',
+          body: `${person.full_name} faz aniversário hoje. Envie parabéns!`,
+          url: '/alertas',
+          tag: `birthday-${person.id}`,
+        });
       }
     }
   }
@@ -226,10 +221,7 @@ export async function checkVisitorDropoff(): Promise<number> {
       [group.id]
     );
 
-    const groupLeader = await queryOne<{ id: string }>(
-      `SELECT id FROM leaders WHERE group_id = $1 LIMIT 1`,
-      [group.id]
-    );
+    const newNames: string[] = [];
 
     for (const visitor of staleVisitors) {
       const existing = await query(
@@ -251,20 +243,64 @@ export async function checkVisitorDropoff(): Promise<number> {
           ]
         );
         alertsCreated++;
-
-        // Notificação push ao líder
-        if (groupLeader?.id) {
-          await sendPushToLeader(groupLeader.id, {
-            title: 'Visitante sem retorno',
-            body: `${visitor.full_name} não aparece há mais de 60 dias.`,
-            url: `/pessoas`,
-          });
-        }
+        newNames.push(visitor.full_name);
       }
+    }
+
+    if (newNames.length > 0) {
+      await sendPushToGroupLeaders(group.id, {
+        title: 'Visitantes sem retorno',
+        body:
+          newNames.length === 1
+            ? `${newNames[0]} não aparece nos últimos encontros.`
+            : `${newNames.length} visitantes não aparecem nos últimos encontros.`,
+        url: '/alertas',
+        tag: 'visitor-dropoff',
+      });
     }
   }
 
   return alertsCreated;
+}
+
+/**
+ * Lembra líder e secretário(a)s de lançar a chamada de encontros regulares dos
+ * últimos 3 dias que ainda não têm nenhuma presença registrada.
+ * Uma notificação por encontro (não repete); o push abre direto a chamada daquele encontro.
+ */
+export async function checkMissingAttendance(): Promise<number> {
+  const pending = await queryMany<{ id: string; group_id: string; meeting_date: string; title: string | null }>(
+    `SELECT mt.id, mt.group_id, mt.meeting_date, mt.title
+     FROM meetings mt
+     WHERE mt.is_cancelled = FALSE
+       AND COALESCE(mt.meeting_type, 'regular') = 'regular'
+       AND mt.meeting_date BETWEEN CURRENT_DATE - 3 AND CURRENT_DATE - 1
+       AND NOT EXISTS (SELECT 1 FROM attendance a WHERE a.meeting_id = mt.id)
+       AND NOT EXISTS (
+         SELECT 1 FROM notifications n
+         WHERE n.meeting_id = mt.id AND n.notification_type = 'attendance_missing'
+       )
+     ORDER BY mt.meeting_date`
+  );
+
+  for (const meeting of pending) {
+    const [y, m, d] = String(meeting.meeting_date).slice(0, 10).split('-');
+    const date = `${d}/${m}/${y}`;
+    const what = meeting.title ? `"${meeting.title}" (${date})` : `do encontro de ${date}`;
+    await query(
+      `INSERT INTO notifications (group_id, notification_type, meeting_id, message)
+       VALUES ($1, 'attendance_missing', $2, $3)`,
+      [meeting.group_id, meeting.id, `A chamada ${meeting.title ? 'de ' : ''}${what} ainda não foi lançada.`]
+    );
+    await sendPushToGroupLeaders(meeting.group_id, {
+      title: 'Lançar a chamada',
+      body: `${meeting.title ? `${meeting.title} (${date})` : `Encontro de ${date}`} ainda está sem presença registrada.`,
+      url: `/chamada?meeting=${meeting.id}`,
+      tag: `chamada-${meeting.id}`,
+    });
+  }
+
+  return pending.length;
 }
 
 /**
@@ -316,7 +352,8 @@ export async function checkMeetingReminders(): Promise<number> {
 
     // Enviar link de grupo para o líder por e-mail
     const leader = await queryOne<{ full_name: string; email: string; phone: string | null }>(
-      `SELECT full_name, email, phone FROM leaders WHERE group_id = $1 LIMIT 1`,
+      `SELECT full_name, email, phone FROM leaders WHERE group_id = $1
+       ORDER BY (role = 'leader') DESC LIMIT 1`,
       [group.id]
     );
 
@@ -359,7 +396,8 @@ export async function checkWeeklySummary(): Promise<number> {
 
   for (const group of groups) {
     const leader = await queryOne<{ full_name: string; email: string }>(
-      `SELECT full_name, email FROM leaders WHERE group_id = $1 LIMIT 1`,
+      `SELECT full_name, email FROM leaders WHERE group_id = $1
+       ORDER BY (role = 'leader') DESC LIMIT 1`,
       [group.id]
     );
 
@@ -456,16 +494,19 @@ export async function runAllChecks(): Promise<{
   absenceAlerts: number;
   birthdayNotifications: number;
   visitorDropoffs: number;
+  missingAttendance: number;
 }> {
-  const [absenceAlerts, birthdayNotifications, visitorDropoffs] = await Promise.all([
+  const [absenceAlerts, birthdayNotifications, visitorDropoffs, missingAttendance] = await Promise.all([
     checkConsecutiveAbsences(),
     checkBirthdaysToday(),
     checkVisitorDropoff(),
+    checkMissingAttendance(),
   ]);
 
   return {
     absenceAlerts,
     birthdayNotifications,
     visitorDropoffs,
+    missingAttendance,
   };
 }

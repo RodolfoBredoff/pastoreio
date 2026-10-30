@@ -188,6 +188,17 @@ export async function POST(request: Request) {
       // Erro já logado em syncEngagementToSheet; não falha a resposta
     }
 
+    // Chamada lançada: o lembrete "chamada pendente" deste encontro deixa de valer
+    try {
+      await query(
+        `UPDATE notifications SET is_read = TRUE
+         WHERE meeting_id = $1 AND notification_type = 'attendance_missing' AND is_read = FALSE`,
+        [meeting_id]
+      );
+    } catch {
+      // Coluna meeting_id só existe após a migration 032; não falha a resposta
+    }
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Erro ao salvar presenças:', error);

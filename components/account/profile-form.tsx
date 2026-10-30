@@ -66,12 +66,15 @@ function PushNotificationButton() {
     return (
       <div className="flex items-start gap-2 rounded-lg border border-muted bg-muted/40 p-3 text-sm text-muted-foreground">
         <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-        <span>Notificações push não são suportadas neste navegador.</span>
+        <span>
+          Notificações push não são suportadas neste navegador. No iPhone, instale o app na
+          tela inicial (Compartilhar → Adicionar à Tela de Início) e abra por lá.
+        </span>
       </div>
     );
   }
 
-  const isSubscribed = !!subscription || permission === 'granted';
+  const isSubscribed = !!subscription;
 
   const handleToggle = async () => {
     setLoading(true);
@@ -84,8 +87,10 @@ function PushNotificationButton() {
         const ok = await requestPermission();
         if (ok) {
           setMessage('Notificações ativadas com sucesso!');
-        } else if (permission === 'denied') {
+        } else if (Notification.permission === 'denied') {
           setMessage('Permissão negada. Habilite nas configurações do navegador.');
+        } else {
+          setMessage('Não foi possível ativar as notificações agora. Tente novamente mais tarde.');
         }
       }
     } finally {
@@ -103,7 +108,7 @@ function PushNotificationButton() {
       ) : (
         <div className="flex items-start gap-2 rounded-lg border border-muted bg-muted/40 p-3 text-sm text-muted-foreground">
           <Bell className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>Receba alertas de aniversários e faltas diretamente no seu navegador, mesmo sem abrir o app.</span>
+          <span>Receba lembretes de chamada, aniversários e faltas no seu aparelho, mesmo sem abrir o app.</span>
         </div>
       )}
       <Button

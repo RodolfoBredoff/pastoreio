@@ -35,6 +35,12 @@ services:
       - ATTENDANCE_SNAPSHOT_SECRET=${ATTENDANCE_SNAPSHOT_SECRET:-}
       # Buffer de confirmações recebidas com a EC2 desligada (aws/terraform-lista-presenca)
       - ATTENDANCE_BUFFER_TABLE=${ATTENDANCE_BUFFER_TABLE:-pastoreio-attendance-buffer}
+      # Alertas: /api/cron/check-alerts (chamado pelo timer scripts/install-alerts-timer.sh)
+      - CRON_SECRET=${CRON_SECRET:-}
+      # Notificações push (Web Push, sem custo). Gerar: scripts/install-alerts-timer.sh
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:admin@skillia.click}
     depends_on:
       postgres:
         condition: service_healthy

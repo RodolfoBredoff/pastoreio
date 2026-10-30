@@ -3,11 +3,12 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { PresenceChecklist } from './presence-checklist';
+import { MeetingReport, type MeetingReportData } from './meeting-report';
 import { Card, CardContent } from '@/components/ui/card';
 import { formatDate, getDayOfWeekName } from '@/lib/utils';
 import { Calendar } from 'lucide-react';
 
-interface Meeting {
+interface Meeting extends MeetingReportData {
   id: string;
   meeting_date: string;
   title: string | null;
@@ -169,6 +170,8 @@ export function ChamadaWithSelector({
               </p>
             </div>
           )}
+
+          <MeetingReport key={selectedMeeting.id} meetingId={selectedMeeting.id} initial={selectedMeeting} />
         </>
       )}
     </div>

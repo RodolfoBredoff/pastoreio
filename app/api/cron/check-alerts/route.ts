@@ -43,6 +43,7 @@ export async function GET(request: Request) {
       absenceAlerts: result.absenceAlerts,
       birthdayNotifications: result.birthdayNotifications,
       visitorDropoffs: result.visitorDropoffs,
+      missingAttendance: result.missingAttendance,
       remindersSent,
       weeklySummary,
       timestamp: new Date().toISOString(),

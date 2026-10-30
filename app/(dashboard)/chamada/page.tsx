@@ -3,7 +3,12 @@ import { getMeetingsForPresence, getMembersByLeaderGroup, getAttendanceByMeeting
 import { ChamadaWithSelector } from '@/components/chamada/chamada-with-selector';
 import { formatDate } from '@/lib/utils';
 
-export default async function ChamadaPage() {
+export default async function ChamadaPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ meeting?: string }>;
+}) {
+  const { meeting: requestedMeetingId } = await searchParams;
   const leader = await getCurrentLeader();
 
   if (!leader?.group_id) {
@@ -16,7 +21,11 @@ export default async function ChamadaPage() {
   ]);
 
   const today = new Date().toISOString().split('T')[0];
-  const defaultMeeting = meetings.find((m) => m.meeting_date === today) ?? meetings[0];
+  // ?meeting=<id> (link do lembrete de chamada) tem prioridade sobre o encontro de hoje
+  const defaultMeeting =
+    meetings.find((m) => m.id === requestedMeetingId) ??
+    meetings.find((m) => m.meeting_date === today) ??
+    meetings[0];
 
   if (!defaultMeeting) {
     return (
@@ -58,6 +67,10 @@ export default async function ChamadaPage() {
           title: m.title,
           meeting_time: m.meeting_time,
           is_cancelled: m.is_cancelled,
+          report_prayer_requests: m.report_prayer_requests ?? null,
+          report_offering: m.report_offering ?? null,
+          report_notes: m.report_notes ?? null,
+          report_updated_at: m.report_updated_at ?? null,
         }))}
         members={members.map((m) => ({ id: m.id, full_name: m.full_name }))}
         defaultMeetingId={defaultMeeting.id}

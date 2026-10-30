@@ -12,12 +12,14 @@ export const NOTIFICATION_TYPES = {
   ABSENCE_ALERT: 'absence_alert',
   BIRTHDAY: 'birthday',
   VISITOR_DROPOFF: 'visitor_dropoff',
+  ATTENDANCE_MISSING: 'attendance_missing',
 } as const;
 
 export const NOTIFICATION_TYPE_LABELS = {
   [NOTIFICATION_TYPES.ABSENCE_ALERT]: 'Alerta de Faltas',
   [NOTIFICATION_TYPES.BIRTHDAY]: 'Aniversário',
   [NOTIFICATION_TYPES.VISITOR_DROPOFF]: 'Visitante Inativo',
+  [NOTIFICATION_TYPES.ATTENDANCE_MISSING]: 'Chamada pendente',
 };
 
 export const INTEGRATION_STAGES = {
