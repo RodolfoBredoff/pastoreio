@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus, RotateCcw, Save, Download, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, XCircle, UserPlus, RotateCcw, Save, Download, Pencil, Trash2, Receipt } from 'lucide-react';
 import {
   internalCheckKeyMember,
   internalCheckKeyGuest,
@@ -30,6 +30,7 @@ interface MemberResponse {
   email: string | null;
   phone: string | null;
   extra_values?: unknown;
+  payment_receipt_id?: string | null;
 }
 
 interface MemberRow {
@@ -55,6 +56,7 @@ interface PublicEntryRow {
   rg: string | null;
   created_at: string;
   extra_values?: unknown;
+  payment_receipt_id?: string | null;
 }
 
 interface ExtraFieldCfg {
@@ -260,6 +262,40 @@ interface ListData {
   guests: GuestRow[];
   public_entries?: PublicEntryRow[];
   extra_fields?: ExtraFieldCfg[];
+}
+
+/** Abre o comprovante de pagamento (link temporário gerado só para o líder do grupo). */
+function ReceiptButton({ meetingId, receiptId }: { meetingId: string; receiptId: string | null | undefined }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  if (!receiptId) return null;
+  const open = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/payment-receipts/${receiptId}`);
+      const json = (await res.json().catch(() => ({}))) as { url?: string };
+      if (!res.ok || !json.url) throw new Error('falha');
+      window.open(json.url, '_blank', 'noopener,noreferrer');
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 text-xs"
+      disabled={busy}
+      onClick={open}
+      title="Ver comprovante de pagamento"
+    >
+      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Receipt className="h-3 w-3 mr-1" />}
+      {failed ? 'Tentar novamente' : 'Comprovante'}
+    </Button>
+  );
 }
 
 function formatDate(d: string) {
@@ -1347,7 +1383,10 @@ export default function ListaConfirmacaoPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="p-3 font-mono text-xs">{contactDisplay(m.response)}</td>
+                    <td className="p-3 font-mono text-xs">
+                      {contactDisplay(m.response)}
+                      <ReceiptButton meetingId={meeting.id} receiptId={m.response?.payment_receipt_id} />
+                    </td>
                     {listExtraFields.length > 0 && (
                       <td className="p-3 text-xs">
                         {(() => {
@@ -1698,6 +1737,7 @@ export default function ListaConfirmacaoPage() {
                       </td>
                       <td className="p-3">
                         <div className="flex items-center gap-1">
+                          <ReceiptButton meetingId={meeting.id} receiptId={e.payment_receipt_id} />
                           <Button
                             variant="ghost"
                             size="sm"

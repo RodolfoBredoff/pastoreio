@@ -6,21 +6,7 @@ import { query, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { normalizeExtraFieldConfigs } from '@/lib/attendance-list-extra';
 import { scheduleAttendanceSnapshotSync } from '@/lib/attendance-snapshot';
-
-function slugify(input: string): string {
-  return input
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)+/g, '')
-    .slice(0, 60);
-}
-
-function shortId(): string {
-  // 4 chars, URL-friendly, enough to avoid casual collisions
-  return Math.random().toString(36).slice(2, 6);
-}
+import { generateListIdentifiers, normalizePaidConfig } from '@/lib/attendance-list-setup';
 
 /**
  * GET /api/meetings
@@ -154,12 +140,11 @@ export async function POST(request: Request) {
 
     let attendanceListSlug: string | null = null;
     if (withList) {
-      const provided = typeof attendance_list_slug === 'string' ? attendance_list_slug.trim() : '';
-      const baseTitle = (title && String(title).trim()) ? String(title).trim() : 'encontro';
-      const base = provided ? slugify(provided) : slugify(baseTitle);
-      const datePart = meeting_date.replaceAll('-', '');
-      const candidateBase = `${base || 'encontro'}-${datePart}`.slice(0, 60);
-      attendanceListSlug = `${candidateBase}-${shortId()}`.replace(/-+/g, '-');
+      attendanceListSlug = generateListIdentifiers({
+        title,
+        meetingDate: meeting_date,
+        preferredSlugBase: attendance_list_slug,
+      }).slug;
     }
 
     // Campos adicionais obrigatórios (somente quando a lista pública é gerada)
@@ -172,18 +157,13 @@ export async function POST(request: Request) {
       extraFieldConfigs = res;
     }
 
-    // Validação de evento pago
-    const isPaidEvent = withList && Boolean(is_paid_event);
-    const paymentPixKey = isPaidEvent && typeof payment_pix_key === 'string' 
-      ? payment_pix_key.trim() 
-      : null;
-    
-    if (isPaidEvent && !paymentPixKey) {
-      return NextResponse.json(
-        { error: 'A chave PIX é obrigatória para eventos pagos' },
-        { status: 400 }
-      );
+    // Evento pago (só faz sentido com lista de presença); chave PIX obrigatória
+    const paid = normalizePaidConfig(withList && Boolean(is_paid_event), payment_pix_key);
+    if (!paid.ok) {
+      return NextResponse.json({ error: paid.error }, { status: 400 });
     }
+    const isPaidEvent = paid.isPaid;
+    const paymentPixKey = paid.pixKey;
 
     const result = await query(
       `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token, attendance_list_deadline, attendance_list_slug, attendance_list_mode, attendance_list_require_rg, attendance_list_limit, is_paid_event, payment_pix_key)

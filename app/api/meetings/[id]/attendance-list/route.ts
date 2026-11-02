@@ -79,6 +79,7 @@ export async function GET(
       attendance_list_internal_unmarked_label: string | null;
       attendance_list_require_rg: boolean;
       attendance_list_limit: number | null;
+      is_paid_event: boolean;
     }>(
       `SELECT id, group_id, title, meeting_date, meeting_time, location, notes, attendance_list_token, attendance_list_deadline, attendance_list_mode,
               attendance_list_internal_label,
@@ -88,7 +89,8 @@ export async function GET(
               attendance_list_internal_result_negative,
               attendance_list_internal_unmarked_label,
               COALESCE(attendance_list_require_rg, FALSE) AS attendance_list_require_rg,
-              attendance_list_limit
+              attendance_list_limit,
+              COALESCE(is_paid_event, FALSE) AS is_paid_event
        FROM meetings WHERE id = $1`,
       [meetingId]
     );
@@ -115,14 +117,24 @@ export async function GET(
       email: string | null;
       phone: string | null;
       extra_values: unknown;
+      payment_receipt_id: string | null;
     }>(
-      `SELECT member_id, status, email, phone, extra_values FROM attendance_list_responses WHERE meeting_id = $1`,
+      `SELECT member_id, status, email, phone, extra_values, payment_receipt_id FROM attendance_list_responses WHERE meeting_id = $1`,
       [meetingId]
     ).catch(() => []);
 
-    const responseMap: Record<string, { status: string; email: string | null; phone: string | null; extra_values: unknown }> = {};
+    const responseMap: Record<
+      string,
+      { status: string; email: string | null; phone: string | null; extra_values: unknown; payment_receipt_id: string | null }
+    > = {};
     for (const r of responses) {
-      responseMap[r.member_id] = { status: r.status, email: r.email, phone: r.phone, extra_values: r.extra_values ?? [] };
+      responseMap[r.member_id] = {
+        status: r.status,
+        email: r.email,
+        phone: r.phone,
+        extra_values: r.extra_values ?? [],
+        payment_receipt_id: r.payment_receipt_id ?? null,
+      };
     }
 
     const guests = await queryMany<{
@@ -149,8 +161,9 @@ export async function GET(
       rg: string | null;
       created_at: string;
       extra_values: unknown;
+      payment_receipt_id: string | null;
     }>(
-      `SELECT id, first_name, last_name, email, phone, rg, created_at, extra_values
+      `SELECT id, first_name, last_name, email, phone, rg, created_at, extra_values, payment_receipt_id
        FROM attendance_list_public_entries
        WHERE meeting_id = $1
        ORDER BY created_at ASC`,
@@ -178,6 +191,7 @@ export async function GET(
         attendance_list_internal_unmarked_label: meetingRow.attendance_list_internal_unmarked_label,
         attendance_list_require_rg: meetingRow.attendance_list_require_rg ?? false,
         attendance_list_limit: meetingRow.attendance_list_limit,
+        is_paid_event: meetingRow.is_paid_event,
       },
       members: members.map((m) => ({
         id: m.id,
@@ -204,6 +218,7 @@ export async function GET(
         rg: e.rg,
         created_at: e.created_at,
         extra_values: e.extra_values ?? [],
+        payment_receipt_id: e.payment_receipt_id ?? null,
       })),
       extra_fields: extraFields,
     });

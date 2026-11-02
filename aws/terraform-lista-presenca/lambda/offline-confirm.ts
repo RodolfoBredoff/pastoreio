@@ -18,11 +18,12 @@ import {
   QueryCommand,
 } from '@aws-sdk/client-dynamodb';
 import {
+  countExtraAnswers,
   isAttendanceLimitReached,
   isMeetingExpired,
   isValidRg,
-  normalizeExtraValues,
   normalizeRg,
+  resolveExtraAndPayment,
   type AttendanceExtraFieldConfig,
   type ExtraValuesEntry,
 } from '../../../lib/attendance-list-rules';
@@ -45,6 +46,7 @@ type Snapshot = {
     attendance_list_mode: 'open' | 'prefilled';
     attendance_list_require_rg: boolean;
     attendance_list_limit: number | null;
+    is_paid_event?: boolean;
   };
   extra_fields?: AttendanceExtraFieldConfig[];
   count_confirmed: number;
@@ -106,20 +108,16 @@ async function pendingSummary(meetingId: string) {
   return { count, taken };
 }
 
-/** Conta a opção pelo nome canônico da configuração (mesma regra do app). */
+/** Conta opções e respostas próprias pela mesma regra do app (countExtraAnswers). */
 function canonicalTaken(fields: AttendanceExtraFieldConfig[], raw: Record<string, Record<string, number>>) {
-  const out: Record<string, Record<string, number>> = {};
-  for (const f of fields) {
-    if (!f.options) continue;
-    const byLower = new Map(f.options.map((o) => [o.toLowerCase(), o]));
-    for (const [value, n] of Object.entries(raw[f.id] ?? {})) {
-      const canonical = byLower.get(value.trim().toLowerCase());
-      if (!canonical) continue;
-      out[f.id] ??= {};
-      out[f.id][canonical] = (out[f.id][canonical] ?? 0) + n;
+  // `raw` já vem agregado por valor; reexpande para reaproveitar a regra única de contagem.
+  const rows: Array<{ extra_values: ExtraValuesEntry[] }> = [];
+  for (const [fieldId, values] of Object.entries(raw)) {
+    for (const [value, n] of Object.entries(values)) {
+      for (let i = 0; i < n; i++) rows.push({ extra_values: [{ field_id: fieldId, values: [value] }] });
     }
   }
-  return out;
+  return countExtraAnswers(fields, rows);
 }
 
 async function handleGet(slug: string) {
@@ -154,13 +152,25 @@ async function handlePost(slug: string, rawBody: string) {
     return json(400, { error: 'O prazo para confirmação deste encontro já foi encerrado.' });
   }
 
+  // Evento pago: sem item preenchido a pessoa precisa enviar comprovante, e o envio de
+  // comprovante depende do app (Postgres/S3). Com a EC2 desligada, só aceita quem preencheu
+  // um item; os demais recebem a mensagem de indisponibilidade temporária.
   const fields = snapshot.extra_fields ?? [];
-  let extraValues: ExtraValuesEntry[] = [];
-  if (fields.length > 0) {
-    const res = normalizeExtraValues(fields, body.extra_values);
-    if (!res.ok) return json(400, { error: res.error });
-    extraValues = res.values;
+  const resolved = resolveExtraAndPayment({
+    fields,
+    rawExtraValues: body.extra_values,
+    isPaidEvent: Boolean(meeting.is_paid_event),
+    hasReceipt: false,
+  });
+  if (!resolved.ok) {
+    if (resolved.code === 'payment_required') {
+      return json(409, {
+        error: 'O envio de comprovante está temporariamente indisponível. Tente novamente mais tarde.',
+      });
+    }
+    return json(400, { error: resolved.error });
   }
+  const extraValues = resolved.values;
 
   const pending = await pendingSummary(meeting.id);
   if (isAttendanceLimitReached(snapshot.count_confirmed + pending.count, meeting.attendance_list_limit)) {

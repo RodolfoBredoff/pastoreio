@@ -43,6 +43,8 @@ interface Meeting {
   attendance_list_require_rg?: boolean;
   attendance_list_limit?: number | null;
   invite_cover_image_url?: string | null;
+  is_paid_event?: boolean;
+  payment_pix_key?: string | null;
 }
 
 interface MeetingWithCount extends Meeting {
@@ -73,6 +75,148 @@ function toInputDate(val: string | Date | null | undefined): string {
   if (!val) return '';
   if (typeof val === 'string') return val.split('T')[0];
   return val.toISOString().split('T')[0];
+}
+
+// ============================================================
+// Editor de campos adicionais (usado na edição de encontros)
+// ============================================================
+
+type ExtraFieldDraft = {
+  /** Presente em campos já salvos: mantém o vínculo com as respostas já registradas. */
+  id?: string;
+  label: string;
+  mode: 'text' | 'options';
+  optionsText: string;
+  allowCustom: boolean;
+};
+
+function ExtraFieldsEditor({
+  value,
+  onChange,
+  paid,
+}: {
+  value: ExtraFieldDraft[];
+  onChange: (next: ExtraFieldDraft[]) => void;
+  paid: boolean;
+}) {
+  const update = (idx: number, patch: Partial<ExtraFieldDraft>) =>
+    onChange(value.map((f, i) => (i === idx ? { ...f, ...patch } : f)));
+
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <Label className="text-sm font-medium">Campos adicionais (opcional)</Label>
+      <p className="text-xs text-muted-foreground">
+        {paid
+          ? 'Em evento pago, quem escolher um item confirma sem pagar; quem não escolher confirma enviando o comprovante do PIX.'
+          : 'Peça uma informação obrigatória a quem confirmar (ex.: "O que você vai levar?"). Quem confirmar escolhe exatamente 1 item entre todos os campos.'}
+      </p>
+      {value.map((f, idx) => (
+        <div key={f.id ?? `new-${idx}`} className="space-y-2 rounded-md border bg-muted/20 p-3">
+          <div className="flex items-end gap-2">
+            <div className="flex-1 space-y-1">
+              <Label htmlFor={`edit-extra-label-${idx}`}>Título do campo</Label>
+              <Input
+                id={`edit-extra-label-${idx}`}
+                placeholder="Ex: O que você vai levar?"
+                value={f.label}
+                onChange={(e) => update(idx, { label: e.target.value })}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 text-muted-foreground hover:text-destructive"
+              onClick={() => onChange(value.filter((_, i) => i !== idx))}
+            >
+              Remover
+            </Button>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`edit-extra-mode-${idx}`}>Tipo de resposta</Label>
+            <select
+              id={`edit-extra-mode-${idx}`}
+              value={f.mode}
+              onChange={(e) => update(idx, { mode: e.target.value as 'text' | 'options' })}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            >
+              <option value="text">Resposta livre (texto)</option>
+              <option value="options">Lista de opções</option>
+            </select>
+          </div>
+          {f.mode === 'options' && (
+            <>
+              <div className="space-y-1">
+                <Label htmlFor={`edit-extra-options-${idx}`}>Opções (uma por linha)</Label>
+                <textarea
+                  id={`edit-extra-options-${idx}`}
+                  rows={4}
+                  placeholder={'Pão de queijo\nPatê com torradas\nFrutas'}
+                  value={f.optionsText}
+                  onChange={(e) => update(idx, { optionsText: e.target.value })}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y"
+                />
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id={`edit-extra-allow-custom-${idx}`}
+                  checked={f.allowCustom}
+                  onCheckedChange={(c) => update(idx, { allowCustom: c === true })}
+                />
+                <Label htmlFor={`edit-extra-allow-custom-${idx}`} className="text-sm font-normal cursor-pointer">
+                  Permitir também resposta própria (outro)
+                </Label>
+              </div>
+            </>
+          )}
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => onChange([...value, { label: '', mode: 'text', optionsText: '', allowCustom: true }])}
+      >
+        + Adicionar campo
+      </Button>
+    </div>
+  );
+}
+
+/** Converte o rascunho no formato da API, validando título e opções. */
+function cleanExtraFieldDrafts(
+  drafts: ExtraFieldDraft[]
+): { ok: true; fields: Array<Record<string, unknown>> } | { ok: false; error: string } {
+  const fields: Array<Record<string, unknown>> = [];
+  for (const f of drafts) {
+    const label = f.label.trim();
+    const options =
+      f.mode === 'options' ? f.optionsText.split('\n').map((l) => l.trim()).filter(Boolean) : null;
+    if (!label && !(options && options.length > 0) && !f.id) continue; // linha vazia nova
+    if (!label) return { ok: false, error: 'Informe o título de cada campo adicional.' };
+    if (f.mode === 'options' && (!options || options.length === 0)) {
+      return { ok: false, error: `Informe ao menos uma opção para o campo "${label}".` };
+    }
+    fields.push({
+      ...(f.id ? { id: f.id } : {}),
+      label,
+      options,
+      allow_custom: f.mode === 'options' ? f.allowCustom : true,
+    });
+  }
+  return { ok: true, fields };
+}
+
+function draftsFromConfig(
+  fields: Array<{ id: string; label: string; options: string[] | null; allow_custom: boolean }>
+): ExtraFieldDraft[] {
+  return fields.map((f) => ({
+    id: f.id,
+    label: f.label,
+    mode: f.options && f.options.length > 0 ? 'options' : 'text',
+    optionsText: (f.options ?? []).join('\n'),
+    allowCustom: f.allow_custom !== false,
+  }));
 }
 
 // ============================================================
@@ -107,6 +251,14 @@ function EditMeetingDialog({
   const [attendanceLimit, setAttendanceLimit] = useState(
     meeting.attendance_list_limit != null ? String(meeting.attendance_list_limit) : ''
   );
+  const [generateList, setGenerateList] = useState(false);
+  const [listMode, setListMode] = useState<'prefilled' | 'open'>(meeting.attendance_list_mode ?? 'prefilled');
+  const [hasConfirmations, setHasConfirmations] = useState(false);
+  const [isPaidEvent, setIsPaidEvent] = useState(meeting.is_paid_event ?? false);
+  const [paymentPixKey, setPaymentPixKey] = useState(meeting.payment_pix_key ?? '');
+  const [extraFieldsDraft, setExtraFieldsDraft] = useState<ExtraFieldDraft[]>([]);
+  // Só enviamos os campos adicionais se foram carregados (evita apagar a configuração por engano)
+  const [extraFieldsLoaded, setExtraFieldsLoaded] = useState(false);
   const [presenceMap, setPresenceMap] = useState<Record<string, boolean>>({});
   const [loadingAttendance, setLoadingAttendance] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string>(meeting.invite_cover_image_url ?? '');
@@ -128,6 +280,13 @@ function EditMeetingDialog({
     setCoverUrl(meeting.invite_cover_image_url ?? '');
     setCoverError('');
     setPublicEntries([]);
+    setGenerateList(false);
+    setListMode(meeting.attendance_list_mode ?? 'prefilled');
+    setIsPaidEvent(meeting.is_paid_event ?? false);
+    setPaymentPixKey(meeting.payment_pix_key ?? '');
+    setHasConfirmations(false);
+    setExtraFieldsDraft([]);
+    setExtraFieldsLoaded(false);
 
     // Se o encontro tem lista de presença (modo especial), buscar dados completos incluindo public_entries
     if (meeting.meeting_type === 'special_event' && meeting.attendance_list_slug) {
@@ -137,8 +296,20 @@ function EditMeetingDialog({
         .then((data: { 
           members: Array<{ id: string; full_name: string; response: { status: string } | null }>;
           public_entries?: Array<{ id: string; full_name: string }>;
+          guests?: Array<{ id: string }>;
+          extra_fields?: Array<{ id: string; label: string; options: string[] | null; allow_custom: boolean }>;
         } | null) => {
           const map: Record<string, boolean> = {};
+
+          if (data) {
+            setExtraFieldsDraft(draftsFromConfig(data.extra_fields ?? []));
+            setExtraFieldsLoaded(true);
+            setHasConfirmations(
+              (data.public_entries?.length ?? 0) > 0 ||
+                (data.guests?.length ?? 0) > 0 ||
+                (data.members ?? []).some((m) => m.response != null)
+            );
+          }
           
           // Membros regulares
           for (const member of members) map[member.id] = false;
@@ -248,11 +419,34 @@ function EditMeetingDialog({
     setPresenceMap((prev) => ({ ...prev, [memberId]: !prev[memberId] }));
   };
 
+  // A lista está ativa se o encontro já tem lista ou se o líder marcou para gerá-la agora
+  const listActive = meetingType === 'special_event' && (Boolean(meeting.attendance_list_token) || generateList);
   const presentCount = Object.values(presenceMap).filter(Boolean).length;
   const totalPeople = members.length + publicEntries.length;
 
   const handleSave = async () => {
     if (!date) { setError('A data é obrigatória'); return; }
+
+    let cleanedExtra: Array<Record<string, unknown>> | null = null;
+    if (listActive) {
+      if (isPaidEvent && !paymentPixKey.trim()) {
+        setError('Informe a chave PIX para o evento pago.');
+        return;
+      }
+      if (attendanceLimit.trim()) {
+        const n = Number(attendanceLimit);
+        if (!Number.isInteger(n) || n < 1) {
+          setError('O limite de inscrições deve ser um número inteiro maior que zero.');
+          return;
+        }
+      }
+      if (extraFieldsLoaded) {
+        const cleaned = cleanExtraFieldDrafts(extraFieldsDraft);
+        if (!cleaned.ok) { setError(cleaned.error); return; }
+        cleanedExtra = cleaned.fields;
+      }
+    }
+
     setError('');
     setLoading(true);
     try {
@@ -266,11 +460,16 @@ function EditMeetingDialog({
           notes: notes || null,
           meeting_type: meetingType,
           location: location || null,
-          attendance_list_deadline: attendanceDeadline || null,
-          attendance_list_require_rg: meeting.attendance_list_token ? attendanceRequireRg : undefined,
-          attendance_list_limit: meeting.attendance_list_token
-            ? (attendanceLimit.trim() ? Number(attendanceLimit) : null)
-            : undefined,
+          // O prazo só é enviado quando há lista (evita apagar prazo sem querer)
+          attendance_list_deadline: listActive ? attendanceDeadline || null : undefined,
+          generate_attendance_list: !meeting.attendance_list_token && generateList ? true : undefined,
+          attendance_list_mode:
+            listActive && listMode !== (meeting.attendance_list_mode ?? 'prefilled') ? listMode : undefined,
+          attendance_list_require_rg: listActive ? listMode === 'open' && attendanceRequireRg : undefined,
+          attendance_list_limit: listActive ? (attendanceLimit.trim() ? Number(attendanceLimit) : null) : undefined,
+          is_paid_event: listActive ? isPaidEvent : undefined,
+          payment_pix_key: listActive ? (isPaidEvent ? paymentPixKey.trim() : null) : undefined,
+          attendance_list_extra_fields: listActive && cleanedExtra ? cleanedExtra : undefined,
         }),
       });
       if (!meetingRes.ok) { const d = await meetingRes.json(); throw new Error(d.error || 'Erro ao salvar'); }
@@ -387,47 +586,134 @@ function EditMeetingDialog({
             />
           </div>
 
-          {meeting.meeting_type === 'special_event' && meeting.attendance_list_token && (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="meeting-deadline">Prazo para confirmações pelo link (opcional)</Label>
-                <Input
-                  id="meeting-deadline"
-                  type="date"
-                  value={attendanceDeadline}
-                  onChange={(e) => setAttendanceDeadline(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Após esta data, o link continua aberto só com totais (confirmados e não confirmados); quem respondeu ou não deixa de aparecer publicamente. Você pode alterar ou estender o prazo a qualquer momento.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-attendance-limit">Limite de inscrições (opcional)</Label>
-                <Input
-                  id="edit-attendance-limit"
-                  type="number"
-                  min={1}
-                  placeholder="Sem limite"
-                  value={attendanceLimit}
-                  onChange={(e) => setAttendanceLimit(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Quando atingido, novas confirmações pelo link público são bloqueadas.
-                </p>
-              </div>
-              {meeting.attendance_list_mode === 'open' && (
+          {meetingType === 'special_event' && (
+            <div className="space-y-3 rounded-md border p-3">
+              <Label className="text-sm font-medium">Lista de presença</Label>
+
+              {!meeting.attendance_list_token && (
                 <div className="flex items-center space-x-2">
                   <Checkbox
-                    id="edit-attendance-require-rg"
-                    checked={attendanceRequireRg}
-                    onCheckedChange={(c) => setAttendanceRequireRg(c === true)}
+                    id="edit-generate-list"
+                    checked={generateList}
+                    onCheckedChange={(c) => {
+                      setGenerateList(c === true);
+                      setExtraFieldsLoaded(true);
+                    }}
                   />
-                  <Label htmlFor="edit-attendance-require-rg" className="text-sm font-normal cursor-pointer">
-                    Exigir RG no formulário de confirmação
+                  <Label htmlFor="edit-generate-list" className="text-sm font-normal cursor-pointer">
+                    Gerar lista de presença (link para enviar aos participantes)
                   </Label>
                 </div>
               )}
-            </>
+
+              {listActive && (
+                <>
+                  {hasConfirmations && (
+                    <p className="text-xs rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900">
+                      Já existem confirmações neste encontro. Você pode editar todas as configurações abaixo; as
+                      confirmações já registradas não são alteradas nem apagadas, e as novas regras valem apenas
+                      para as próximas confirmações.
+                    </p>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-list-mode">Tipo de lista pública</Label>
+                    <select
+                      id="edit-list-mode"
+                      value={listMode}
+                      disabled={Boolean(meeting.attendance_list_token) && hasConfirmations}
+                      onChange={(e) => {
+                        const mode = e.target.value as 'prefilled' | 'open';
+                        setListMode(mode);
+                        if (mode !== 'open') setAttendanceRequireRg(false);
+                      }}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+                    >
+                      <option value="prefilled">Pré-preenchida (participantes já cadastrados)</option>
+                      <option value="open">Lista vazia (autocadastro)</option>
+                    </select>
+                    {Boolean(meeting.attendance_list_token) && hasConfirmations && (
+                      <p className="text-xs text-muted-foreground">
+                        O tipo da lista não pode ser trocado depois que há confirmações, para que elas continuem visíveis.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="meeting-deadline">Prazo para confirmações pelo link (opcional)</Label>
+                    <Input
+                      id="meeting-deadline"
+                      type="date"
+                      value={attendanceDeadline}
+                      onChange={(e) => setAttendanceDeadline(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Após esta data, o link continua aberto só com totais. Você pode alterar ou estender o prazo a qualquer momento.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-attendance-limit">Limite de inscrições (opcional)</Label>
+                    <Input
+                      id="edit-attendance-limit"
+                      type="number"
+                      min={1}
+                      placeholder="Sem limite"
+                      value={attendanceLimit}
+                      onChange={(e) => setAttendanceLimit(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Quando atingido, novas confirmações pelo link público são bloqueadas.
+                    </p>
+                  </div>
+                  {listMode === 'open' && (
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="edit-attendance-require-rg"
+                        checked={attendanceRequireRg}
+                        onCheckedChange={(c) => setAttendanceRequireRg(c === true)}
+                      />
+                      <Label htmlFor="edit-attendance-require-rg" className="text-sm font-normal cursor-pointer">
+                        Exigir RG no formulário de confirmação
+                      </Label>
+                    </div>
+                  )}
+
+                  {extraFieldsLoaded ? (
+                    <ExtraFieldsEditor value={extraFieldsDraft} onChange={setExtraFieldsDraft} paid={isPaidEvent} />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Carregando campos adicionais...</p>
+                  )}
+
+                  <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50/50 p-3">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="edit-is-paid-event"
+                        checked={isPaidEvent}
+                        onCheckedChange={(c) => setIsPaidEvent(c === true)}
+                      />
+                      <Label htmlFor="edit-is-paid-event" className="text-sm font-medium cursor-pointer">
+                        Este é um evento pago
+                      </Label>
+                    </div>
+                    {isPaidEvent && (
+                      <div className="space-y-2 pl-6">
+                        <Label htmlFor="edit-payment-pix-key">Chave PIX para pagamento *</Label>
+                        <Input
+                          id="edit-payment-pix-key"
+                          placeholder="Ex: seuemail@exemplo.com ou (11) 99999-9999"
+                          value={paymentPixKey}
+                          onChange={(e) => setPaymentPixKey(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Quem confirmar vê a chave PIX e envia o comprovante. Se houver campos adicionais, escolher um item dispensa o comprovante.
+                          Confirmações já feitas não são afetadas.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {(members.length > 0 || publicEntries.length > 0) && (

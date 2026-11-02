@@ -89,3 +89,95 @@ export function normalizeExtraValues(
 
   return { ok: true, values: [{ field_id: field.id, values: [value] }] };
 }
+
+/** True se `raw` traz ao menos uma resposta não vazia em algum campo adicional. */
+export function hasAnyExtraAnswer(raw: unknown): boolean {
+  if (!Array.isArray(raw)) return false;
+  return raw.some((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const values = (item as Record<string, unknown>).values;
+    return Array.isArray(values) && values.some((v) => typeof v === 'string' && v.trim().length > 0);
+  });
+}
+
+export const PAYMENT_REQUIRED_MESSAGE =
+  'Este evento requer pagamento. Envie o comprovante para confirmar a presença.';
+
+/**
+ * Regra de confirmação combinando campos adicionais e evento pago:
+ *  - Evento não pago: regra de sempre (normalizeExtraValues; item obrigatório).
+ *  - Evento pago com campos adicionais:
+ *      * preencheu um item -> confirma normalmente (valida o item; comprovante opcional);
+ *      * não preencheu nada -> o item é opcional; só confirma com comprovante.
+ *  - Evento pago sem campos adicionais: sempre exige comprovante.
+ * Outros erros de validação (dois itens, opção inválida) são sempre devolvidos.
+ */
+export function resolveExtraAndPayment(args: {
+  fields: AttendanceExtraFieldConfig[];
+  rawExtraValues: unknown;
+  isPaidEvent: boolean;
+  hasReceipt: boolean;
+}):
+  | { ok: false; error: string; code: 'invalid_extra' | 'payment_required' }
+  | { ok: true; values: ExtraValuesEntry[]; requiresReceipt: boolean } {
+  const { fields, rawExtraValues, isPaidEvent, hasReceipt } = args;
+
+  let values: ExtraValuesEntry[] = [];
+  let requiresReceipt = false;
+
+  if (fields.length === 0) {
+    requiresReceipt = isPaidEvent;
+  } else if (isPaidEvent && !hasAnyExtraAnswer(rawExtraValues)) {
+    requiresReceipt = true;
+  } else {
+    const res = normalizeExtraValues(fields, rawExtraValues);
+    if (!res.ok) return { ok: false, error: res.error, code: 'invalid_extra' };
+    values = res.values;
+  }
+
+  if (requiresReceipt && !hasReceipt) {
+    return { ok: false, error: PAYMENT_REQUIRED_MESSAGE, code: 'payment_required' };
+  }
+  return { ok: true, values, requiresReceipt };
+}
+
+/**
+ * Conta as respostas dos campos adicionais (apenas totais, sem dados pessoais).
+ * Opções configuradas usam o nome da configuração; respostas próprias (campo livre
+ * ou "outro") são agrupadas sem diferenciar maiúsculas/minúsculas, mantendo a
+ * primeira grafia vista.
+ */
+export function countExtraAnswers(
+  fields: AttendanceExtraFieldConfig[],
+  rows: Array<{ extra_values: unknown }>
+): Record<string, Record<string, number>> {
+  const taken: Record<string, Record<string, number>> = {};
+  const canonicalByField = new Map<string, Map<string, string>>();
+  for (const f of fields) {
+    taken[f.id] = {};
+    const canonical = new Map<string, string>();
+    for (const o of f.options ?? []) canonical.set(o.toLowerCase(), o);
+    canonicalByField.set(f.id, canonical);
+  }
+
+  for (const row of rows) {
+    const entries = Array.isArray(row.extra_values) ? row.extra_values : [];
+    for (const item of entries) {
+      if (!item || typeof item !== 'object') continue;
+      const e = item as Record<string, unknown>;
+      if (typeof e.field_id !== 'string' || !Array.isArray(e.values)) continue;
+      const canonical = canonicalByField.get(e.field_id);
+      if (!canonical) continue;
+      for (const v of e.values) {
+        if (typeof v !== 'string') continue;
+        const trimmed = v.trim();
+        if (!trimmed) continue;
+        const key = trimmed.toLowerCase();
+        if (!canonical.has(key)) canonical.set(key, trimmed);
+        const name = canonical.get(key)!;
+        taken[e.field_id][name] = (taken[e.field_id][name] ?? 0) + 1;
+      }
+    }
+  }
+  return taken;
+}

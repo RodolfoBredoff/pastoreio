@@ -5,10 +5,22 @@ import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import { canManageMeetings, SECRETARY_FORBIDDEN_MESSAGE } from '@/lib/auth/permissions';
 import { normalizeExtraFieldConfigs, type ExtraFieldConfigInput } from '@/lib/attendance-list-extra';
 import { scheduleAttendanceSnapshotSync } from '@/lib/attendance-snapshot';
+import {
+  countRecordedConfirmations,
+  extraFieldHasAnswers,
+  generateListIdentifiers,
+  normalizePaidConfig,
+} from '@/lib/attendance-list-setup';
+
+function toDateOnly(value: string | Date): string {
+  if (value instanceof Date) return value.toISOString().split('T')[0];
+  return String(value).split('T')[0];
+}
 
 /**
  * PUT /api/meetings/[id]
  * Updates a meeting. Leaders and secretaries can edit meetings.
+ * Editing the list configuration never changes or deletes confirmations already recorded.
  */
 export async function PUT(
   request: Request,
@@ -31,8 +43,21 @@ export async function PUT(
 
     const { id } = await params;
 
-    const existing = await queryOne<{ id: string; group_id: string; meeting_date: string }>(
-      `SELECT id, group_id, meeting_date FROM meetings WHERE id = $1`,
+    const existing = await queryOne<{
+      id: string;
+      group_id: string;
+      meeting_date: string;
+      title: string | null;
+      meeting_type: 'regular' | 'special_event';
+      attendance_list_token: string | null;
+      attendance_list_mode: 'prefilled' | 'open' | null;
+      is_paid_event: boolean;
+      payment_pix_key: string | null;
+    }>(
+      `SELECT id, group_id, meeting_date, title, meeting_type, attendance_list_token,
+              COALESCE(attendance_list_mode, 'prefilled') AS attendance_list_mode,
+              COALESCE(is_paid_event, FALSE) AS is_paid_event, payment_pix_key
+       FROM meetings WHERE id = $1`,
       [id]
     );
 
@@ -56,6 +81,10 @@ export async function PUT(
       attendance_list_require_rg,
       attendance_list_limit,
       attendance_list_extra_fields,
+      generate_attendance_list,
+      attendance_list_mode,
+      is_paid_event,
+      payment_pix_key,
     } = data as {
       meeting_date?: string;
       meeting_time?: string | null;
@@ -68,6 +97,10 @@ export async function PUT(
       attendance_list_require_rg?: boolean;
       attendance_list_limit?: number | null;
       attendance_list_extra_fields?: unknown;
+      generate_attendance_list?: boolean;
+      attendance_list_mode?: 'prefilled' | 'open';
+      is_paid_event?: boolean;
+      payment_pix_key?: string | null;
     };
 
     const updates: string[] = [];
@@ -141,6 +174,80 @@ export async function PUT(
       }
     }
 
+    // ------------------------------------------------------------------
+    // Configuração da lista (totalmente editável pelo líder).
+    // Nada aqui altera ou apaga confirmações já registradas: só mexemos na tabela
+    // meetings e na configuração dos campos adicionais. Validações vêm antes de qualquer escrita.
+    // ------------------------------------------------------------------
+    const recordedConfirmations = await countRecordedConfirmations(id);
+    let listToken = existing.attendance_list_token;
+    const effectiveType = meeting_type ?? existing.meeting_type;
+
+    // Ativar a lista pública em um encontro especial que ainda não tem
+    if (generate_attendance_list === true && !listToken) {
+      if (effectiveType !== 'special_event') {
+        return NextResponse.json(
+          { error: 'A lista de presença só pode ser gerada em Agenda Especial / Evento' },
+          { status: 400 }
+        );
+      }
+      const ids = generateListIdentifiers({
+        title: title !== undefined ? title : existing.title,
+        meetingDate: toDateOnly(meeting_date ?? existing.meeting_date),
+        preferredSlugBase: null,
+      });
+      listToken = ids.token;
+      updates.push(`attendance_list_token = $${paramIndex++}`);
+      values.push(ids.token);
+      updates.push(`attendance_list_slug = $${paramIndex++}`);
+      values.push(ids.slug);
+    }
+
+    const wantsListSettings =
+      attendance_list_mode !== undefined ||
+      is_paid_event !== undefined ||
+      payment_pix_key !== undefined ||
+      attendance_list_extra_fields !== undefined;
+    if (wantsListSettings && !listToken) {
+      return NextResponse.json({ error: 'Este encontro não possui lista de presença' }, { status: 400 });
+    }
+
+    // Tipo da lista: trocar entre pré-preenchida e vazia esconderia as confirmações já feitas
+    let finalMode = existing.attendance_list_mode ?? 'prefilled';
+    if (attendance_list_mode !== undefined) {
+      if (attendance_list_mode !== 'prefilled' && attendance_list_mode !== 'open') {
+        return NextResponse.json({ error: 'Tipo de lista inválido' }, { status: 400 });
+      }
+      if (attendance_list_mode !== finalMode) {
+        if (recordedConfirmations > 0) {
+          return NextResponse.json(
+            {
+              error:
+                'Não é possível trocar o tipo da lista depois que há confirmações registradas, pois elas ficariam ocultas. As demais configurações podem ser editadas normalmente.',
+            },
+            { status: 409 }
+          );
+        }
+        finalMode = attendance_list_mode;
+        updates.push(`attendance_list_mode = $${paramIndex++}`);
+        values.push(attendance_list_mode);
+      }
+    }
+
+    // Evento pago: chave PIX obrigatória; confirmações já feitas não são revalidadas
+    if (is_paid_event !== undefined || payment_pix_key !== undefined) {
+      const willBePaid = is_paid_event !== undefined ? Boolean(is_paid_event) : existing.is_paid_event;
+      const keyInput = payment_pix_key !== undefined ? payment_pix_key : existing.payment_pix_key;
+      const paid = normalizePaidConfig(willBePaid, keyInput);
+      if (!paid.ok) {
+        return NextResponse.json({ error: paid.error }, { status: 400 });
+      }
+      updates.push(`is_paid_event = $${paramIndex++}`);
+      values.push(paid.isPaid);
+      updates.push(`payment_pix_key = $${paramIndex++}`);
+      values.push(paid.pixKey);
+    }
+
     // Campos adicionais obrigatórios (edição da configuração pelo admin)
     let extraFieldsPayload: ExtraFieldConfigInput[] | null = null;
     if (attendance_list_extra_fields !== undefined) {
@@ -149,6 +256,29 @@ export async function PUT(
         return NextResponse.json({ error: res.error }, { status: 400 });
       }
       extraFieldsPayload = res.fields;
+    }
+
+    // Um campo que já tem respostas registradas não pode ser removido (as respostas
+    // ficariam invisíveis). Renomear e editar opções continua permitido.
+    if (extraFieldsPayload !== null) {
+      const currentFields = await queryMany<{ id: string; label: string }>(
+        `SELECT id, label FROM attendance_list_extra_fields WHERE meeting_id = $1`,
+        [id]
+      );
+      const keep = new Set(extraFieldsPayload.map((f) => f.id).filter((v): v is string => Boolean(v)));
+      const blocked: string[] = [];
+      for (const f of currentFields) {
+        if (keep.has(f.id)) continue;
+        if (await extraFieldHasAnswers(id, f.id)) blocked.push(f.label);
+      }
+      if (blocked.length > 0) {
+        return NextResponse.json(
+          {
+            error: `Não é possível remover o campo "${blocked.join('", "')}" porque já há confirmações com resposta nele. Você pode renomeá-lo ou editar as opções.`,
+          },
+          { status: 409 }
+        );
+      }
     }
 
     if (updates.length === 0 && extraFieldsPayload === null) {

@@ -1,16 +1,18 @@
 import { query, queryOne, queryMany } from '@/lib/db/postgres';
 import {
   getMeetingExtraFields,
-  normalizeExtraValues,
   type AttendanceExtraFieldConfig,
   type ExtraValuesEntry,
 } from '@/lib/attendance-list-extra';
 import {
+  countExtraAnswers,
   isAttendanceLimitReached,
   isMeetingExpired,
   isValidRg,
   normalizeRg,
+  resolveExtraAndPayment,
 } from '@/lib/attendance-list-rules';
+import { receiptObjectExists } from '@/lib/payment-receipts';
 
 // Reexportadas para manter os imports existentes.
 export { isAttendanceLimitReached, isMeetingExpired, isValidRg, normalizeRg };
@@ -111,8 +113,7 @@ export async function getExtraOptionCounts(
   meetingId: string,
   fields: AttendanceExtraFieldConfig[]
 ): Promise<Record<string, Record<string, number>>> {
-  const taken: Record<string, Record<string, number>> = {};
-  if (fields.length === 0) return taken;
+  if (fields.length === 0) return {};
 
   const rows = await queryMany<{ extra_values: unknown }>(
     `SELECT extra_values FROM attendance_list_responses WHERE meeting_id = $1 AND status = 'present'
@@ -123,37 +124,61 @@ export async function getExtraOptionCounts(
     [meetingId]
   ).catch(() => []);
 
-  // Mapa de opções pré-definidas por campo (para normalização case-insensitive)
-  const optionsByField = new Map<string, Map<string, string>>();
-  for (const f of fields) {
-    const lower = new Map<string, string>();
-    if (f.options) {
-      for (const o of f.options) lower.set(o.toLowerCase(), o);
-    }
-    optionsByField.set(f.id, lower);
-    taken[f.id] = {};
-  }
+  return countExtraAnswers(fields, rows);
+}
 
-  for (const row of rows) {
-    const entries = Array.isArray(row.extra_values) ? row.extra_values : [];
-    for (const item of entries) {
-      if (!item || typeof item !== 'object') continue;
-      const e = item as Record<string, unknown>;
-      if (typeof e.field_id !== 'string' || !Array.isArray(e.values)) continue;
-      const lower = optionsByField.get(e.field_id);
-      if (!lower) continue;
-      for (const v of e.values) {
-        if (typeof v !== 'string') continue;
-        const trimmed = v.trim();
-        if (!trimmed) continue;
-        
-        // Tenta normalizar para opção pré-definida (case-insensitive)
-        const canonical = lower.get(trimmed.toLowerCase()) ?? trimmed;
-        taken[e.field_id][canonical] = (taken[e.field_id][canonical] ?? 0) + 1;
-      }
-    }
+/**
+ * Localiza o membro ativo do grupo do encontro pelo telefone (só dígitos).
+ * Compara apenas os dígitos do cadastro, então funciona com telefone salvo formatado.
+ */
+export async function findMemberByPhone(
+  meetingId: string,
+  phoneDigits: string
+): Promise<{ id: string; full_name: string } | null> {
+  const member = await queryOne<{ id: string; full_name: string }>(
+    `SELECT m.id, m.full_name
+     FROM members m
+     JOIN meetings mt ON mt.group_id = m.group_id
+     WHERE mt.id = $1 AND m.is_active = TRUE
+       AND regexp_replace(m.phone, '\\D', '', 'g') = $2
+     LIMIT 1`,
+    [meetingId, phoneDigits]
+  );
+  return member ?? null;
+}
+
+type ReceiptCheck = { ok: true; receiptId: string | null } | { ok: false; error: string; status: number };
+
+/**
+ * Valida o comprovante enviado na confirmação: pertence a este encontro, ainda não foi
+ * usado por outra confirmação e o arquivo realmente existe no S3 (upload concluído).
+ */
+async function checkReceipt(
+  receiptId: string | undefined,
+  meetingId: string,
+  exceptMemberId?: string
+): Promise<ReceiptCheck> {
+  if (!receiptId) return { ok: true, receiptId: null };
+
+  const receipt = await queryOne<{ id: string; meeting_id: string; receipt_object_key: string; used: boolean }>(
+    `SELECT r.id, r.meeting_id, r.receipt_object_key,
+            (EXISTS (SELECT 1 FROM attendance_list_public_entries e WHERE e.payment_receipt_id = r.id)
+             OR EXISTS (SELECT 1 FROM attendance_list_responses a
+                        WHERE a.payment_receipt_id = r.id AND ($2::uuid IS NULL OR a.member_id <> $2::uuid))) AS used
+     FROM payment_receipts r WHERE r.id = $1::uuid`,
+    [receiptId, exceptMemberId ?? null]
+  ).catch(() => null);
+
+  if (!receipt || receipt.meeting_id !== meetingId) {
+    return { ok: false, error: 'Comprovante de pagamento inválido.', status: 400 };
   }
-  return taken;
+  if (receipt.used) {
+    return { ok: false, error: 'Este comprovante já foi utilizado. Envie um novo comprovante.', status: 400 };
+  }
+  if (!(await receiptObjectExists(receipt.receipt_object_key))) {
+    return { ok: false, error: 'Não encontramos o arquivo do comprovante. Envie-o novamente.', status: 400 };
+  }
+  return { ok: true, receiptId: receipt.id };
 }
 
 export async function getPublicAttendanceList(identifier: string): Promise<PublicAttendanceListPayload | null> {
@@ -220,34 +245,14 @@ export async function publicConfirmPrefilledByPhoneOrEmail(args: {
   }
 
   const extraFields = await getMeetingExtraFields(meeting.id);
-  let extraValues: ExtraValuesEntry[] = [];
-  if (extraFields.length > 0) {
-    const extraRes = normalizeExtraValues(extraFields, args.extra_values);
-    if (!extraRes.ok && extraRes.error.includes('exatamente 1 item')) {
-      if (!meeting.is_paid_event) {
-        return { error: extraRes.error, status: 400 };
-      }
-    } else if (extraRes.ok) {
-      extraValues = extraRes.values;
-    }
-  }
-
-  const needsPayment = meeting.is_paid_event && extraValues.length === 0;
-  if (needsPayment && !args.payment_receipt_id) {
-    return { error: 'Este evento requer pagamento. Por favor, envie o comprovante de pagamento.', status: 400 };
-  }
-
-  let paymentReceiptId: string | null = null;
-  if (args.payment_receipt_id) {
-    const receipt = await queryOne<{ id: string; meeting_id: string }>(
-      `SELECT id, meeting_id FROM payment_receipts WHERE id = $1`,
-      [args.payment_receipt_id]
-    );
-    if (!receipt || receipt.meeting_id !== meeting.id) {
-      return { error: 'Comprovante de pagamento inválido.', status: 400 };
-    }
-    paymentReceiptId = receipt.id;
-  }
+  const resolved = resolveExtraAndPayment({
+    fields: extraFields,
+    rawExtraValues: args.extra_values,
+    isPaidEvent: meeting.is_paid_event,
+    hasReceipt: Boolean(args.payment_receipt_id),
+  });
+  if (!resolved.ok) return { error: resolved.error, status: 400 };
+  const extraValues = resolved.values;
 
   const phoneVal = typeof args.phone === 'string' ? args.phone.replace(/\D/g, '').trim() : '';
   const emailVal = typeof args.email === 'string' ? args.email.trim().toLowerCase() : '';
@@ -258,21 +263,15 @@ export async function publicConfirmPrefilledByPhoneOrEmail(args: {
     return { error: 'Informe um telefone (com DDD) ou um e-mail válido.', status: 400 };
   }
 
-  const member = await queryOne<{ id: string }>(
-    hasPhone
-      ? `SELECT m.id
-         FROM members m
-         JOIN meetings mt ON mt.group_id = m.group_id
-         WHERE mt.id = $1 AND m.is_active = TRUE
-           AND regexp_replace(m.phone, '\\\\D', '', 'g') = $2
-         LIMIT 1`
-      : `SELECT m.id FROM members m WHERE FALSE`,
-    hasPhone ? [meeting.id, phoneVal] : []
-  );
+  const member = hasPhone ? await findMemberByPhone(meeting.id, phoneVal) : null;
 
   if (!member) {
     return { error: 'Não encontramos um participante com esse telefone neste grupo.', status: 404 };
   }
+
+  const receiptCheck = await checkReceipt(args.payment_receipt_id, meeting.id, member.id);
+  if (!receiptCheck.ok) return { error: receiptCheck.error, status: receiptCheck.status };
+  const paymentReceiptId = receiptCheck.receiptId;
 
   const existing = await queryOne<{ status: string }>(
     `SELECT status FROM attendance_list_responses WHERE meeting_id = $1 AND member_id = $2`,
@@ -319,39 +318,18 @@ export async function publicCreateOpenEntry(args: {
   }
 
   const extraFields = await getMeetingExtraFields(meeting.id);
-  let extraValues: ExtraValuesEntry[] = [];
-  if (extraFields.length > 0) {
-    const extraRes = normalizeExtraValues(extraFields, args.extra_values);
-    if (!extraRes.ok && extraRes.error.includes('exatamente 1 item')) {
-      // Se há campos adicionais mas não preencheu, verifica se precisa de pagamento
-      // Se não é evento pago, retorna o erro normal
-      // Se é evento pago, permite continuar se tiver comprovante
-      if (!meeting.is_paid_event) {
-        return { error: extraRes.error, status: 400 };
-      }
-    } else if (extraRes.ok) {
-      extraValues = extraRes.values;
-    }
-  }
+  const resolved = resolveExtraAndPayment({
+    fields: extraFields,
+    rawExtraValues: args.extra_values,
+    isPaidEvent: meeting.is_paid_event,
+    hasReceipt: Boolean(args.payment_receipt_id),
+  });
+  if (!resolved.ok) return { error: resolved.error, status: 400 };
+  const extraValues = resolved.values;
 
-  // Verifica se precisa de pagamento
-  const needsPayment = meeting.is_paid_event && extraValues.length === 0;
-  if (needsPayment && !args.payment_receipt_id) {
-    return { error: 'Este evento requer pagamento. Por favor, envie o comprovante de pagamento.', status: 400 };
-  }
-
-  // Valida o receipt se fornecido
-  let paymentReceiptId: string | null = null;
-  if (args.payment_receipt_id) {
-    const receipt = await queryOne<{ id: string; meeting_id: string }>(
-      `SELECT id, meeting_id FROM payment_receipts WHERE id = $1`,
-      [args.payment_receipt_id]
-    );
-    if (!receipt || receipt.meeting_id !== meeting.id) {
-      return { error: 'Comprovante de pagamento inválido.', status: 400 };
-    }
-    paymentReceiptId = receipt.id;
-  }
+  const receiptCheck = await checkReceipt(args.payment_receipt_id, meeting.id);
+  if (!receiptCheck.ok) return { error: receiptCheck.error, status: receiptCheck.status };
+  const paymentReceiptId = receiptCheck.receiptId;
 
   const count = await getAttendanceConfirmedCount(meeting.id, mode);
   if (isAttendanceLimitReached(count, meeting.attendance_list_limit)) {
@@ -424,13 +402,20 @@ export async function insertBufferedOpenEntry(args: {
   if (!meeting) return { ok: false, error: 'Encontro não existe mais' };
   if (meeting.attendance_list_mode !== 'open') return { ok: false, error: 'Lista não está mais no modo aberto' };
 
-  const extraFields = await getMeetingExtraFields(meeting.id);
-  let extraValues: ExtraValuesEntry[] = [];
-  if (extraFields.length > 0) {
-    const res = normalizeExtraValues(extraFields, args.extra_values);
-    if (!res.ok) return { ok: false, error: `Campos adicionais: ${res.error}` };
-    extraValues = res.values;
-  }
+  // A Lambda já validou a confirmação com a configuração vigente no momento do envio.
+  // Se o líder mudou os campos depois, a confirmação já aceita NÃO pode ser descartada:
+  // gravamos as respostas como foram aceitas (apenas saneadas).
+  const extraValues: ExtraValuesEntry[] = (Array.isArray(args.extra_values) ? args.extra_values : []).flatMap(
+    (item): ExtraValuesEntry[] => {
+      if (!item || typeof item !== 'object') return [];
+      const e = item as Record<string, unknown>;
+      if (typeof e.field_id !== 'string' || !Array.isArray(e.values)) return [];
+      const values = e.values
+        .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+        .map((v) => v.trim().slice(0, 200));
+      return values.length > 0 ? [{ field_id: e.field_id, values }] : [];
+    }
+  );
 
   const firstName = (args.first_name ?? '').trim();
   const lastName = (args.last_name ?? '').trim();

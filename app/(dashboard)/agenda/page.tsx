@@ -18,6 +18,10 @@ type MeetingRow = {
   attendance_list_slug?: string | null;
   attendance_list_mode?: 'prefilled' | 'open' | null;
   invite_cover_image_url?: string | null;
+  attendance_list_require_rg?: boolean;
+  attendance_list_limit?: number | null;
+  is_paid_event?: boolean;
+  payment_pix_key?: string | null;
 };
 
 type PastMeetingRow = MeetingRow & {
@@ -68,6 +72,32 @@ export default async function AgendaPage() {
      ) as exists`
   ).then((r) => r?.exists === true);
 
+  // Configuração da lista (migrations 030 e 033): carregada para o diálogo de edição
+  // abrir com os valores atuais (sem isso, salvar apagaria o limite de inscrições).
+  const listConfigColumns = [
+    'attendance_list_require_rg',
+    'attendance_list_limit',
+    'is_paid_event',
+    'payment_pix_key',
+  ];
+  const existingListConfigColumns = new Set(
+    (
+      await queryMany<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'meetings' AND column_name = ANY($1::text[])`,
+        [listConfigColumns]
+      )
+    ).map((r) => r.column_name)
+  );
+  const listConfigSelect = listConfigColumns
+    .filter((c) => existingListConfigColumns.has(c))
+    .map((c) => `, ${c}`)
+    .join('');
+  const listConfigSelectM = listConfigColumns
+    .filter((c) => existingListConfigColumns.has(c))
+    .map((c) => `, m.${c}`)
+    .join('');
+
   const groupPromise = queryOne<{ default_meeting_day: number; default_meeting_time: string }>(
     `SELECT default_meeting_day, default_meeting_time FROM groups WHERE id = $1`,
     [leader.group_id]
@@ -83,7 +113,7 @@ export default async function AgendaPage() {
           hasAttendanceModeColumn ? ', attendance_list_mode' : ''
         }${
           hasInviteCoverColumn ? ', invite_cover_image_url' : ''
-        }
+        }${listConfigSelect}
          FROM meetings
          WHERE group_id = $1 AND meeting_date >= CURRENT_DATE AND is_cancelled = FALSE
          ORDER BY meeting_date ASC LIMIT 30`,
@@ -117,7 +147,7 @@ export default async function AgendaPage() {
                   hasAttendanceModeColumn ? ', m.attendance_list_mode' : ''
                 }${
                   hasInviteCoverColumn ? ', m.invite_cover_image_url' : ''
-                },
+                }${listConfigSelectM},
                 (COUNT(a.id)::int + COALESCE(MAX(ag.guest_count), 0)) as attendance_count
          FROM meetings m
          LEFT JOIN attendance a ON a.meeting_id = m.id
@@ -132,7 +162,7 @@ export default async function AgendaPage() {
                     hasAttendanceModeColumn ? ', m.attendance_list_mode' : ''
                   }${
                     hasInviteCoverColumn ? ', m.invite_cover_image_url' : ''
-                  }
+                  }${listConfigSelectM}
          ORDER BY m.meeting_date DESC LIMIT 10`,
         [leader.group_id]
       )

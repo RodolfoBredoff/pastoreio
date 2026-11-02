@@ -11,6 +11,18 @@ import type { AttendanceSource, PublicAttendancePayload } from './attendance-sou
 
 type PublicPayload = PublicAttendancePayload;
 
+const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+const RECEIPT_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Confirmação já validada, aguardando o comprovante (evento pago). */
+type PendingRequest = {
+  mode: 'open' | 'prefilled';
+  /** Dados para identificar a pessoa no endpoint de presign. */
+  identity: Record<string, string>;
+  /** Corpo da confirmação (sem o id do comprovante). */
+  body: Record<string, unknown>;
+};
+
 function formatDate(d: string) {
   const date = new Date(d + 'T12:00:00');
   return date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -29,6 +41,7 @@ function ExtraFieldsSection({
   selections,
   custom,
   taken,
+  optional,
   onToggleOption,
   onCustomChange,
 }: {
@@ -36,6 +49,8 @@ function ExtraFieldsSection({
   selections: Record<string, string[]>;
   custom: Record<string, string>;
   taken: Record<string, Record<string, number>>;
+  /** Evento pago: o item é opcional (sem ele, a pessoa paga via PIX). */
+  optional?: boolean;
   onToggleOption: (fieldId: string, option: string) => void;
   onCustomChange: (fieldId: string, value: string) => void;
 }) {
@@ -43,11 +58,18 @@ function ExtraFieldsSection({
   return (
     <div className="space-y-4 rounded-lg border bg-muted/20 p-3">
       <p className="text-xs font-medium text-muted-foreground">
-        Escolha exatamente 1 item abaixo (qualquer lista) para confirmar presença
+        {optional
+          ? 'Opcional: escolha 1 item abaixo para confirmar sem pagamento. Se não escolher, você confirma enviando o comprovante do PIX.'
+          : 'Escolha exatamente 1 item abaixo (qualquer lista) para confirmar presença'}
       </p>
       {fields.map((f) => {
         const selected = selections[f.id] ?? [];
         const customVal = custom[f.id] ?? '';
+        // Respostas próprias de outras pessoas (fora das opções configuradas)
+        const configured = new Set((f.options ?? []).map((o) => o.toLowerCase()));
+        const customTaken = Object.entries(taken?.[f.id] ?? {}).filter(
+          ([name, n]) => n > 0 && !configured.has(name.toLowerCase())
+        );
         return (
           <div key={f.id} className="space-y-2">
             <Label className="text-sm font-medium">{f.label}</Label>
@@ -96,6 +118,21 @@ function ExtraFieldsSection({
                 placeholder="Digite sua resposta"
               />
             )}
+            {customTaken.length > 0 && (
+              <div className="rounded-md border border-dashed bg-background/60 p-2 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Outros itens já escolhidos</p>
+                <ul className="space-y-0.5">
+                  {customTaken.map(([name, n]) => (
+                    <li key={name} className="text-sm">
+                      {name}
+                      <span className="ml-1 text-xs text-amber-700 dark:text-amber-400 whitespace-nowrap">
+                        · {n} {n === 1 ? 'pessoa' : 'pessoas'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         );
       })}
@@ -139,6 +176,7 @@ export function PublicAttendanceView({
   const [paymentReceiptId, setPaymentReceiptId] = useState<string | null>(null);
   const [paymentUploading, setPaymentUploading] = useState(false);
   const [paymentError, setPaymentError] = useState('');
+  const [pixCopied, setPixCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const extraFields = data?.extra_fields ?? [];
@@ -199,100 +237,35 @@ export function PublicAttendanceView({
     }
     return { ok: true, values: [{ field_id: answers[0].field_id, values: [answers[0].value] }] };
   };
-  
-  // Verifica se o usuário preencheu algum campo adicional
-  const hasFilledExtraField = (): boolean => {
-    for (const f of extraFields) {
-      const selected = extraSelections[f.id] ?? [];
-      if (selected.length > 0) return true;
-      const customVal = (extraCustom[f.id] ?? '').trim();
-      if (customVal) return true;
-    }
-    return false;
-  };
-  
-  // Verifica se precisa de pagamento
+
+  // A pessoa preencheu algum item nos campos adicionais?
+  const hasFilledExtraField = (): boolean =>
+    extraFields.some(
+      (f) => (extraSelections[f.id] ?? []).some((s) => s.trim()) || (extraCustom[f.id] ?? '').trim().length > 0
+    );
+
+  // Evento pago: o item é opcional. Sem item (ou sem campos adicionais) a pessoa paga e envia o comprovante.
   const needsPayment = (): boolean => {
     if (!data?.meeting.is_paid_event) return false;
-    // Se há campos adicionais e o usuário preencheu algum, não precisa de pagamento
-    if (extraFields.length > 0 && hasFilledExtraField()) return false;
-    // Se não há campos adicionais ou não preencheu, precisa de pagamento
-    return true;
+    return extraFields.length === 0 || !hasFilledExtraField();
   };
-  
-  const handlePaymentFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    // Validação básica
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-    if (!allowedTypes.includes(file.type)) {
-      setPaymentError('Formato não suportado. Use JPG, PNG, WEBP ou PDF.');
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      setPaymentError('Arquivo muito grande. Máximo 10MB.');
-      return;
-    }
-    
-    setPaymentReceiptFile(file);
-    setPaymentError('');
-  };
-  
-  const handleUploadPaymentReceipt = async () => {
-    if (!paymentReceiptFile || !slug || !data) return;
-    
-    setPaymentUploading(true);
-    setPaymentError('');
-    
-    try {
-      // 1. Obter presigned URL
-      const presignRes = await fetch(`/api/lista-presenca/${slug}/payment-presign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contentType: paymentReceiptFile.type,
-          size: paymentReceiptFile.size,
-          first_name: firstName,
-          last_name: lastName,
-          email: email || undefined,
-          phone: phone || undefined,
-        }),
-      });
-      
-      const presignData = await presignRes.json();
-      if (!presignRes.ok) {
-        throw new Error(presignData.error || 'Erro ao preparar upload');
-      }
-      
-      const { uploadUrl, receiptId } = presignData;
-      
-      // 2. Fazer upload para S3
-      const uploadRes = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': paymentReceiptFile.type },
-        body: paymentReceiptFile,
-      });
-      
-      if (!uploadRes.ok) {
-        throw new Error('Erro ao enviar arquivo');
-      }
-      
-      // 3. Salvar receipt ID para usar na confirmação
-      setPaymentReceiptId(receiptId);
-      setShowPaymentModal(false);
-      setPaymentReceiptFile(null);
-      
-    } catch (err) {
-      setPaymentError(err instanceof Error ? err.message : 'Erro ao enviar comprovante');
-    } finally {
-      setPaymentUploading(false);
-    }
+
+  /**
+   * Valida os campos adicionais conforme o caso:
+   *  - precisa pagar -> item é opcional, nada a validar (vai para o modal do PIX);
+   *  - caso contrário -> regra de sempre (exatamente 1 item).
+   */
+  const resolveExtras = (): { ok: false; error: string } | { ok: true; values: Array<{ field_id: string; values: string[] }> } => {
+    if (needsPayment()) return { ok: true, values: [] };
+    return buildExtraValues();
   };
 
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [submitOk, setSubmitOk] = useState<string | null>(null);
+
+  // Dados validados da pessoa, guardados enquanto o modal de pagamento está aberto
+  const [pendingRequest, setPendingRequest] = useState<PendingRequest | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!slug) return;
@@ -309,11 +282,9 @@ export function PublicAttendanceView({
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleSubmitOpen = async () => {
-    if (!slug || !data) return;
-    setSubmitOk(null);
-    setSubmitError('');
-
+  /** Valida o formulário "lista vazia". */
+  const buildOpenRequest = (): { error: string } | { request: PendingRequest } => {
+    if (!data) return { error: 'Lista indisponível.' };
     const fn = firstName.trim();
     const ln = lastName.trim();
     const em = email.trim();
@@ -321,99 +292,219 @@ export function PublicAttendanceView({
     const hasEmail = !noEmail && em && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);
     const hasPhone = noEmail && ph.length >= 10;
 
-    if (!fn) { setSubmitError('Informe o nome.'); return; }
-    if (!ln) { setSubmitError('Informe o sobrenome.'); return; }
+    if (!fn) return { error: 'Informe o nome.' };
+    if (!ln) return { error: 'Informe o sobrenome.' };
     if (!hasEmail && !hasPhone) {
-      setSubmitError(noEmail ? 'Informe um telefone com DDD (mín. 10 dígitos).' : 'Informe um e-mail válido.');
-      return;
+      return { error: noEmail ? 'Informe um telefone com DDD (mín. 10 dígitos).' : 'Informe um e-mail válido.' };
     }
-    if (data.meeting.attendance_list_require_rg && !rg.trim()) {
-      setSubmitError('Informe o RG.');
-      return;
-    }
+    if (data.meeting.attendance_list_require_rg && !rg.trim()) return { error: 'Informe o RG.' };
 
-    const extras = buildExtraValues();
-    if (!extras.ok && extraFields.length > 0) {
-      setSubmitError(extras.error);
-      return;
-    }
+    const extras = resolveExtras();
+    if (!extras.ok) return { error: extras.error };
 
-    // Verifica se precisa de pagamento
-    if (needsPayment() && !paymentReceiptId) {
-      setShowPaymentModal(true);
-      return;
-    }
-
-    setSubmitLoading(true);
-    try {
-      await source.submit(slug, {
+    return {
+      request: {
         mode: 'open',
-        first_name: fn,
-        last_name: ln,
-        ...(hasEmail ? { email: em } : {}),
-        ...(hasPhone ? { phone: ph } : {}),
-        ...(data.meeting.attendance_list_require_rg ? { rg: rg.trim() } : {}),
-        ...(extras.ok && extras.values.length > 0 ? { extra_values: extras.values } : {}),
-        ...(paymentReceiptId ? { payment_receipt_id: paymentReceiptId } : {}),
-      });
-      setSubmitOk('Confirmação registrada. Obrigado!');
-      setFirstName(''); setLastName(''); setEmail(''); setPhone(''); setNoEmail(false); setRg('');
-      resetExtras();
-      setPaymentReceiptId(null);
-      await fetchData();
-    } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Erro ao confirmar');
-    } finally {
-      setSubmitLoading(false);
-    }
+        identity: {
+          mode: 'open',
+          first_name: fn,
+          last_name: ln,
+          ...(hasEmail ? { email: em } : {}),
+          ...(hasPhone ? { phone: ph } : {}),
+        },
+        body: {
+          mode: 'open',
+          first_name: fn,
+          last_name: ln,
+          ...(hasEmail ? { email: em } : {}),
+          ...(hasPhone ? { phone: ph } : {}),
+          ...(data.meeting.attendance_list_require_rg ? { rg: rg.trim() } : {}),
+          ...(extras.values.length > 0 ? { extra_values: extras.values } : {}),
+        },
+      },
+    };
   };
 
-  const handleSubmitPrefilled = async () => {
-    if (!slug || !data) return;
-    setSubmitOk(null);
-    setSubmitError('');
-
+  /** Valida o formulário "pré-preenchida" (membro identificado pelo telefone). */
+  const buildPrefilledRequest = (): { error: string } | { request: PendingRequest } => {
     const ph = prefilledPhone.replace(/\D/g, '');
     const em = prefilledEmail.trim();
     const hasPhone = prefilledNoEmail && ph.length >= 10;
     const hasEmail = !prefilledNoEmail && em && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);
 
     if (!hasPhone && !hasEmail) {
-      setSubmitError(prefilledNoEmail ? 'Informe um telefone com DDD (mín. 10 dígitos).' : 'Informe um e-mail válido.');
+      return { error: prefilledNoEmail ? 'Informe um telefone com DDD (mín. 10 dígitos).' : 'Informe um e-mail válido.' };
+    }
+
+    const extras = resolveExtras();
+    if (!extras.ok) return { error: extras.error };
+
+    // O comprovante é vinculado ao cadastro do membro, que é localizado pelo telefone.
+    if (needsPayment() && !hasPhone) {
+      return { error: 'Para enviar o comprovante, confirme usando o seu telefone (com DDD).' };
+    }
+
+    return {
+      request: {
+        mode: 'prefilled',
+        identity: { mode: 'prefilled', ...(hasPhone ? { phone: ph } : {}) },
+        body: {
+          mode: 'prefilled',
+          ...(hasPhone ? { phone: ph } : {}),
+          ...(hasEmail ? { email: em } : {}),
+          ...(extras.values.length > 0 ? { extra_values: extras.values } : {}),
+        },
+      },
+    };
+  };
+
+  /** Envia a confirmação. Retorna a mensagem de erro, ou null se deu certo. */
+  const sendConfirmation = async (request: PendingRequest, receiptId: string | null): Promise<string | null> => {
+    if (!slug) return 'Link inválido.';
+    setSubmitLoading(true);
+    try {
+      await source.submit(slug, {
+        ...request.body,
+        ...(receiptId ? { payment_receipt_id: receiptId } : {}),
+      });
+      setSubmitOk(request.mode === 'open' ? 'Confirmação registrada. Obrigado!' : 'Presença confirmada. Obrigado!');
+      if (request.mode === 'open') {
+        setFirstName(''); setLastName(''); setEmail(''); setPhone(''); setNoEmail(false); setRg('');
+      } else {
+        setPrefilledPhone(''); setPrefilledEmail('');
+      }
+      resetExtras();
+      setPaymentReceiptId(null);
+      setPendingRequest(null);
+      await fetchData();
+      return null;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Erro ao confirmar';
+      // Comprovante recusado pelo servidor: força um novo envio
+      if (receiptId && /comprovante/i.test(message)) setPaymentReceiptId(null);
+      return message;
+    } finally {
+      setSubmitLoading(false);
+    }
+  };
+
+  /** Clique em "Confirmar presença" (nos dois modos). */
+  const handleConfirm = async (mode: 'open' | 'prefilled') => {
+    if (!slug || !data) return;
+    setSubmitOk(null);
+    setSubmitError('');
+
+    const built = mode === 'open' ? buildOpenRequest() : buildPrefilledRequest();
+    if ('error' in built) {
+      setSubmitError(built.error);
       return;
     }
 
-    const extras = buildExtraValues();
-    if (!extras.ok && extraFields.length > 0) {
-      setSubmitError(extras.error);
-      return;
-    }
-
-    // Verifica se precisa de pagamento (para modo prefilled, não há dados do usuário ainda)
-    // Nesse caso, se precisa de pagamento, pedimos para entrar em contato com o líder
+    // Evento pago sem item preenchido: abre o modal do PIX; a confirmação acontece após o upload
     if (needsPayment() && !paymentReceiptId) {
+      setPendingRequest(built.request);
+      setPaymentError('');
+      setPaymentReceiptFile(null);
       setShowPaymentModal(true);
       return;
     }
 
-    setSubmitLoading(true);
+    const failure = await sendConfirmation(built.request, needsPayment() ? paymentReceiptId : null);
+    if (failure) setSubmitError(failure);
+  };
+
+  const handleSubmitOpen = () => handleConfirm('open');
+  const handleSubmitPrefilled = () => handleConfirm('prefilled');
+
+  const closePaymentModal = () => {
+    if (paymentUploading) return;
+    setShowPaymentModal(false);
+    setPaymentReceiptFile(null);
+    setPaymentError('');
+  };
+
+  const handlePaymentFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite escolher o mesmo arquivo novamente
+    if (!file) return;
+    if (!RECEIPT_TYPES.includes(file.type)) {
+      setPaymentReceiptFile(null);
+      setPaymentError('Formato não suportado. Use JPG, PNG, WEBP ou PDF.');
+      return;
+    }
+    if (file.size > RECEIPT_MAX_BYTES) {
+      setPaymentReceiptFile(null);
+      setPaymentError('Arquivo muito grande. Máximo 10MB.');
+      return;
+    }
+    setPaymentReceiptFile(file);
+    setPaymentError('');
+  };
+
+  /** Envia o comprovante (URL pré-assinada -> S3) e, em seguida, conclui a confirmação. */
+  const handleUploadAndConfirm = async () => {
+    if (!paymentReceiptFile || !slug || !pendingRequest) return;
+    setPaymentUploading(true);
+    setPaymentError('');
+
+    let receiptId: string;
     try {
-      await source.submit(slug, {
-        mode: 'prefilled',
-        ...(hasPhone ? { phone: ph } : {}),
-        ...(hasEmail ? { email: em } : {}),
-        ...(extras.ok && extras.values.length > 0 ? { extra_values: extras.values } : {}),
-        ...(paymentReceiptId ? { payment_receipt_id: paymentReceiptId } : {}),
-      });
-      setSubmitOk('Presença confirmada. Obrigado!');
-      setPrefilledPhone(''); setPrefilledEmail('');
-      resetExtras();
-      setPaymentReceiptId(null);
-      await fetchData();
-    } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Erro ao confirmar');
-    } finally {
-      setSubmitLoading(false);
+      let presignRes: Response;
+      try {
+        presignRes = await fetch(`/api/lista-presenca/${slug}/payment-presign`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...pendingRequest.identity,
+            contentType: paymentReceiptFile.type,
+            size: paymentReceiptFile.size,
+          }),
+        });
+      } catch {
+        throw new Error('O envio de comprovante está indisponível no momento. Tente novamente mais tarde.');
+      }
+      const presign = (await presignRes.json().catch(() => ({}))) as { uploadUrl?: string; receiptId?: string; error?: string };
+      if (!presignRes.ok || !presign.uploadUrl || !presign.receiptId) {
+        throw new Error(presign.error || 'Não foi possível preparar o envio do comprovante.');
+      }
+
+      let putRes: Response;
+      try {
+        putRes = await fetch(presign.uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': paymentReceiptFile.type },
+          body: paymentReceiptFile,
+        });
+      } catch {
+        throw new Error('Falha de conexão ao enviar o comprovante. Tente novamente.');
+      }
+      if (!putRes.ok) throw new Error('Não foi possível enviar o comprovante. Tente novamente.');
+
+      receiptId = presign.receiptId;
+      setPaymentReceiptId(receiptId);
+    } catch (err) {
+      setPaymentError(err instanceof Error ? err.message : 'Erro ao enviar comprovante');
+      setPaymentUploading(false);
+      return;
+    }
+
+    // Upload concluído: confirma a presença
+    const failure = await sendConfirmation(pendingRequest, receiptId);
+    setPaymentUploading(false);
+    setShowPaymentModal(false);
+    setPaymentReceiptFile(null);
+    if (failure) setSubmitError(failure);
+  };
+
+  const copyPixKey = async () => {
+    const key = data?.meeting.payment_pix_key;
+    if (!key) return;
+    try {
+      await navigator.clipboard.writeText(key);
+      setPixCopied(true);
+      setTimeout(() => setPixCopied(false), 2000);
+    } catch {
+      /* sem permissão de área de transferência: a chave continua visível */
     }
   };
 
@@ -519,15 +610,15 @@ export function PublicAttendanceView({
         {/* Aviso de evento pago */}
         {meeting.is_paid_event && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
-            <CreditCard className="h-5 w-5 text-amber-600 mt-0.5" />
-            <div className="flex-1">
-              <p className="text-sm font-medium text-amber-900">Este evento requer pagamento</p>
-              <p className="text-xs text-amber-700 mt-1">
-                Efetue o pagamento via PIX para a chave: <strong className="font-mono">{meeting.payment_pix_key}</strong>
+            <CreditCard className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+            <div className="flex-1 space-y-1">
+              <p className="text-sm font-medium text-amber-900">Este evento é pago</p>
+              <p className="text-xs text-amber-800">
+                Ao confirmar, você verá a chave PIX e enviará o comprovante de pagamento.
               </p>
               {extraFields.length > 0 && (
-                <p className="text-xs text-amber-600 mt-2">
-                  Se você preencher um item nos campos adicionais abaixo, pode confirmar sem pagamento.
+                <p className="text-xs text-amber-700">
+                  Se preferir contribuir com um item da lista abaixo, escolha-o e confirme sem enviar comprovante.
                 </p>
               )}
             </div>
@@ -538,43 +629,51 @@ export function PublicAttendanceView({
           Esta página é pública e exibe apenas totais. Nenhum nome, e-mail ou telefone é mostrado.
         </p>
 
-        {/* Modal de pagamento */}
+        {/* Modal de pagamento (PIX + comprovante) */}
         {showPaymentModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-card rounded-lg max-w-md w-full p-6 space-y-4">
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="payment-modal-title"
+          >
+            <div className="bg-card rounded-lg max-w-md w-full p-6 space-y-4 max-h-[90dvh] overflow-y-auto">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
                   <CreditCard className="h-5 w-5 text-amber-600" />
-                  <h3 className="font-semibold">Pagamento necessário</h3>
+                  <h3 id="payment-modal-title" className="font-semibold">Pagamento via PIX</h3>
                 </div>
                 <button
-                  onClick={() => {
-                    setShowPaymentModal(false);
-                    setPaymentReceiptFile(null);
-                    setPaymentError('');
-                  }}
-                  className="text-muted-foreground hover:text-foreground"
+                  type="button"
+                  aria-label="Fechar"
+                  onClick={closePaymentModal}
+                  disabled={paymentUploading}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              
+
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Este evento requer pagamento. Por favor, efetue o pagamento via PIX para a chave abaixo e envie o comprovante.
+                  Para confirmar sua presença, faça o pagamento via PIX para a chave abaixo e envie o comprovante.
+                  A confirmação é concluída assim que o comprovante for enviado.
                 </p>
-                
-                <div className="bg-muted p-3 rounded border">
-                  <p className="text-xs text-muted-foreground mb-1">Chave PIX:</p>
-                  <p className="font-mono font-medium">{data?.meeting.payment_pix_key}</p>
+
+                <div className="bg-muted p-3 rounded border space-y-2">
+                  <p className="text-xs text-muted-foreground">Chave PIX</p>
+                  <p className="font-mono font-medium break-all">{data?.meeting.payment_pix_key}</p>
+                  <Button type="button" variant="outline" size="sm" onClick={copyPixKey}>
+                    {pixCopied ? 'Chave copiada!' : 'Copiar chave'}
+                  </Button>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label className="text-sm font-medium">Comprovante de pagamento</Label>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*,.pdf"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
                     onChange={handlePaymentFileSelect}
                     className="hidden"
                   />
@@ -582,30 +681,28 @@ export function PublicAttendanceView({
                     type="button"
                     variant="outline"
                     className="w-full"
+                    disabled={paymentUploading}
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    <Upload className="h-4 w-4 mr-2" />
-                    {paymentReceiptFile ? paymentReceiptFile.name : 'Selecionar arquivo'}
+                    <Upload className="h-4 w-4 mr-2 shrink-0" />
+                    <span className="truncate">{paymentReceiptFile ? paymentReceiptFile.name : 'Selecionar comprovante'}</span>
                   </Button>
                   <p className="text-xs text-muted-foreground">
-                    Formatos aceitos: JPG, PNG, WEBP ou PDF. Máximo 10MB.
+                    Formatos aceitos: JPG, PNG, WEBP ou PDF (até 10MB).
                   </p>
                 </div>
-                
+
                 {paymentError && (
-                  <p className="text-sm text-destructive">{paymentError}</p>
+                  <p className="text-sm text-destructive" role="alert">{paymentError}</p>
                 )}
-                
+
                 <div className="flex gap-2 pt-2">
                   <Button
                     type="button"
                     variant="outline"
                     className="flex-1"
-                    onClick={() => {
-                      setShowPaymentModal(false);
-                      setPaymentReceiptFile(null);
-                      setPaymentError('');
-                    }}
+                    disabled={paymentUploading}
+                    onClick={closePaymentModal}
                   >
                     Cancelar
                   </Button>
@@ -613,7 +710,7 @@ export function PublicAttendanceView({
                     type="button"
                     className="flex-1"
                     disabled={!paymentReceiptFile || paymentUploading}
-                    onClick={handleUploadPaymentReceipt}
+                    onClick={handleUploadAndConfirm}
                   >
                     {paymentUploading ? (
                       <>
@@ -712,6 +809,7 @@ export function PublicAttendanceView({
                     selections={extraSelections}
                     custom={extraCustom}
                     taken={data?.extra_options_taken ?? {}}
+                    optional={meeting.is_paid_event}
                     onToggleOption={toggleExtraOption}
                     onCustomChange={setExtraCustomValue}
                   />
@@ -761,6 +859,7 @@ export function PublicAttendanceView({
                     selections={extraSelections}
                     custom={extraCustom}
                     taken={data?.extra_options_taken ?? {}}
+                    optional={meeting.is_paid_event}
                     onToggleOption={toggleExtraOption}
                     onCustomChange={setExtraCustomValue}
                   />
