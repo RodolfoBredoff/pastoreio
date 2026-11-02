@@ -1,11 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Calendar, MapPin, CheckCircle2, UserPlus } from 'lucide-react';
+import { Loader2, Calendar, MapPin, CheckCircle2, UserPlus, CreditCard, Upload, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AttendanceSource, PublicAttendancePayload } from './attendance-sources';
 
@@ -133,6 +133,14 @@ export function PublicAttendanceView({
   const [extraSelections, setExtraSelections] = useState<Record<string, string[]>>({});
   const [extraCustom, setExtraCustom] = useState<Record<string, string>>({});
 
+  // Estados para evento pago
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentReceiptFile, setPaymentReceiptFile] = useState<File | null>(null);
+  const [paymentReceiptId, setPaymentReceiptId] = useState<string | null>(null);
+  const [paymentUploading, setPaymentUploading] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const extraFields = data?.extra_fields ?? [];
 
   const toggleExtraOption = (fieldId: string, option: string) => {
@@ -191,6 +199,96 @@ export function PublicAttendanceView({
     }
     return { ok: true, values: [{ field_id: answers[0].field_id, values: [answers[0].value] }] };
   };
+  
+  // Verifica se o usuário preencheu algum campo adicional
+  const hasFilledExtraField = (): boolean => {
+    for (const f of extraFields) {
+      const selected = extraSelections[f.id] ?? [];
+      if (selected.length > 0) return true;
+      const customVal = (extraCustom[f.id] ?? '').trim();
+      if (customVal) return true;
+    }
+    return false;
+  };
+  
+  // Verifica se precisa de pagamento
+  const needsPayment = (): boolean => {
+    if (!data?.meeting.is_paid_event) return false;
+    // Se há campos adicionais e o usuário preencheu algum, não precisa de pagamento
+    if (extraFields.length > 0 && hasFilledExtraField()) return false;
+    // Se não há campos adicionais ou não preencheu, precisa de pagamento
+    return true;
+  };
+  
+  const handlePaymentFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // Validação básica
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      setPaymentError('Formato não suportado. Use JPG, PNG, WEBP ou PDF.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setPaymentError('Arquivo muito grande. Máximo 10MB.');
+      return;
+    }
+    
+    setPaymentReceiptFile(file);
+    setPaymentError('');
+  };
+  
+  const handleUploadPaymentReceipt = async () => {
+    if (!paymentReceiptFile || !slug || !data) return;
+    
+    setPaymentUploading(true);
+    setPaymentError('');
+    
+    try {
+      // 1. Obter presigned URL
+      const presignRes = await fetch(`/api/lista-presenca/${slug}/payment-presign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contentType: paymentReceiptFile.type,
+          size: paymentReceiptFile.size,
+          first_name: firstName,
+          last_name: lastName,
+          email: email || undefined,
+          phone: phone || undefined,
+        }),
+      });
+      
+      const presignData = await presignRes.json();
+      if (!presignRes.ok) {
+        throw new Error(presignData.error || 'Erro ao preparar upload');
+      }
+      
+      const { uploadUrl, receiptId } = presignData;
+      
+      // 2. Fazer upload para S3
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': paymentReceiptFile.type },
+        body: paymentReceiptFile,
+      });
+      
+      if (!uploadRes.ok) {
+        throw new Error('Erro ao enviar arquivo');
+      }
+      
+      // 3. Salvar receipt ID para usar na confirmação
+      setPaymentReceiptId(receiptId);
+      setShowPaymentModal(false);
+      setPaymentReceiptFile(null);
+      
+    } catch (err) {
+      setPaymentError(err instanceof Error ? err.message : 'Erro ao enviar comprovante');
+    } finally {
+      setPaymentUploading(false);
+    }
+  };
 
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -235,8 +333,14 @@ export function PublicAttendanceView({
     }
 
     const extras = buildExtraValues();
-    if (!extras.ok) {
+    if (!extras.ok && extraFields.length > 0) {
       setSubmitError(extras.error);
+      return;
+    }
+
+    // Verifica se precisa de pagamento
+    if (needsPayment() && !paymentReceiptId) {
+      setShowPaymentModal(true);
       return;
     }
 
@@ -249,11 +353,13 @@ export function PublicAttendanceView({
         ...(hasEmail ? { email: em } : {}),
         ...(hasPhone ? { phone: ph } : {}),
         ...(data.meeting.attendance_list_require_rg ? { rg: rg.trim() } : {}),
-        ...(extras.values.length > 0 ? { extra_values: extras.values } : {}),
+        ...(extras.ok && extras.values.length > 0 ? { extra_values: extras.values } : {}),
+        ...(paymentReceiptId ? { payment_receipt_id: paymentReceiptId } : {}),
       });
       setSubmitOk('Confirmação registrada. Obrigado!');
       setFirstName(''); setLastName(''); setEmail(''); setPhone(''); setNoEmail(false); setRg('');
       resetExtras();
+      setPaymentReceiptId(null);
       await fetchData();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Erro ao confirmar');
@@ -278,8 +384,15 @@ export function PublicAttendanceView({
     }
 
     const extras = buildExtraValues();
-    if (!extras.ok) {
+    if (!extras.ok && extraFields.length > 0) {
       setSubmitError(extras.error);
+      return;
+    }
+
+    // Verifica se precisa de pagamento (para modo prefilled, não há dados do usuário ainda)
+    // Nesse caso, se precisa de pagamento, pedimos para entrar em contato com o líder
+    if (needsPayment() && !paymentReceiptId) {
+      setShowPaymentModal(true);
       return;
     }
 
@@ -289,11 +402,13 @@ export function PublicAttendanceView({
         mode: 'prefilled',
         ...(hasPhone ? { phone: ph } : {}),
         ...(hasEmail ? { email: em } : {}),
-        ...(extras.values.length > 0 ? { extra_values: extras.values } : {}),
+        ...(extras.ok && extras.values.length > 0 ? { extra_values: extras.values } : {}),
+        ...(paymentReceiptId ? { payment_receipt_id: paymentReceiptId } : {}),
       });
       setSubmitOk('Presença confirmada. Obrigado!');
       setPrefilledPhone(''); setPrefilledEmail('');
       resetExtras();
+      setPaymentReceiptId(null);
       await fetchData();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Erro ao confirmar');
@@ -400,10 +515,121 @@ export function PublicAttendanceView({
             </div>
           )}
         </div>
+        
+        {/* Aviso de evento pago */}
+        {meeting.is_paid_event && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+            <CreditCard className="h-5 w-5 text-amber-600 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-amber-900">Este evento requer pagamento</p>
+              <p className="text-xs text-amber-700 mt-1">
+                Efetue o pagamento via PIX para a chave: <strong className="font-mono">{meeting.payment_pix_key}</strong>
+              </p>
+              {extraFields.length > 0 && (
+                <p className="text-xs text-amber-600 mt-2">
+                  Se você preencher um item nos campos adicionais abaixo, pode confirmar sem pagamento.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+        </div>
 
         <p className="text-center text-sm text-muted-foreground px-2">
           Esta página é pública e exibe apenas totais. Nenhum nome, e-mail ou telefone é mostrado.
         </p>
+
+        {/* Modal de pagamento */}
+        {showPaymentModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <div className="bg-card rounded-lg max-w-md w-full p-6 space-y-4">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-2">
+                  <CreditCard className="h-5 w-5 text-amber-600" />
+                  <h3 className="font-semibold">Pagamento necessário</h3>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowPaymentModal(false);
+                    setPaymentReceiptFile(null);
+                    setPaymentError('');
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Este evento requer pagamento. Por favor, efetue o pagamento via PIX para a chave abaixo e envie o comprovante.
+                </p>
+                
+                <div className="bg-muted p-3 rounded border">
+                  <p className="text-xs text-muted-foreground mb-1">Chave PIX:</p>
+                  <p className="font-mono font-medium">{data?.meeting.payment_pix_key}</p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Comprovante de pagamento</Label>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,.pdf"
+                    onChange={handlePaymentFileSelect}
+                    className="hidden"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    {paymentReceiptFile ? paymentReceiptFile.name : 'Selecionar arquivo'}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Formatos aceitos: JPG, PNG, WEBP ou PDF. Máximo 10MB.
+                  </p>
+                </div>
+                
+                {paymentError && (
+                  <p className="text-sm text-destructive">{paymentError}</p>
+                )}
+                
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      setShowPaymentModal(false);
+                      setPaymentReceiptFile(null);
+                      setPaymentError('');
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    className="flex-1"
+                    disabled={!paymentReceiptFile || paymentUploading}
+                    onClick={handleUploadPaymentReceipt}
+                  >
+                    {paymentUploading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Enviando...
+                      </>
+                    ) : (
+                      'Enviar e confirmar'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="rounded-lg border bg-card overflow-hidden">
           <div className="px-4 py-3 border-b bg-muted/50 space-y-1">

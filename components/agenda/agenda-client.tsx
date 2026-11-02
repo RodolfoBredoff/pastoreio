@@ -539,6 +539,10 @@ function AddMeetingDialog({
   const [createdListLink, setCreatedListLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  // Estados para evento pago
+  const [isPaidEvent, setIsPaidEvent] = useState(false);
+  const [paymentPixKey, setPaymentPixKey] = useState('');
 
   const handleCreate = async () => {
     if (!date) { setError('A data é obrigatória'); return; }
@@ -593,6 +597,8 @@ function AddMeetingDialog({
               : null,
           attendance_list_extra_fields:
             withList && cleanedExtraFields.length > 0 ? cleanedExtraFields : undefined,
+          is_paid_event: withList && isPaidEvent,
+          payment_pix_key: withList && isPaidEvent ? paymentPixKey.trim() : null,
         }),
       });
       const data = await res.json();
@@ -604,6 +610,7 @@ function AddMeetingDialog({
       } else {
         setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
         setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline(''); setAttendanceRequireRg(false); setAttendanceLimit(''); setExtraFieldsDraft([]);
+        setIsPaidEvent(false); setPaymentPixKey('');
         onSave();
         onOpenChange(false);
       }
@@ -617,6 +624,7 @@ function AddMeetingDialog({
   const handleCloseAfterList = () => {
     setDate(todayStr); setTime(group.default_meeting_time.substring(0, 5));
     setTitle(''); setNotes(''); setLocation(''); setMeetingType('regular'); setGenerateAttendanceList(false); setAttendanceListMode('prefilled'); setAttendanceDeadline(''); setAttendanceRequireRg(false); setAttendanceLimit(''); setExtraFieldsDraft([]);
+    setIsPaidEvent(false); setPaymentPixKey('');
     setCreatedListLink(null);
     onSave();
     onOpenChange(false);
@@ -827,6 +835,35 @@ function AddMeetingDialog({
                         >
                           + Adicionar campo
                         </Button>
+                      </div>
+                      
+                      {/* Seção de evento pago */}
+                      <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50/50 p-3">
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="is-paid-event"
+                            checked={isPaidEvent}
+                            onCheckedChange={(c) => setIsPaidEvent(c === true)}
+                          />
+                          <Label htmlFor="is-paid-event" className="text-sm font-medium cursor-pointer">
+                            Este é um evento pago
+                          </Label>
+                        </div>
+                        {isPaidEvent && (
+                          <div className="space-y-2 pl-6">
+                            <Label htmlFor="payment-pix-key">Chave PIX para pagamento *</Label>
+                            <Input
+                              id="payment-pix-key"
+                              placeholder="Ex: seuemail@exemplo.com ou (11) 99999-9999"
+                              value={paymentPixKey}
+                              onChange={(e) => setPaymentPixKey(e.target.value)}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Participantes deverão enviar comprovante de pagamento antes de confirmar presença.
+                              Se houver campos adicionais e o participante preencher algum item, ele poderá confirmar sem pagamento.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </>
                   )}

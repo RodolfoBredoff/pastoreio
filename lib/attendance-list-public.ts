@@ -29,6 +29,8 @@ export type PublicAttendanceListMeeting = {
   attendance_list_require_rg: boolean;
   attendance_list_limit: number | null;
   invite_cover_image_url?: string | null;
+  is_paid_event: boolean;
+  payment_pix_key: string | null;
 };
 
 export type PublicAttendanceListPayload = {
@@ -54,6 +56,8 @@ type MeetingRow = {
   attendance_list_require_rg: boolean;
   attendance_list_limit: number | null;
   invite_cover_image_url: string | null;
+  is_paid_event: boolean;
+  payment_pix_key: string | null;
 };
 
 export async function getAttendanceConfirmedCount(meetingId: string, mode: AttendanceListMode): Promise<number> {
@@ -85,7 +89,9 @@ export async function getMeetingBySlugOrToken(identifier: string): Promise<Meeti
             COALESCE(attendance_list_mode, 'prefilled') as attendance_list_mode,
             COALESCE(attendance_list_require_rg, FALSE) as attendance_list_require_rg,
             attendance_list_limit,
-            invite_cover_image_url
+            invite_cover_image_url,
+            COALESCE(is_paid_event, FALSE) as is_paid_event,
+            payment_pix_key
      FROM meetings
      WHERE (attendance_list_slug = $1 OR attendance_list_token::text = $1)
        AND is_cancelled = FALSE`,
@@ -98,6 +104,8 @@ export async function getMeetingBySlugOrToken(identifier: string): Promise<Meeti
  * Conta quantas vezes cada opção dos campos adicionais já foi escolhida.
  * Agrega respostas de membros (só 'present'), autocadastro e visitantes.
  * Expõe apenas CONTAGENS por opção — nenhum dado pessoal (padrão "somente totais").
+ * 
+ * IMPORTANTE: Inclui tanto opções pré-definidas quanto itens personalizados digitados pelos usuários.
  */
 export async function getExtraOptionCounts(
   meetingId: string,
@@ -115,15 +123,16 @@ export async function getExtraOptionCounts(
     [meetingId]
   ).catch(() => []);
 
+  // Mapa de opções pré-definidas por campo (para normalização case-insensitive)
   const optionsByField = new Map<string, Map<string, string>>();
   for (const f of fields) {
-    if (!f.options) continue;
     const lower = new Map<string, string>();
-    for (const o of f.options) lower.set(o.toLowerCase(), o);
+    if (f.options) {
+      for (const o of f.options) lower.set(o.toLowerCase(), o);
+    }
     optionsByField.set(f.id, lower);
     taken[f.id] = {};
   }
-  if (optionsByField.size === 0) return taken;
 
   for (const row of rows) {
     const entries = Array.isArray(row.extra_values) ? row.extra_values : [];
@@ -135,8 +144,11 @@ export async function getExtraOptionCounts(
       if (!lower) continue;
       for (const v of e.values) {
         if (typeof v !== 'string') continue;
-        const canonical = lower.get(v.trim().toLowerCase());
-        if (!canonical) continue;
+        const trimmed = v.trim();
+        if (!trimmed) continue;
+        
+        // Tenta normalizar para opção pré-definida (case-insensitive)
+        const canonical = lower.get(trimmed.toLowerCase()) ?? trimmed;
         taken[e.field_id][canonical] = (taken[e.field_id][canonical] ?? 0) + 1;
       }
     }
@@ -165,6 +177,8 @@ export async function getPublicAttendanceList(identifier: string): Promise<Publi
     attendance_list_require_rg: meeting.attendance_list_require_rg ?? false,
     attendance_list_limit: meeting.attendance_list_limit,
     invite_cover_image_url: meeting.invite_cover_image_url,
+    is_paid_event: meeting.is_paid_event ?? false,
+    payment_pix_key: meeting.payment_pix_key,
   };
 
   const guestsRow = await queryOne<{ c: string }>(
@@ -250,10 +264,10 @@ export async function publicConfirmPrefilledByPhoneOrEmail(args: {
   }
 
   await query(
-    `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email, phone, extra_values)
-     VALUES ($1, $2, 'present', $3, $4, $5::jsonb)
-     ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = 'present', email = $3, phone = $4, extra_values = $5::jsonb`,
-    [meeting.id, member.id, hasEmail ? emailVal : null, hasPhone ? phoneVal : null, JSON.stringify(extraValues)]
+    `INSERT INTO attendance_list_responses (meeting_id, member_id, status, email, phone, extra_values, payment_receipt_id)
+     VALUES ($1, $2, 'present', $3, $4, $5::jsonb, $6)
+     ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = 'present', email = $3, phone = $4, extra_values = $5::jsonb, payment_receipt_id = $6`,
+    [meeting.id, member.id, hasEmail ? emailVal : null, hasPhone ? phoneVal : null, JSON.stringify(extraValues), paymentReceiptId]
   );
 
   return { ok: true, status: 200 };
@@ -267,6 +281,7 @@ export async function publicCreateOpenEntry(args: {
   phone?: string;
   rg?: string;
   extra_values?: unknown;
+  payment_receipt_id?: string;
 }) {
   const meeting = await getMeetingBySlugOrToken(args.identifier);
   if (!meeting) return { error: 'Lista não encontrada ou indisponível', status: 404 };
@@ -284,8 +299,35 @@ export async function publicCreateOpenEntry(args: {
   let extraValues: ExtraValuesEntry[] = [];
   if (extraFields.length > 0) {
     const extraRes = normalizeExtraValues(extraFields, args.extra_values);
-    if (!extraRes.ok) return { error: extraRes.error, status: 400 };
-    extraValues = extraRes.values;
+    if (!extraRes.ok && extraRes.error.includes('exatamente 1 item')) {
+      // Se há campos adicionais mas não preencheu, verifica se precisa de pagamento
+      // Se não é evento pago, retorna o erro normal
+      // Se é evento pago, permite continuar se tiver comprovante
+      if (!meeting.is_paid_event) {
+        return { error: extraRes.error, status: 400 };
+      }
+    } else if (extraRes.ok) {
+      extraValues = extraRes.values;
+    }
+  }
+
+  // Verifica se precisa de pagamento
+  const needsPayment = meeting.is_paid_event && extraValues.length === 0;
+  if (needsPayment && !args.payment_receipt_id) {
+    return { error: 'Este evento requer pagamento. Por favor, envie o comprovante de pagamento.', status: 400 };
+  }
+
+  // Valida o receipt se fornecido
+  let paymentReceiptId: string | null = null;
+  if (args.payment_receipt_id) {
+    const receipt = await queryOne<{ id: string; meeting_id: string }>(
+      `SELECT id, meeting_id FROM payment_receipts WHERE id = $1`,
+      [args.payment_receipt_id]
+    );
+    if (!receipt || receipt.meeting_id !== meeting.id) {
+      return { error: 'Comprovante de pagamento inválido.', status: 400 };
+    }
+    paymentReceiptId = receipt.id;
   }
 
   const count = await getAttendanceConfirmedCount(meeting.id, mode);
@@ -312,8 +354,8 @@ export async function publicCreateOpenEntry(args: {
   }
 
   await query(
-    `INSERT INTO attendance_list_public_entries (meeting_id, first_name, last_name, email, phone, rg, extra_values)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    `INSERT INTO attendance_list_public_entries (meeting_id, first_name, last_name, email, phone, rg, extra_values, payment_receipt_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
     [
       meeting.id,
       firstName,
@@ -322,6 +364,7 @@ export async function publicCreateOpenEntry(args: {
       hasPhone ? phoneVal : null,
       meeting.attendance_list_require_rg ? rgVal : null,
       JSON.stringify(extraValues),
+      paymentReceiptId,
     ]
   );
 

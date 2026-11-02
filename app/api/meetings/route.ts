@@ -90,6 +90,8 @@ export async function POST(request: Request) {
       attendance_list_require_rg,
       attendance_list_limit,
       attendance_list_extra_fields,
+      is_paid_event,
+      payment_pix_key,
     } = data as {
       meeting_date: string;
       meeting_time?: string | null;
@@ -104,6 +106,8 @@ export async function POST(request: Request) {
       attendance_list_require_rg?: boolean;
       attendance_list_limit?: number | null;
       attendance_list_extra_fields?: unknown;
+      is_paid_event?: boolean;
+      payment_pix_key?: string | null;
     };
 
     if (!meeting_date) {
@@ -168,9 +172,22 @@ export async function POST(request: Request) {
       extraFieldConfigs = res;
     }
 
+    // Validação de evento pago
+    const isPaidEvent = withList && Boolean(is_paid_event);
+    const paymentPixKey = isPaidEvent && typeof payment_pix_key === 'string' 
+      ? payment_pix_key.trim() 
+      : null;
+    
+    if (isPaidEvent && !paymentPixKey) {
+      return NextResponse.json(
+        { error: 'A chave PIX é obrigatória para eventos pagos' },
+        { status: 400 }
+      );
+    }
+
     const result = await query(
-      `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token, attendance_list_deadline, attendance_list_slug, attendance_list_mode, attendance_list_require_rg, attendance_list_limit)
-       VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11, $12, $13)
+      `INSERT INTO meetings (group_id, meeting_date, meeting_time, title, notes, meeting_type, is_cancelled, location, attendance_list_token, attendance_list_deadline, attendance_list_slug, attendance_list_mode, attendance_list_require_rg, attendance_list_limit, is_paid_event, payment_pix_key)
+       VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        ON CONFLICT (group_id, meeting_date) DO NOTHING
        RETURNING *`,
       [
@@ -187,6 +204,8 @@ export async function POST(request: Request) {
         attendanceListMode,
         attendanceListRequireRg,
         attendanceListLimit,
+        isPaidEvent,
+        paymentPixKey,
       ]
     );
 

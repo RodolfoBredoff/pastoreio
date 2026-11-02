@@ -42,13 +42,14 @@ export async function POST(
     const { mode } = body as { mode?: 'open' | 'prefilled' };
 
     if (mode === 'open') {
-      const { first_name, last_name, email, phone, rg, extra_values } = body as {
+      const { first_name, last_name, email, phone, rg, extra_values, payment_receipt_id } = body as {
         first_name?: string;
         last_name?: string;
         email?: string;
         phone?: string;
         rg?: string;
         extra_values?: unknown;
+        payment_receipt_id?: string;
       };
       const res = await publicCreateOpenEntry({
         identifier: slug,
@@ -58,6 +59,7 @@ export async function POST(
         phone,
         rg,
         extra_values,
+        payment_receipt_id,
       });
       if ('error' in res) return NextResponse.json({ error: res.error }, { status: res.status });
       scheduleAttendanceSnapshotSyncForIdentifier(slug);
@@ -65,8 +67,19 @@ export async function POST(
     }
 
     // Default: prefilled confirmation (present) by phone/email
-    const { phone, email, extra_values } = body as { phone?: string; email?: string; extra_values?: unknown };
-    const res = await publicConfirmPrefilledByPhoneOrEmail({ identifier: slug, phone, email, extra_values });
+    const { phone, email, extra_values, payment_receipt_id } = body as { 
+      phone?: string; 
+      email?: string; 
+      extra_values?: unknown;
+      payment_receipt_id?: string;
+    };
+    const res = await publicConfirmPrefilledByPhoneOrEmail({ 
+      identifier: slug, 
+      phone, 
+      email, 
+      extra_values,
+      payment_receipt_id,
+    });
     if ('error' in res) return NextResponse.json({ error: res.error }, { status: res.status });
     scheduleAttendanceSnapshotSyncForIdentifier(slug);
     return NextResponse.json({ ok: true }, { status: 200 });
