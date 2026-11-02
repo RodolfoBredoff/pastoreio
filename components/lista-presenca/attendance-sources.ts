@@ -23,6 +23,8 @@ export type PublicAttendancePayload = {
     attendance_list_require_rg: boolean;
     attendance_list_limit: number | null;
     invite_cover_image_url?: string | null;
+    is_paid_event: boolean;
+    payment_pix_key: string | null;
   };
   count_confirmed: number;
   count_guests: number;
