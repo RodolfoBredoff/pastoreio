@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Aplica migrations SQL no PostgreSQL em execução na EC2 (container Docker).
 # Uso: bash scripts/ec2-deploy-migrate.sh [arquivo.sql ...]
-#   Sem argumentos: aplica a migration 031 (campos adicionais da lista de presença).
+#   Sem argumentos: aplica as migrations idempotentes recentes (031, 032, 033).
+#   NÃO rode as migrations antigas (ex.: 001): elas não usam IF NOT EXISTS.
 # As migrations do projeto são idempotentes (IF NOT EXISTS), seguras para reexecução.
 set -u
 
@@ -17,7 +18,11 @@ fi
 
 FILES=("$@")
 if [ ${#FILES[@]} -eq 0 ] || [ -z "${FILES[0]}" ]; then
-  FILES=(db/migrations/031_attendance_list_extra_fields.sql)
+  FILES=(
+    db/migrations/031_attendance_list_extra_fields.sql
+    db/migrations/032_rotina_do_lider.sql
+    db/migrations/033_paid_events_and_custom_items.sql
+  )
 fi
 
 FAILED=0
@@ -43,6 +48,15 @@ if [ "${ROWS:-0}" -ge 1 ]; then
   echo "OK: tabela attendance_list_extra_fields existe"
 else
   echo "AVISO: tabela attendance_list_extra_fields não encontrada"
+  FAILED=1
+fi
+
+echo "== Verificação: payment_receipts =="
+ROWS=$(docker exec "$PG_CONTAINER" sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "\dt payment_receipts"' 2>/dev/null | wc -l)
+if [ "${ROWS:-0}" -ge 1 ]; then
+  echo "OK: tabela payment_receipts existe"
+else
+  echo "AVISO: tabela payment_receipts não encontrada"
   FAILED=1
 fi
 

@@ -226,7 +226,7 @@ jobs:
               'set -e',
               'export HOME=/root',
               'cd ${{ env.APP_DIR }} || { echo \"Directory ${{ env.APP_DIR }} not found\"; exit 1; }',
-              'bash scripts/ec2-deploy-migrate-all.sh'
+              'bash scripts/ec2-deploy-migrate.sh'
             ]" \
             --region ${{ env.AWS_REGION }} \
             --output text --query "Command.CommandId" 2>&1) || true
