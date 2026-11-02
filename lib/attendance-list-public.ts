@@ -205,6 +205,7 @@ export async function publicConfirmPrefilledByPhoneOrEmail(args: {
   phone?: string;
   email?: string;
   extra_values?: unknown;
+  payment_receipt_id?: string;
 }) {
   const meeting = await getMeetingBySlugOrToken(args.identifier);
   if (!meeting) return { error: 'Lista não encontrada ou indisponível', status: 404 };

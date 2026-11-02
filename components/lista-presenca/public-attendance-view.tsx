@@ -533,7 +533,6 @@ export function PublicAttendanceView({
             </div>
           </div>
         )}
-        </div>
 
         <p className="text-center text-sm text-muted-foreground px-2">
           Esta página é pública e exibe apenas totais. Nenhum nome, e-mail ou telefone é mostrado.
