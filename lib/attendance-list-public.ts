@@ -223,8 +223,30 @@ export async function publicConfirmPrefilledByPhoneOrEmail(args: {
   let extraValues: ExtraValuesEntry[] = [];
   if (extraFields.length > 0) {
     const extraRes = normalizeExtraValues(extraFields, args.extra_values);
-    if (!extraRes.ok) return { error: extraRes.error, status: 400 };
-    extraValues = extraRes.values;
+    if (!extraRes.ok && extraRes.error.includes('exatamente 1 item')) {
+      if (!meeting.is_paid_event) {
+        return { error: extraRes.error, status: 400 };
+      }
+    } else if (extraRes.ok) {
+      extraValues = extraRes.values;
+    }
+  }
+
+  const needsPayment = meeting.is_paid_event && extraValues.length === 0;
+  if (needsPayment && !args.payment_receipt_id) {
+    return { error: 'Este evento requer pagamento. Por favor, envie o comprovante de pagamento.', status: 400 };
+  }
+
+  let paymentReceiptId: string | null = null;
+  if (args.payment_receipt_id) {
+    const receipt = await queryOne<{ id: string; meeting_id: string }>(
+      `SELECT id, meeting_id FROM payment_receipts WHERE id = $1`,
+      [args.payment_receipt_id]
+    );
+    if (!receipt || receipt.meeting_id !== meeting.id) {
+      return { error: 'Comprovante de pagamento inválido.', status: 400 };
+    }
+    paymentReceiptId = receipt.id;
   }
 
   const phoneVal = typeof args.phone === 'string' ? args.phone.replace(/\D/g, '').trim() : '';
