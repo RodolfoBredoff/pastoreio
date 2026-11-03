@@ -93,6 +93,8 @@ export async function POST(
       contact = hasEmail ? email : phone;
     }
 
+    // Um único UUID: id do comprovante e sufixo do nome do arquivo
+    const receiptId = randomUUID();
     const key = buildReceiptObjectKey({
       meetingId: meeting.id,
       eventTitle: meeting.title,
@@ -100,11 +102,11 @@ export async function POST(
       lastName,
       contact,
       contentType,
+      uuid: receiptId,
     });
 
     const uploadUrl = await createReceiptUploadUrl({ key, contentType, size });
 
-    const receiptId = randomUUID();
     await queryOne(
       `INSERT INTO payment_receipts
          (id, meeting_id, user_first_name, user_last_name, user_email, user_phone, receipt_url, receipt_object_key)

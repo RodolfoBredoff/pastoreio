@@ -11,7 +11,7 @@
     "setup": "chmod +x install-and-run.sh && ./install-and-run.sh",
     "icons": "open scripts/generate-icons.html",
     "build:lista-presenca": "vite build --config apps/lista-presenca-static/vite.config.ts",
-    "build:lista-presenca-lambda": "esbuild aws/terraform-lista-presenca/lambda/offline-confirm.ts --bundle --platform=node --target=node22 --format=esm --external:@aws-sdk/* --outfile=aws/terraform-lista-presenca/lambda/dist/index.mjs"
+    "build:lista-presenca-lambda": "esbuild aws/terraform-lista-presenca/lambda/offline-confirm.ts --bundle --platform=node --target=node22 --format=esm \"--external:@aws-sdk/client-*\" --outfile=aws/terraform-lista-presenca/lambda/dist/index.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1037.0",

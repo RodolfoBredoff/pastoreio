@@ -10,6 +10,8 @@ locals {
   offline_name     = "pastoreio-lista-presenca-offline"
   lambda_bundle    = "${path.module}/lambda/dist/index.mjs"
   snapshot_arn     = "arn:aws:s3:::${var.bucket_name}/snapshots/lista-presenca/*"
+  bucket_arn       = "arn:aws:s3:::${var.bucket_name}"
+  receipts_arn     = "arn:aws:s3:::${var.bucket_name}/payment-receipts/*"
   distribution_arn = "arn:aws:cloudfront::${var.aws_account_id}:distribution/${var.distribution_id}"
 }
 
@@ -100,8 +102,24 @@ resource "aws_iam_role_policy" "offline_lambda" {
       {
         Sid      = "WriteBuffer"
         Effect   = "Allow"
-        Action   = ["dynamodb:PutItem", "dynamodb:Query"]
+        Action   = ["dynamodb:PutItem", "dynamodb:Query", "dynamodb:GetItem", "dynamodb:UpdateItem"]
         Resource = aws_dynamodb_table.attendance_buffer.arn
+      },
+      {
+        # URL pré-assinada de upload é assinada com estas credenciais; GetObject serve ao HeadObject
+        # que confirma que o comprovante foi realmente enviado. Somente o prefixo payment-receipts/.
+        Sid      = "PaymentReceipts"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject"]
+        Resource = local.receipts_arn
+      },
+      {
+        # Sem ListBucket o S3 responde 403 (e não 404) para arquivo inexistente
+        Sid       = "ListReceiptsPrefix"
+        Effect    = "Allow"
+        Action    = ["s3:ListBucket"]
+        Resource  = local.bucket_arn
+        Condition = { StringLike = { "s3:prefix" = ["payment-receipts/*"] } }
       },
     ]
   })
@@ -117,12 +135,13 @@ resource "aws_lambda_function" "offline" {
   filename         = data.archive_file.offline_lambda.output_path
   source_code_hash = data.archive_file.offline_lambda.output_base64sha256
   memory_size      = 128
-  timeout          = 5
+  timeout          = 10
 
   environment {
     variables = {
       SNAPSHOT_BUCKET = var.bucket_name
       SNAPSHOT_PREFIX = "snapshots/lista-presenca"
+      RECEIPTS_BUCKET = var.bucket_name
       BUFFER_TABLE    = aws_dynamodb_table.attendance_buffer.name
     }
   }

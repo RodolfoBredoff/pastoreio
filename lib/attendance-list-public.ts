@@ -12,7 +12,8 @@ import {
   normalizeRg,
   resolveExtraAndPayment,
 } from '@/lib/attendance-list-rules';
-import { receiptObjectExists } from '@/lib/payment-receipts';
+import { getReceiptBucket, receiptObjectExists } from '@/lib/payment-receipts';
+import { isReceiptKeyForMeeting, isUuid } from '@/lib/payment-receipt-key';
 
 // Reexportadas para manter os imports existentes.
 export { isAttendanceLimitReached, isMeetingExpired, isValidRg, normalizeRg };
@@ -388,6 +389,9 @@ export async function insertBufferedOpenEntry(args: {
   rg?: string | null;
   extra_values: unknown;
   created_at: string;
+  /** Comprovante emitido pela Lambda (evento pago): id e chave do arquivo no S3. */
+  payment_receipt_id?: string | null;
+  payment_receipt_key?: string | null;
 }): Promise<{ ok: true; inserted: boolean } | { ok: false; error: string }> {
   const meeting = await queryOne<{
     id: string;
@@ -424,12 +428,39 @@ export async function insertBufferedOpenEntry(args: {
   if (!firstName || !lastName || (!email && !phone)) return { ok: false, error: 'Dados incompletos' };
   const rg = meeting.attendance_list_require_rg ? normalizeRg(args.rg ?? '') || null : null;
 
+  // Comprovante enviado com a EC2 desligada: cria o registro em payment_receipts (id da Lambda)
+  // e vincula à confirmação. O arquivo já está no S3; só validamos que a chave é do encontro.
+  let receiptId: string | null = null;
+  if (args.payment_receipt_id) {
+    if (!isUuid(args.payment_receipt_id) || !isReceiptKeyForMeeting(args.payment_receipt_key, meeting.id)) {
+      return { ok: false, error: 'Comprovante inválido no buffer' };
+    }
+    receiptId = args.payment_receipt_id.toLowerCase();
+    await query(
+      `INSERT INTO payment_receipts
+         (id, meeting_id, user_first_name, user_last_name, user_email, user_phone, receipt_url, receipt_object_key, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        receiptId,
+        meeting.id,
+        firstName,
+        lastName,
+        email,
+        phone,
+        `s3://${getReceiptBucket() ?? ''}/${args.payment_receipt_key}`,
+        args.payment_receipt_key,
+        args.created_at,
+      ]
+    );
+  }
+
   const result = await query(
     `INSERT INTO attendance_list_public_entries
-       (id, meeting_id, first_name, last_name, email, phone, rg, extra_values, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+       (id, meeting_id, first_name, last_name, email, phone, rg, extra_values, created_at, payment_receipt_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
      ON CONFLICT (id) DO NOTHING`,
-    [args.entryId, meeting.id, firstName, lastName, email, phone, rg, JSON.stringify(extraValues), args.created_at]
+    [args.entryId, meeting.id, firstName, lastName, email, phone, rg, JSON.stringify(extraValues), args.created_at, receiptId]
   );
   return { ok: true, inserted: (result.rowCount ?? 0) > 0 };
 }

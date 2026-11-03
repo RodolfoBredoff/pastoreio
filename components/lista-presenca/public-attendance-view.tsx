@@ -449,23 +449,15 @@ export function PublicAttendanceView({
 
     let receiptId: string;
     try {
-      let presignRes: Response;
+      let presign: { uploadUrl: string; receiptId: string };
       try {
-        presignRes = await fetch(`/api/lista-presenca/${slug}/payment-presign`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...pendingRequest.identity,
-            contentType: paymentReceiptFile.type,
-            size: paymentReceiptFile.size,
-          }),
+        presign = await source.presignReceipt(slug, {
+          ...pendingRequest.identity,
+          contentType: paymentReceiptFile.type,
+          size: paymentReceiptFile.size,
         });
-      } catch {
-        throw new Error('O envio de comprovante está indisponível no momento. Tente novamente mais tarde.');
-      }
-      const presign = (await presignRes.json().catch(() => ({}))) as { uploadUrl?: string; receiptId?: string; error?: string };
-      if (!presignRes.ok || !presign.uploadUrl || !presign.receiptId) {
-        throw new Error(presign.error || 'Não foi possível preparar o envio do comprovante.');
+      } catch (e) {
+        throw e instanceof Error ? e : new Error('Não foi possível preparar o envio do comprovante.');
       }
 
       let putRes: Response;

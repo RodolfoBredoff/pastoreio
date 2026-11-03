@@ -41,12 +41,28 @@ export type PublicAttendancePayload = {
   extra_options_taken?: Record<string, Record<string, number>>;
 };
 
+/** Pedido de URL de upload do comprovante (identidade + dados do arquivo). */
+export type ReceiptPresignRequest = Record<string, string | number> & { contentType: string; size: number };
+export type ReceiptPresignResult = { uploadUrl: string; receiptId: string };
+
 export type AttendanceSource = {
   /** Carrega os dados públicos da lista. Lança Error com mensagem amigável. */
   load: (slug: string) => Promise<PublicAttendancePayload>;
   /** Envia uma confirmação. Lança Error com mensagem amigável. */
   submit: (slug: string, body: Record<string, unknown>) => Promise<void>;
+  /** Gera a URL pré-assinada para enviar o comprovante (evento pago). Lança Error com mensagem amigável. */
+  presignReceipt: (slug: string, request: ReceiptPresignRequest) => Promise<ReceiptPresignResult>;
 };
+
+const RECEIPT_UNAVAILABLE_MESSAGE =
+  'O envio de comprovante está indisponível no momento. Tente novamente mais tarde.';
+
+function parsePresign(json: unknown): ReceiptPresignResult | null {
+  const j = json as { uploadUrl?: unknown; receiptId?: unknown } | null;
+  return j && typeof j.uploadUrl === 'string' && typeof j.receiptId === 'string'
+    ? { uploadUrl: j.uploadUrl, receiptId: j.receiptId }
+    : null;
+}
 
 /** Comportamento original da página (idêntico ao que existia antes). */
 export const apiAttendanceSource: AttendanceSource = {
@@ -64,6 +80,22 @@ export const apiAttendanceSource: AttendanceSource = {
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error || 'Erro ao confirmar');
+  },
+  async presignReceipt(slug, request) {
+    let res: Response;
+    try {
+      res = await fetch(`/api/lista-presenca/${slug}/payment-presign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+    } catch {
+      throw new Error(RECEIPT_UNAVAILABLE_MESSAGE);
+    }
+    const json = await res.json().catch(() => ({}));
+    const parsed = res.ok ? parsePresign(json) : null;
+    if (!parsed) throw new Error((json as { error?: string }).error || 'Não foi possível preparar o envio do comprovante.');
+    return parsed;
   },
 };
 
@@ -174,6 +206,28 @@ async function sha256Hex(text: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+async function presignOffline(slug: string, request: ReceiptPresignRequest): Promise<ReceiptPresignResult> {
+  const payload = JSON.stringify(request);
+  let res: Response;
+  try {
+    res = await fetch(`${OFFLINE_API}/${slug}/payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-amz-content-sha256': await sha256Hex(payload) },
+      body: payload,
+      signal: AbortSignal.timeout(OFFLINE_TIMEOUT_MS),
+    });
+  } catch {
+    throw new Error(RECEIPT_UNAVAILABLE_MESSAGE);
+  }
+  const json = await res.json().catch(() => ({}));
+  const parsed = res.ok ? parsePresign(json) : null;
+  if (!parsed) {
+    if (res.status >= 500) throw new Error(RECEIPT_UNAVAILABLE_MESSAGE);
+    throw new Error((json as { error?: string }).error || 'Não foi possível preparar o envio do comprovante.');
+  }
+  return parsed;
+}
+
 async function submitOffline(slug: string, body: Record<string, unknown>): Promise<void> {
   const payload = JSON.stringify(body);
   let res: Response;
@@ -243,5 +297,31 @@ export const staticAttendanceSource: AttendanceSource = {
     }
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error || 'Erro ao confirmar');
+  },
+
+  async presignReceipt(slug, request) {
+    // Com a EC2 no ar, usa a API; se ela não responder (rede/5xx), a Lambda emite a URL.
+    if (liveBySlug.get(slug)) {
+      let res: Response | null = null;
+      try {
+        res = await fetch(`/api/lista-presenca/${slug}/payment-presign`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+          signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS),
+        });
+      } catch {
+        res = null; // sem rede com a EC2
+      }
+      if (res && res.status < 500) {
+        // Resposta definitiva do servidor: sucesso ou erro de validação (sem fallback)
+        const json = await res.json().catch(() => ({}));
+        const parsed = res.ok ? parsePresign(json) : null;
+        if (parsed) return parsed;
+        throw new Error((json as { error?: string }).error || 'Não foi possível preparar o envio do comprovante.');
+      }
+      liveBySlug.set(slug, false);
+    }
+    return presignOffline(slug, request);
   },
 };

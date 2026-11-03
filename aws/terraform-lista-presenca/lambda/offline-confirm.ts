@@ -3,20 +3,31 @@
  *
  * GET  /offline-api/lista-presenca/<slug> -> totais pendentes no buffer (sem PII)
  * POST /offline-api/lista-presenca/<slug> -> valida e grava a confirmação no DynamoDB
+ * POST /offline-api/lista-presenca/<slug>/payment -> URL pré-assinada (PUT) p/ comprovante (evento pago)
  *
  * Fonte de verdade da lista: o snapshot público no S3 (o mesmo que a página lê).
  * As confirmações ficam no buffer até a EC2 ligar e o app sincronizar com o Postgres
  * (POST /api/cron/sync-attendance-buffer). Validações iguais às do app
  * (lib/attendance-list-rules, lib/attendance-list-public#publicCreateOpenEntry).
  */
-import { createHash } from 'node:crypto';
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { createHash, randomUUID } from 'node:crypto';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   ConditionalCheckFailedException,
   DynamoDBClient,
+  GetItemCommand,
   PutItemCommand,
   QueryCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
+import {
+  buildReceiptObjectKey,
+  isReceiptKeyForMeeting,
+  isUuid,
+  validateReceiptFile,
+} from '../../../lib/payment-receipt-key';
 import {
   countExtraAnswers,
   isAttendanceLimitReached,
@@ -31,6 +42,9 @@ import {
 const BUCKET = process.env.SNAPSHOT_BUCKET!;
 const PREFIX = process.env.SNAPSHOT_PREFIX || 'snapshots/lista-presenca';
 const TABLE = process.env.BUFFER_TABLE!;
+// Comprovantes ficam no mesmo bucket, prefixo payment-receipts/ (nunca exposto pelo CloudFront)
+const RECEIPTS_BUCKET = process.env.RECEIPTS_BUCKET || BUCKET;
+const RECEIPT_URL_TTL_SECONDS = 300;
 const PATH_PREFIX = '/offline-api/lista-presenca/';
 const SLUG_RE = /^[a-z0-9-]{1,120}$/;
 const MAX_BODY_BYTES = 8 * 1024;
@@ -42,6 +56,7 @@ const ddb = new DynamoDBClient({});
 type Snapshot = {
   meeting: {
     id: string;
+    title?: string | null;
     attendance_list_deadline: string | null;
     attendance_list_mode: 'open' | 'prefilled';
     attendance_list_require_rg: boolean;
@@ -120,6 +135,117 @@ function canonicalTaken(fields: AttendanceExtraFieldConfig[], raw: Record<string
   return countExtraAnswers(fields, rows);
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const str = (v: unknown) => (typeof v === 'string' ? v : '');
+
+/** O arquivo do comprovante existe no S3? (upload concluído) */
+async function receiptFileExists(key: string): Promise<boolean> {
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket: RECEIPTS_BUCKET, Key: key }));
+    return true;
+  } catch (e) {
+    const name = (e as { name?: string }).name;
+    if (name === 'NotFound' || name === 'NoSuchKey' || name === 'Forbidden' || name === 'AccessDenied') return false;
+    throw e;
+  }
+}
+
+type IssuedReceipt = { key: string; status: string; usedBy?: string };
+
+async function loadIssuedReceipt(meetingId: string, receiptId: string): Promise<IssuedReceipt | null> {
+  const res = await ddb.send(
+    new GetItemCommand({
+      TableName: TABLE,
+      Key: { pk: { S: `MEETING#${meetingId}` }, sk: { S: `RECEIPT#${receiptId}` } },
+    })
+  );
+  const item = res.Item;
+  if (!item?.receipt_key?.S) return null;
+  return { key: item.receipt_key.S, status: item.status?.S ?? '', usedBy: item.used_by?.S };
+}
+
+/**
+ * Emite a URL de upload do comprovante com a EC2 desligada.
+ * Só para evento pago em lista "open"; registra o comprovante emitido no buffer (status "issued"),
+ * que o sync ignora até a confirmação usá-lo.
+ */
+async function handlePresign(slug: string, rawBody: string) {
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return json(400, { error: 'Requisição inválida' });
+  }
+  const snapshot = await loadSnapshot(slug);
+  if (!snapshot) return json(404, { error: 'Lista não encontrada ou indisponível' });
+  const { meeting } = snapshot;
+
+  if (!meeting.is_paid_event) return json(400, { error: 'Este evento não requer pagamento' });
+  if (meeting.attendance_list_mode !== 'open') {
+    // Modo "prefilled" depende da base de membros (Postgres) — só com a EC2 ligada.
+    return json(409, { error: 'O envio de comprovante está temporariamente indisponível. Tente novamente mais tarde.' });
+  }
+  if (isMeetingExpired(meeting.attendance_list_deadline)) {
+    return json(400, { error: 'O prazo para confirmação deste encontro já foi encerrado.' });
+  }
+
+  const file = validateReceiptFile(body.contentType, body.size);
+  if (!file.ok) return json(400, { error: file.error });
+
+  const firstName = str(body.first_name).trim().slice(0, 120);
+  const lastName = str(body.last_name).trim().slice(0, 120);
+  const emailVal = str(body.email).trim().toLowerCase().slice(0, 255);
+  const phoneVal = str(body.phone).replace(/\D/g, '').slice(0, 20);
+  const hasEmail = EMAIL_RE.test(emailVal);
+  const hasPhone = phoneVal.length >= 10;
+  if (!firstName) return json(400, { error: 'Informe o nome.' });
+  if (!lastName) return json(400, { error: 'Informe o sobrenome.' });
+  if (!hasEmail && !hasPhone) return json(400, { error: 'Informe um e-mail válido ou telefone (com DDD).' });
+
+  const receiptId = randomUUID();
+  const key = buildReceiptObjectKey({
+    meetingId: meeting.id,
+    eventTitle: meeting.title ?? null,
+    firstName,
+    lastName,
+    contact: hasEmail ? emailVal : phoneVal,
+    contentType: file.contentType,
+    uuid: receiptId,
+  });
+
+  const now = new Date();
+  await ddb.send(
+    new PutItemCommand({
+      TableName: TABLE,
+      Item: {
+        pk: { S: `MEETING#${meeting.id}` },
+        sk: { S: `RECEIPT#${receiptId}` },
+        status: { S: 'issued' },
+        meeting_id: { S: meeting.id },
+        receipt_key: { S: key },
+        first_name: { S: firstName },
+        last_name: { S: lastName },
+        ...(hasEmail ? { email: { S: emailVal } } : {}),
+        ...(hasPhone ? { phone: { S: phoneVal } } : {}),
+        created_at: { S: now.toISOString() },
+        ttl: { N: String(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400) },
+      },
+    })
+  );
+
+  const uploadUrl = await getSignedUrl(
+    s3,
+    new PutObjectCommand({
+      Bucket: RECEIPTS_BUCKET,
+      Key: key,
+      ContentType: file.contentType,
+      ContentLength: file.size, // assinado: o S3 recusa tamanho diferente do declarado
+    }),
+    { expiresIn: RECEIPT_URL_TTL_SECONDS, signableHeaders: new Set(['content-type']) }
+  );
+  return json(200, { uploadUrl, receiptId });
+}
+
 async function handleGet(slug: string) {
   const snapshot = await loadSnapshot(slug);
   if (!snapshot) return json(404, { error: 'Lista não encontrada ou indisponível' });
@@ -152,24 +278,28 @@ async function handlePost(slug: string, rawBody: string) {
     return json(400, { error: 'O prazo para confirmação deste encontro já foi encerrado.' });
   }
 
-  // Evento pago: sem item preenchido a pessoa precisa enviar comprovante, e o envio de
-  // comprovante depende do app (Postgres/S3). Com a EC2 desligada, só aceita quem preencheu
-  // um item; os demais recebem a mensagem de indisponibilidade temporária.
+  // Comprovante (evento pago): precisa ter sido emitido por esta Lambda para ESTE encontro,
+  // não ter sido usado por outra pessoa e o arquivo precisa existir no S3.
+  const wantsReceipt = body.payment_receipt_id !== undefined && body.payment_receipt_id !== null && body.payment_receipt_id !== '';
+  let receipt: IssuedReceipt | null = null;
+  let receiptId = '';
+  if (wantsReceipt) {
+    if (!isUuid(body.payment_receipt_id)) return json(400, { error: 'Comprovante de pagamento inválido.' });
+    receiptId = body.payment_receipt_id.toLowerCase();
+    receipt = await loadIssuedReceipt(meeting.id, receiptId);
+    if (!receipt || !isReceiptKeyForMeeting(receipt.key, meeting.id)) {
+      return json(400, { error: 'Comprovante de pagamento inválido.' });
+    }
+  }
+
   const fields = snapshot.extra_fields ?? [];
   const resolved = resolveExtraAndPayment({
     fields,
     rawExtraValues: body.extra_values,
     isPaidEvent: Boolean(meeting.is_paid_event),
-    hasReceipt: false,
+    hasReceipt: wantsReceipt,
   });
-  if (!resolved.ok) {
-    if (resolved.code === 'payment_required') {
-      return json(409, {
-        error: 'O envio de comprovante está temporariamente indisponível. Tente novamente mais tarde.',
-      });
-    }
-    return json(400, { error: resolved.error });
-  }
+  if (!resolved.ok) return json(400, { error: resolved.error });
   const extraValues = resolved.values;
 
   const pending = await pendingSummary(meeting.id);
@@ -177,7 +307,6 @@ async function handlePost(slug: string, rawBody: string) {
     return json(400, { error: 'O limite de inscrições para este evento já foi atingido.' });
   }
 
-  const str = (v: unknown) => (typeof v === 'string' ? v : '');
   const firstName = str(body.first_name).trim().slice(0, 120);
   const lastName = str(body.last_name).trim().slice(0, 120);
   const emailVal = str(body.email).trim().toLowerCase().slice(0, 255);
@@ -200,34 +329,76 @@ async function handlePost(slug: string, rawBody: string) {
     .update([meeting.id, firstName.toLowerCase(), lastName.toLowerCase(), contact].join('|'))
     .digest('hex');
 
+  // Reenvio do mesmo formulário com o mesmo comprovante: já registrado, responde sucesso.
+  if (receipt?.status === 'used') {
+    if (receipt.usedBy === dedupe) return json(201, { ok: true });
+    return json(400, { error: 'Este comprovante já foi utilizado. Envie um novo comprovante.' });
+  }
+  if (receipt && receipt.status !== 'issued') return json(400, { error: 'Comprovante de pagamento inválido.' });
+  if (receipt && !(await receiptFileExists(receipt.key))) {
+    return json(400, { error: 'Não encontramos o arquivo do comprovante. Envie-o novamente.' });
+  }
+
   const now = new Date();
+  const entryItem = {
+    pk: { S: `MEETING#${meeting.id}` },
+    sk: { S: `ENTRY#${dedupe}` },
+    status: { S: 'pending' },
+    meeting_id: { S: meeting.id },
+    slug: { S: slug },
+    mode: { S: 'open' },
+    first_name: { S: firstName },
+    last_name: { S: lastName },
+    ...(hasEmail ? { email: { S: emailVal } } : {}),
+    ...(hasPhone ? { phone: { S: phoneVal } } : {}),
+    ...(meeting.attendance_list_require_rg ? { rg: { S: rgVal } } : {}),
+    ...(receipt ? { payment_receipt_id: { S: receiptId }, payment_receipt_key: { S: receipt.key } } : {}),
+    extra_values: { S: JSON.stringify(extraValues) },
+    dedupe_key: { S: dedupe },
+    created_at: { S: now.toISOString() },
+    ttl: { N: String(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400) },
+  };
+
+  if (!receipt) {
+    try {
+      await ddb.send(new PutItemCommand({ TableName: TABLE, Item: entryItem, ConditionExpression: 'attribute_not_exists(sk)' }));
+    } catch (e) {
+      if (!(e instanceof ConditionalCheckFailedException)) throw e;
+      // Já registrado antes: responde como sucesso.
+    }
+    return json(201, { ok: true });
+  }
+
+  // Com comprovante: a confirmação e a marcação do comprovante como "usado" são atômicas.
   try {
     await ddb.send(
-      new PutItemCommand({
-        TableName: TABLE,
-        Item: {
-          pk: { S: `MEETING#${meeting.id}` },
-          sk: { S: `ENTRY#${dedupe}` },
-          status: { S: 'pending' },
-          meeting_id: { S: meeting.id },
-          slug: { S: slug },
-          mode: { S: 'open' },
-          first_name: { S: firstName },
-          last_name: { S: lastName },
-          ...(hasEmail ? { email: { S: emailVal } } : {}),
-          ...(hasPhone ? { phone: { S: phoneVal } } : {}),
-          ...(meeting.attendance_list_require_rg ? { rg: { S: rgVal } } : {}),
-          extra_values: { S: JSON.stringify(extraValues) },
-          dedupe_key: { S: dedupe },
-          created_at: { S: now.toISOString() },
-          ttl: { N: String(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400) },
-        },
-        ConditionExpression: 'attribute_not_exists(sk)',
+      new TransactWriteItemsCommand({
+        TransactItems: [
+          { Put: { TableName: TABLE, Item: entryItem, ConditionExpression: 'attribute_not_exists(sk)' } },
+          {
+            Update: {
+              TableName: TABLE,
+              Key: { pk: { S: `MEETING#${meeting.id}` }, sk: { S: `RECEIPT#${receiptId}` } },
+              UpdateExpression: 'SET #s = :used, used_by = :by, used_at = :at',
+              ConditionExpression: '#s = :issued',
+              ExpressionAttributeNames: { '#s': 'status' },
+              ExpressionAttributeValues: {
+                ':used': { S: 'used' },
+                ':issued': { S: 'issued' },
+                ':by': { S: dedupe },
+                ':at': { S: now.toISOString() },
+              },
+            },
+          },
+        ],
       })
     );
   } catch (e) {
-    if (!(e instanceof ConditionalCheckFailedException)) throw e;
-    // Já registrado antes: responde como sucesso.
+    if (!(e instanceof TransactionCanceledException)) throw e;
+    // Concorrência ou reenvio: confere quem ficou com o comprovante.
+    const again = await loadIssuedReceipt(meeting.id, receiptId);
+    if (again?.status === 'used' && again.usedBy === dedupe) return json(201, { ok: true });
+    return json(409, { error: 'Não foi possível registrar agora. Tente novamente.' });
   }
   return json(201, { ok: true });
 }
@@ -237,14 +408,16 @@ export async function handler(event: FunctionUrlEvent) {
     const method = event.requestContext.http.method;
     const path = event.rawPath ?? '';
     if (!path.startsWith(PATH_PREFIX)) return json(404, { error: 'Não encontrado' });
-    const slug = decodeURIComponent(path.slice(PATH_PREFIX.length)).toLowerCase();
+    const rest = decodeURIComponent(path.slice(PATH_PREFIX.length)).toLowerCase();
+    const isPayment = rest.endsWith('/payment');
+    const slug = isPayment ? rest.slice(0, -'/payment'.length) : rest;
     if (!SLUG_RE.test(slug)) return json(400, { error: 'Link inválido' });
 
-    if (method === 'GET') return await handleGet(slug);
+    if (method === 'GET' && !isPayment) return await handleGet(slug);
     if (method === 'POST') {
       const raw = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString('utf8') : event.body ?? '';
       if (Buffer.byteLength(raw) > MAX_BODY_BYTES) return json(413, { error: 'Requisição muito grande' });
-      return await handlePost(slug, raw);
+      return isPayment ? await handlePresign(slug, raw) : await handlePost(slug, raw);
     }
     return json(405, { error: 'Método não permitido' });
   } catch (error) {

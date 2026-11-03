@@ -89,6 +89,8 @@ export async function syncAttendanceBuffer(): Promise<BufferSyncResult> {
           rg: s(item, 'rg') ?? null,
           extra_values: JSON.parse(s(item, 'extra_values') ?? '[]'),
           created_at: s(item, 'created_at') ?? new Date().toISOString(),
+          payment_receipt_id: s(item, 'payment_receipt_id') ?? null,
+          payment_receipt_key: s(item, 'payment_receipt_key') ?? null,
         });
         if (!res.ok) throw Object.assign(new Error(res.error), { permanent: true });
 
