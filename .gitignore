@@ -61,7 +61,7 @@ aws/terraform/*.auto.tfvars
 *.tfvars
 !*.tfvars.example
 *.tfplan
-aws/terraform-lista-presenca/tfplan
+aws/terraform-lista-presenca/tfplan*
 
 # AWS credentials (nunca commitar!)
 .aws/
