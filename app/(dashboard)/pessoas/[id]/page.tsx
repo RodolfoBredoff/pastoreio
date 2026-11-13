@@ -7,6 +7,7 @@ import { DeleteMemberButton } from '@/components/pessoas/delete-member-button';
 import { ToggleMemberStatusButton } from '@/components/pessoas/toggle-member-status-button';
 import { ContactLog } from '@/components/pessoas/contact-log';
 import { VisitorStageCard } from '@/components/pessoas/visitor-stage-card';
+import { UndoConversionCard } from '@/components/pessoas/undo-conversion-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { formatDate } from '@/lib/utils';
@@ -97,6 +98,7 @@ export default async function EditarPessoaPage({
 
       <MemberAttendanceStats memberId={id} />
 
+      <UndoConversionCard memberId={id} />
       {member.member_type === 'visitor' && (
         <VisitorStageCard
           memberId={id}

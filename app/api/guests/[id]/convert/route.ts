@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader, getGuestVisitorById } from '@/lib/db/queries';
 import { query, transaction } from '@/lib/db/postgres';
+import { recordConversion } from '@/lib/guest-conversion';
 
 /**
  * POST /api/guests/[id]/convert
@@ -31,6 +32,7 @@ export async function POST(
     }
 
     // Usar transação para garantir que tudo seja feito atomicamente
+    let conversionId: string | null = null;
     const newMember = await transaction(async (client) => {
       // Criar o novo membro sempre como 'novo_visitante'
       // O sistema de estágios automático calculará o estágio correto após a conversão
@@ -65,6 +67,13 @@ export async function POST(
         );
       }
       
+      // Guarda a origem (cópia do visitante + encontros) para permitir desfazer a conversão
+      conversionId = await recordConversion(client, {
+        groupId: guest.group_id,
+        memberId: newMember.id,
+        guestId,
+        convertedBy: leader.id,
+      });
       // Remover os registros antigos de guest
       await client.query(
         `DELETE FROM attendance_guests WHERE guest_id = $1`,
@@ -102,7 +111,7 @@ export async function POST(
       console.error('Erro ao atualizar estágio de integração:', err);
     }
 
-    return NextResponse.json(newMember, { status: 201 });
+    return NextResponse.json({ ...newMember, conversion_id: conversionId }, { status: 201 });
   } catch (error) {
     console.error('Erro ao converter visitante em membro:', error);
     return NextResponse.json(

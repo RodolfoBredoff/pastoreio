@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Loader2, Save, WifiOff, UserPlus, UserCheck, Clock, Camera, Trash2 } from 'lucide-react';
+import { Loader2, Save, WifiOff, UserPlus, UserCheck, Clock, Camera, Trash2, Undo2 } from 'lucide-react';
 import { createThumbnailDataUrl } from '@/lib/image-thumbnail';
 
 interface Member {
@@ -87,6 +87,9 @@ export function PresenceChecklist({
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState('');
   const [photoVersion, setPhotoVersion] = useState(0);
+  // Última conversão feita nesta tela: permite desfazer na hora
+  const [lastConversion, setLastConversion] = useState<{ memberId: string; name: string } | null>(null);
+  const [undoing, setUndoing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<GuestSuggestion[]>([]);
@@ -237,18 +240,36 @@ export function PresenceChecklist({
     setConvertingId(guestId);
     try {
       const res = await fetch(`/api/guests/${guestId}/convert`, { method: 'POST' });
+      const data = (await res.json().catch(() => ({}))) as { id?: string; full_name?: string; error?: string };
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || 'Erro ao converter');
       }
+      const converted = guests.find((g) => g.id === guestId);
       setGuests((prev) => prev.filter((g) => g.id !== guestId));
       setRecurring((prev) => prev.filter((g) => g.id !== guestId));
+      if (data.id) setLastConversion({ memberId: data.id, name: data.full_name ?? converted?.full_name ?? 'Visitante' });
       onConvertToMember?.();
-      alert('Visitante convertido em membro com sucesso!');
     } catch (e: unknown) {
       alert('Erro: ' + (e instanceof Error ? e.message : 'Erro ao converter'));
     } finally {
       setConvertingId(null);
+    }
+  };
+
+  const undoLastConversion = async () => {
+    if (!lastConversion) return;
+    setUndoing(true);
+    try {
+      const res = await fetch(`/api/members/${lastConversion.memberId}/undo-conversion`, { method: 'POST' });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; reasons?: string[] };
+      if (!res.ok) throw new Error([data.error, ...(data.reasons ?? [])].filter(Boolean).join(' '));
+      setLastConversion(null);
+      onConvertToMember?.();
+      onSaved?.();
+    } catch (e: unknown) {
+      alert('Erro: ' + (e instanceof Error ? e.message : 'Erro ao desfazer'));
+    } finally {
+      setUndoing(false);
     }
   };
 
@@ -557,6 +578,20 @@ export function PresenceChecklist({
           </ul>
         )}
       </Card>
+
+      {lastConversion && (
+        <Card className="p-3 flex flex-wrap items-center justify-between gap-2 border-green-300 bg-green-50" data-testid="conversion-banner">
+          <p className="text-sm text-green-900">{lastConversion.name} agora é membro do grupo.</p>
+          <div className="flex gap-1">
+            <Button type="button" size="sm" variant="outline" onClick={undoLastConversion} disabled={undoing}>
+              {undoing ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Undo2 className="mr-1 h-4 w-4" />Desfazer</>}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setLastConversion(null)}>
+              Ok
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {recurring.length > 0 && (
         <Card className="p-4 space-y-2 border-blue-300 bg-blue-50" data-testid="recurring-guests">
