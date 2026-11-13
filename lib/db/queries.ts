@@ -68,6 +68,7 @@ export interface GuestVisitor {
   group_id: string;
   full_name: string;
   phone: string | null;
+  description: string | null;
   created_at: string;
 }
 
@@ -488,7 +489,7 @@ export async function getAttendanceByMeeting(meetingId: string): Promise<Attenda
  */
 export async function getAttendanceGuestsByMeeting(meetingId: string): Promise<GuestVisitor[]> {
   return queryMany<GuestVisitor>(
-    `SELECT g.id, g.group_id, g.full_name, g.phone, g.created_at
+    `SELECT g.id, g.group_id, g.full_name, g.phone, g.description, g.created_at
      FROM attendance_guests ag
      JOIN guest_visitors g ON g.id = ag.guest_id
      WHERE ag.meeting_id = $1
@@ -499,30 +500,44 @@ export async function getAttendanceGuestsByMeeting(meetingId: string): Promise<G
 
 export async function getGuestVisitorById(id: string): Promise<GuestVisitor | null> {
   return queryOne<GuestVisitor>(
-    `SELECT id, group_id, full_name, phone, created_at FROM guest_visitors WHERE id = $1`,
+    `SELECT id, group_id, full_name, phone, description, created_at FROM guest_visitors WHERE id = $1`,
     [id]
   );
 }
 
+/** Visitante avulso que aparece em 2+ encontros e ainda pode virar membro (decisão do líder). */
+export interface RecurringGuest {
+  id: string;
+  full_name: string;
+  appearances: number;
+}
+
 /**
- * Salva presenças de uma reunião (membros + visitantes não cadastrados)
+ * Salva presenças de uma reunião (membros + visitantes não cadastrados).
+ *
+ * Visitantes: se `options.guests` for informado (mesmo vazio), o conjunto de visitantes do
+ * encontro é substituído por ele. Se for `undefined`, os visitantes existentes são preservados
+ * (ex.: sincronização offline, que só envia membros).
+ *
+ * Não converte visitantes em membros automaticamente. Visitantes recorrentes são devolvidos
+ * em `recurringGuests` para o líder confirmar a conversão.
  */
 export async function saveAttendance(
   meetingId: string,
   attendance: Array<{ member_id: string; is_present: boolean }>,
   options: {
     groupId: string;
-    guests?: Array<{ full_name: string; phone?: string | null }>;
+    guests?: Array<{ full_name: string; phone?: string | null; description?: string | null }>;
     /**
      * Se true, só grava linhas de membros que já estavam no grupo na data do encontro.
      * Se false (padrão), grava o que o líder marcar — necessário para retroativos e encontros antigos.
      */
     restrictToMembersBeforeMeetingDate?: boolean;
   } = { groupId: '' }
-): Promise<void> {
-  const { groupId, guests = [], restrictToMembersBeforeMeetingDate = false } = options;
+): Promise<{ recurringGuests: RecurringGuest[] }> {
+  const { groupId, guests, restrictToMembersBeforeMeetingDate = false } = options;
 
-  await transaction(async (client) => {
+  return transaction(async (client) => {
     const meetingRow = await client.query<{ meeting_date: string }>(
       `SELECT meeting_date::text AS meeting_date FROM meetings WHERE id = $1`,
       [meetingId]
@@ -551,12 +566,6 @@ export async function saveAttendance(
       );
     }
 
-    // Remover visitantes do encontro
-    await client.query(
-      `DELETE FROM attendance_guests WHERE meeting_id = $1`,
-      [meetingId]
-    );
-
     // Inserir presenças dos membros (só quem já pertencia ao grupo na data do encontro)
     for (const item of attendance) {
       if (eligibleMemberIds !== null && !eligibleMemberIds.has(item.member_id)) continue;
@@ -569,122 +578,67 @@ export async function saveAttendance(
       );
     }
 
-    // Inserir visitantes não cadastrados: criar ou reutilizar guest e vincular ao encontro
-    const guestsToConvert: Array<{ id: string; full_name: string; phone: string | null }> = [];
-    
-    for (const g of guests) {
-      const name = (g.full_name || '').trim();
-      if (!name) continue;
-      const phone = (g.phone || '').trim() || null;
+    // Visitantes: só mexe neles se o chamador informou a lista
+    const touchedGuestIds: string[] = [];
+    if (guests !== undefined) {
+      await client.query(`DELETE FROM attendance_guests WHERE meeting_id = $1`, [meetingId]);
 
-      let guestId: string;
-      const existing = await client.query(
-        `SELECT id FROM guest_visitors WHERE group_id = $1 AND LOWER(TRIM(full_name)) = LOWER($2) AND COALESCE(TRIM(phone), '') = COALESCE($3, '') LIMIT 1`,
-        [groupId, name, phone || '']
-      );
-      if (existing.rows.length > 0) {
-        guestId = existing.rows[0].id;
-        
-        // Verificar quantas vezes este guest já apareceu
-        const appearancesResult = await client.query<{ count: string }>(
-          `SELECT COUNT(DISTINCT meeting_id)::text as count 
-           FROM attendance_guests 
-           WHERE guest_id = $1`,
-          [guestId]
-        );
-        const appearances = parseInt(appearancesResult.rows[0]?.count || '0', 10);
-        
-        // Se já apareceu 1 vez antes (agora é a segunda), marcar para conversão
-        if (appearances >= 1) {
-          guestsToConvert.push({ id: guestId, full_name: name, phone });
-        }
-      } else {
-        const insert = await client.query(
-          `INSERT INTO guest_visitors (group_id, full_name, phone) VALUES ($1, $2, $3) RETURNING id`,
-          [groupId, name, phone]
-        );
-        guestId = insert.rows[0].id;
-      }
-      await client.query(
-        `INSERT INTO attendance_guests (meeting_id, guest_id) VALUES ($1, $2) ON CONFLICT (meeting_id, guest_id) DO NOTHING`,
-        [meetingId, guestId]
-      );
-    }
+      for (const g of guests) {
+        const name = (g.full_name || '').trim();
+        if (!name) continue;
+        const phone = (g.phone || '').trim() || null;
+        const description = (g.description || '').trim().slice(0, 200) || null;
 
-    // Converter automaticamente guests recorrentes em membros com estágio "retornou"
-    for (const guest of guestsToConvert) {
-      // Verificar se já existe um membro com o mesmo nome
-      const existingMember = await client.query(
-        `SELECT id FROM members 
-         WHERE group_id = $1 
-         AND LOWER(TRIM(full_name)) = LOWER($2) 
-         AND is_active = TRUE
-         LIMIT 1`,
-        [groupId, guest.full_name]
-      );
-      
-      // Só converter se ainda não existe membro cadastrado
-      if (existingMember.rows.length === 0) {
-        // Criar o novo membro e capturar o ID
-        // Começa sempre como 'novo_visitante' - a função updateVisitorIntegrationStages
-        // que é executada logo após vai calcular o estágio correto baseado nas presenças
-        const newMemberResult = await client.query<{ id: string }>(
-          `INSERT INTO members (group_id, full_name, phone, birth_date, member_type, integration_stage)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING id`,
-          [groupId, guest.full_name, guest.phone || '', null, 'visitor', 'novo_visitante']
+        let guestId: string;
+        const existing = await client.query(
+          `SELECT id FROM guest_visitors WHERE group_id = $1 AND LOWER(TRIM(full_name)) = LOWER($2) AND COALESCE(TRIM(phone), '') = COALESCE($3, '') LIMIT 1`,
+          [groupId, name, phone || '']
         );
-        const newMemberId = newMemberResult.rows[0].id;
-        
-        // Migrar todos os registros de presença do guest para o novo membro
-        // Buscar todos os encontros onde o guest estava presente
-        const guestAttendances = await client.query<{ meeting_id: string }>(
-          `SELECT meeting_id FROM attendance_guests WHERE guest_id = $1`,
-          [guest.id]
-        );
-        
-        // Criar registros de attendance (is_present=TRUE) para cada encontro
-        for (const att of guestAttendances.rows) {
-          await client.query(
-            `INSERT INTO attendance (meeting_id, member_id, is_present)
-             VALUES ($1, $2, TRUE)
-             ON CONFLICT (meeting_id, member_id) DO UPDATE SET is_present = TRUE`,
-            [att.meeting_id, newMemberId]
+        if (existing.rows.length > 0) {
+          guestId = existing.rows[0].id;
+          // Só sobrescreve a descrição quando o líder informou uma nova
+          if (description) {
+            await client.query(`UPDATE guest_visitors SET description = $2 WHERE id = $1`, [
+              guestId,
+              description,
+            ]);
+          }
+        } else {
+          const insert = await client.query(
+            `INSERT INTO guest_visitors (group_id, full_name, phone, description) VALUES ($1, $2, $3, $4) RETURNING id`,
+            [groupId, name, phone, description]
           );
+          guestId = insert.rows[0].id;
         }
-        
-        // Atualizar o estágio de integração baseado nas presenças
-        // Isso precisa acontecer DENTRO da transação, após migrar as presenças
         await client.query(
-          `UPDATE members
-           SET integration_stage = CASE
-             WHEN (
-               SELECT COUNT(*) FROM attendance a
-               JOIN meetings m ON m.id = a.meeting_id
-               WHERE a.member_id = $1 AND a.is_present = TRUE AND m.group_id = $2
-             ) >= 4 THEN 'integrando'
-             WHEN (
-               SELECT COUNT(*) FROM attendance a
-               JOIN meetings m ON m.id = a.meeting_id
-               WHERE a.member_id = $1 AND a.is_present = TRUE AND m.group_id = $2
-             ) >= 2 THEN 'retornou'
-             ELSE 'novo_visitante'
-           END
-           WHERE id = $1 AND member_type = 'visitor' AND integration_stage != 'membro'`,
-          [newMemberId, groupId]
+          `INSERT INTO attendance_guests (meeting_id, guest_id) VALUES ($1, $2) ON CONFLICT (meeting_id, guest_id) DO NOTHING`,
+          [meetingId, guestId]
         );
-        
-        // Agora sim remover os registros antigos de guest
-        await client.query(
-          `DELETE FROM attendance_guests WHERE guest_id = $1`,
-          [guest.id]
-        );
-        await client.query(
-          `DELETE FROM guest_visitors WHERE id = $1`,
-          [guest.id]
-        );
+        touchedGuestIds.push(guestId);
       }
     }
+
+    // Visitantes deste encontro que já apareceram em outros: o líder decide se vira membro
+    let recurringGuests: RecurringGuest[] = [];
+    if (touchedGuestIds.length > 0) {
+      const rec = await client.query<{ id: string; full_name: string; appearances: string }>(
+        `SELECT gv.id, gv.full_name, COUNT(DISTINCT ag.meeting_id)::text AS appearances
+         FROM guest_visitors gv
+         JOIN attendance_guests ag ON ag.guest_id = gv.id
+         WHERE gv.id = ANY($1::uuid[])
+         GROUP BY gv.id, gv.full_name
+         HAVING COUNT(DISTINCT ag.meeting_id) >= 2
+         ORDER BY gv.full_name ASC`,
+        [touchedGuestIds]
+      );
+      recurringGuests = rec.rows.map((r) => ({
+        id: r.id,
+        full_name: r.full_name,
+        appearances: parseInt(r.appearances, 10),
+      }));
+    }
+
+    return { recurringGuests };
   });
 }
 

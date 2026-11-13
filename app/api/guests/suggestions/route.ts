@@ -7,6 +7,7 @@ interface GuestSuggestion {
   id: string;
   full_name: string;
   phone: string | null;
+  description: string | null;
   appearances: string;
   last_appearance: string;
 }
@@ -40,6 +41,7 @@ export async function GET(request: Request) {
         gv.id,
         gv.full_name,
         gv.phone,
+        gv.description,
         COUNT(DISTINCT ag.meeting_id)::text as appearances,
         MAX(m.meeting_date)::text as last_appearance
        FROM guest_visitors gv
@@ -47,7 +49,7 @@ export async function GET(request: Request) {
        INNER JOIN meetings m ON m.id = ag.meeting_id
        WHERE gv.group_id = $1
          AND LOWER(gv.full_name) LIKE LOWER($2)
-       GROUP BY gv.id, gv.full_name, gv.phone
+       GROUP BY gv.id, gv.full_name, gv.phone, gv.description
        ORDER BY MAX(m.meeting_date) DESC, gv.full_name ASC
        LIMIT 10`,
       [leader.group_id, `%${query_term}%`]

@@ -150,12 +150,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Reunião não encontrada' }, { status: 404 });
     }
 
+    // undefined = não mexer nos visitantes do encontro (ex.: sincronização offline só de membros)
     const guestList = Array.isArray(guests)
-      ? guests.map((g: { full_name?: string; phone?: string | null }) => ({
+      ? guests.map((g: { full_name?: string; phone?: string | null; description?: string | null }) => ({
           full_name: typeof g.full_name === 'string' ? g.full_name : '',
           phone: g.phone ?? null,
+          description: typeof g.description === 'string' ? g.description : null,
         }))
-      : [];
+      : undefined;
 
     const payload = attendance as Array<{ member_id: string; is_present: boolean }>;
     const memberIds = payload.map((a) => a.member_id).filter(Boolean);
@@ -170,7 +172,7 @@ export async function POST(request: Request) {
       filteredAttendance = payload.filter((a) => activeIds.has(a.member_id));
     }
 
-    await saveAttendance(meeting_id, filteredAttendance, {
+    const { recurringGuests } = await saveAttendance(meeting_id, filteredAttendance, {
       groupId: meeting.group_id,
       guests: guestList,
     });
@@ -199,7 +201,7 @@ export async function POST(request: Request) {
       // Coluna meeting_id só existe após a migration 032; não falha a resposta
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, recurring_guests: recurringGuests });
   } catch (error) {
     console.error('Erro ao salvar presenças:', error);
     return NextResponse.json(

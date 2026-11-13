@@ -22,18 +22,30 @@ export interface GuestItem {
   id?: string;
   full_name: string;
   phone?: string | null;
+  description?: string | null;
 }
 
 interface GuestSuggestion {
   id: string;
   full_name: string;
   phone: string | null;
+  description?: string | null;
   appearances: string;
   last_appearance: string;
 }
 
+interface RecurringGuest {
+  id: string;
+  full_name: string;
+  appearances: number;
+}
+
 interface PresenceChecklistProps {
   meetingId: string;
+  /** Texto "Título — dd/mm/aaaa" usado na confirmação de encontro futuro */
+  meetingLabel?: string;
+  /** Encontro que ainda não aconteceu: pede confirmação antes de salvar */
+  isFutureMeeting?: boolean;
   members: Member[];
   attendance: Attendance[];
   guests?: GuestItem[];
@@ -43,6 +55,8 @@ interface PresenceChecklistProps {
 
 export function PresenceChecklist({
   meetingId,
+  meetingLabel,
+  isFutureMeeting = false,
   members,
   attendance,
   guests: initialGuests = [],
@@ -59,6 +73,8 @@ export function PresenceChecklist({
   const [guests, setGuests] = useState<GuestItem[]>(initialGuests);
   const [guestName, setGuestName] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
+  const [guestDescription, setGuestDescription] = useState('');
+  const [recurring, setRecurring] = useState<RecurringGuest[]>([]);
   const [saving, setSaving] = useState(false);
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<GuestSuggestion[]>([]);
@@ -116,6 +132,7 @@ export function PresenceChecklist({
   const selectSuggestion = (suggestion: GuestSuggestion) => {
     setGuestName(suggestion.full_name);
     setGuestPhone(suggestion.phone || '');
+    setGuestDescription(suggestion.description || '');
     setShowSuggestions(false);
     setSuggestions([]);
   };
@@ -127,9 +144,17 @@ export function PresenceChecklist({
   const addGuest = () => {
     const name = guestName.trim();
     if (!name) return;
-    setGuests((prev) => [...prev, { full_name: name, phone: guestPhone.trim() || null }]);
+    setGuests((prev) => [
+      ...prev,
+      {
+        full_name: name,
+        phone: guestPhone.trim() || null,
+        description: guestDescription.trim() || null,
+      },
+    ]);
     setGuestName('');
     setGuestPhone('');
+    setGuestDescription('');
   };
 
   const removeGuest = (index: number) => {
@@ -145,6 +170,7 @@ export function PresenceChecklist({
         throw new Error(data.error || 'Erro ao converter');
       }
       setGuests((prev) => prev.filter((g) => g.id !== guestId));
+      setRecurring((prev) => prev.filter((g) => g.id !== guestId));
       onConvertToMember?.();
       alert('Visitante convertido em membro com sucesso!');
     } catch (e: unknown) {
@@ -155,6 +181,14 @@ export function PresenceChecklist({
   };
 
   const saveAttendance = async () => {
+    if (
+      isFutureMeeting &&
+      !window.confirm(
+        `Este encontro ainda não aconteceu${meetingLabel ? ` (${meetingLabel})` : ''}.\n\nSalvar a chamada mesmo assim?`
+      )
+    ) {
+      return;
+    }
     setSaving(true);
 
     try {
@@ -165,6 +199,7 @@ export function PresenceChecklist({
       const guestsPayload = guests.map((g) => ({
         full_name: g.full_name,
         phone: g.phone ?? null,
+        description: g.description ?? null,
       }));
 
       if (isOnline) {
@@ -183,6 +218,11 @@ export function PresenceChecklist({
           throw new Error(data.error || 'Erro ao salvar presença');
         }
 
+        const saved = (await response.json().catch(() => ({}))) as {
+          recurring_guests?: RecurringGuest[];
+        };
+        setRecurring(Array.isArray(saved.recurring_guests) ? saved.recurring_guests : []);
+
         alert('Presença salva com sucesso!');
         onSaved?.();
       } else {
@@ -192,7 +232,12 @@ export function PresenceChecklist({
             ...item,
           });
         }
-        alert('Presença salva localmente! Será sincronizada quando a conexão voltar.');
+        alert(
+          'Presença salva localmente! Será sincronizada quando a conexão voltar.' +
+            (guests.length > 0
+              ? '\n\nAtenção: visitantes não cadastrados não são salvos offline. Registre-os quando estiver online.'
+              : '')
+        );
       }
     } catch (error: unknown) {
       console.error('Error saving attendance:', error);
@@ -285,6 +330,15 @@ export function PresenceChecklist({
               Adicionar
             </Button>
           </div>
+          <Input
+            className="mt-2"
+            placeholder="Descrição para reconhecer (opcional). Ex.: camisa azul, veio com a Maria"
+            maxLength={200}
+            value={guestDescription}
+            onChange={(e) => setGuestDescription(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addGuest()}
+            aria-label="Descrição do visitante"
+          />
           {loadingSuggestions && guestName.length >= 2 && (
             <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -303,6 +357,9 @@ export function PresenceChecklist({
                   {g.full_name}
                   {g.phone ? (
                     <span className="text-muted-foreground ml-1">— {g.phone}</span>
+                  ) : null}
+                  {g.description ? (
+                    <span className="block text-xs text-muted-foreground">{g.description}</span>
                   ) : null}
                 </span>
                 <div className="flex items-center gap-1">
@@ -337,6 +394,42 @@ export function PresenceChecklist({
           </ul>
         )}
       </Card>
+
+      {recurring.length > 0 && (
+        <Card className="p-4 space-y-2 border-blue-300 bg-blue-50" data-testid="recurring-guests">
+          <p className="text-sm font-medium text-blue-900">
+            Visitantes que já vieram mais de uma vez. Quer cadastrá-los como membros?
+          </p>
+          <ul className="space-y-2">
+            {recurring.map((r) => (
+              <li key={r.id} className="flex items-center justify-between gap-2 text-sm">
+                <span>
+                  {r.full_name}
+                  <span className="text-muted-foreground"> — {r.appearances} encontros</span>
+                </span>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => convertToMember(r.id)}
+                    disabled={convertingId === r.id}
+                  >
+                    {convertingId === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cadastrar como membro'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setRecurring((prev) => prev.filter((x) => x.id !== r.id))}
+                  >
+                    Agora não
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <Button 
         onClick={saveAttendance} 

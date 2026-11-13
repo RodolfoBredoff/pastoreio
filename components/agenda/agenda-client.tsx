@@ -266,7 +266,7 @@ function EditMeetingDialog({
   const [attendanceLoaded, setAttendanceLoaded] = useState(false);
   // Visitantes avulsos já registrados no encontro: o POST de chamada apaga e recria esse conjunto,
   // então precisam ser reenviados para não serem perdidos ao editar o encontro.
-  const [existingGuests, setExistingGuests] = useState<Array<{ full_name: string; phone: string | null }>>([]);
+  const [existingGuests, setExistingGuests] = useState<Array<{ full_name: string; phone: string | null; description: string | null }>>([]);
   const [coverUrl, setCoverUrl] = useState<string>(meeting.invite_cover_image_url ?? '');
   const [coverUploading, setCoverUploading] = useState(false);
   const [coverError, setCoverError] = useState('');
@@ -353,13 +353,13 @@ function EditMeetingDialog({
         })
         .then((data: {
           attendance?: Array<{ member_id: string; is_present: boolean }>;
-          guests?: Array<{ full_name: string; phone: string | null }>;
+          guests?: Array<{ full_name: string; phone: string | null; description?: string | null }>;
         }) => {
           const map: Record<string, boolean> = {};
           for (const member of members) map[member.id] = false;
           for (const att of data.attendance ?? []) map[att.member_id] = att.is_present;
           setPresenceMap(map);
-          setExistingGuests((data.guests ?? []).map((g) => ({ full_name: g.full_name, phone: g.phone ?? null })));
+          setExistingGuests((data.guests ?? []).map((g) => ({ full_name: g.full_name, phone: g.phone ?? null, description: g.description ?? null })));
           setAttendanceLoaded(true);
         })
         .catch(() => {

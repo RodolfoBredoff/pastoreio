@@ -6,7 +6,8 @@ import { PresenceChecklist } from './presence-checklist';
 import { MeetingReport, type MeetingReportData } from './meeting-report';
 import { Card, CardContent } from '@/components/ui/card';
 import { formatDate, getDayOfWeekName } from '@/lib/utils';
-import { Calendar } from 'lucide-react';
+import { Calendar, AlertTriangle } from 'lucide-react';
+import { describeMeetingDate } from '@/lib/meeting-date';
 
 interface Meeting extends MeetingReportData {
   id: string;
@@ -31,12 +32,15 @@ export interface GuestVisitor {
   group_id: string;
   full_name: string;
   phone: string | null;
+  description?: string | null;
   created_at?: string;
 }
 
 interface ChamadaWithSelectorProps {
   meetings: Meeting[];
   members: Member[];
+  /** Hoje (YYYY-MM-DD) no fuso do app, calculado no servidor */
+  today: string;
   defaultMeetingId: string;
   defaultAttendance: Attendance[];
   defaultGuests?: GuestVisitor[];
@@ -46,6 +50,7 @@ interface ChamadaWithSelectorProps {
 export function ChamadaWithSelector({
   meetings,
   members,
+  today,
   defaultMeetingId,
   defaultAttendance,
   defaultGuests = [],
@@ -135,17 +140,38 @@ export function ChamadaWithSelector({
 
       {selectedMeeting && (
         <>
-          <div className="text-sm text-muted-foreground">
-            {selectedMeeting.title && (
-              <p className="font-medium text-foreground">{selectedMeeting.title}</p>
-            )}
-            <p>
-              {formatDate(selectedMeeting.meeting_date)}
-              {selectedMeeting.meeting_time && (
-                <span> — {selectedMeeting.meeting_time.toString().substring(0, 5)}</span>
-              )}
-            </p>
-          </div>
+          {(() => {
+            const info = describeMeetingDate(selectedMeeting.meeting_date, today);
+            return (
+              <div
+                role="status"
+                data-testid="meeting-banner"
+                className={
+                  info.isFuture
+                    ? 'rounded-md border border-amber-400 bg-amber-50 p-3 text-sm text-amber-900'
+                    : 'rounded-md border bg-muted/40 p-3 text-sm'
+                }
+              >
+                <p className="font-semibold text-base">
+                  {selectedMeeting.title || 'Encontro'}
+                </p>
+                <p>
+                  {getDayOfWeekName(new Date(`${selectedMeeting.meeting_date.slice(0, 10)}T12:00:00`).getDay())},{' '}
+                  {formatDate(selectedMeeting.meeting_date)}
+                  {selectedMeeting.meeting_time && (
+                    <span> — {selectedMeeting.meeting_time.toString().substring(0, 5)}</span>
+                  )}
+                  <span className="ml-2 font-medium">({info.relativeLabel})</span>
+                </p>
+                {info.isFuture && (
+                  <p className="mt-1 flex items-start gap-2 font-medium">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    Este encontro ainda não aconteceu. Confirme se é o encontro certo antes de salvar.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
 
           {members.length > 0 ? (
             loadingAttendance ? (
@@ -155,6 +181,8 @@ export function ChamadaWithSelector({
             ) : (
               <PresenceChecklist
                 meetingId={selectedMeeting.id}
+                meetingLabel={`${selectedMeeting.title ? selectedMeeting.title + ' — ' : ''}${formatDate(selectedMeeting.meeting_date)}`}
+                isFutureMeeting={describeMeetingDate(selectedMeeting.meeting_date, today).isFuture}
                 members={members}
                 attendance={attendance}
                 guests={guests}

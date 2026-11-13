@@ -2,6 +2,7 @@ import { getCurrentLeader } from '@/lib/db/queries';
 import { getMeetingsForPresence, getMembersByLeaderGroup, getAttendanceByMeeting, getAttendanceGuestsByMeeting } from '@/lib/db/queries';
 import { ChamadaWithSelector } from '@/components/chamada/chamada-with-selector';
 import { formatDate } from '@/lib/utils';
+import { pickDefaultMeetingId, todayInAppTimeZone } from '@/lib/meeting-date';
 
 export default async function ChamadaPage({
   searchParams,
@@ -20,12 +21,12 @@ export default async function ChamadaPage({
     getMembersByLeaderGroup(),
   ]);
 
-  const today = new Date().toISOString().split('T')[0];
-  // ?meeting=<id> (link do lembrete de chamada) tem prioridade sobre o encontro de hoje
-  const defaultMeeting =
-    meetings.find((m) => m.id === requestedMeetingId) ??
-    meetings.find((m) => m.meeting_date === today) ??
-    meetings[0];
+  const today = todayInAppTimeZone();
+
+  // ?meeting=<id> (link do lembrete) > encontro de hoje > mais recente que já aconteceu.
+  // Nunca abre por padrão o encontro mais distante no futuro.
+  const defaultMeetingId = pickDefaultMeetingId(meetings, today, requestedMeetingId);
+  const defaultMeeting = meetings.find((m) => m.id === defaultMeetingId);
 
   if (!defaultMeeting) {
     return (
@@ -73,6 +74,7 @@ export default async function ChamadaPage({
           report_updated_at: m.report_updated_at ?? null,
         }))}
         members={members.map((m) => ({ id: m.id, full_name: m.full_name }))}
+        today={today}
         defaultMeetingId={defaultMeeting.id}
         defaultAttendance={attendanceForClient}
         defaultGuests={defaultGuests}
