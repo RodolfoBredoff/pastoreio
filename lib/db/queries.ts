@@ -69,6 +69,8 @@ export interface GuestVisitor {
   full_name: string;
   phone: string | null;
   description: string | null;
+  /** Há miniatura registrada (os bytes ficam em guest_visitor_photos) */
+  has_photo?: boolean;
   created_at: string;
 }
 
@@ -489,7 +491,9 @@ export async function getAttendanceByMeeting(meetingId: string): Promise<Attenda
  */
 export async function getAttendanceGuestsByMeeting(meetingId: string): Promise<GuestVisitor[]> {
   return queryMany<GuestVisitor>(
-    `SELECT g.id, g.group_id, g.full_name, g.phone, g.description, g.created_at
+    `SELECT g.id, g.group_id, g.full_name, g.phone, g.description,
+            EXISTS (SELECT 1 FROM guest_visitor_photos p WHERE p.guest_id = g.id) AS has_photo,
+            g.created_at
      FROM attendance_guests ag
      JOIN guest_visitors g ON g.id = ag.guest_id
      WHERE ag.meeting_id = $1
@@ -502,6 +506,23 @@ export async function getGuestVisitorById(id: string): Promise<GuestVisitor | nu
   return queryOne<GuestVisitor>(
     `SELECT id, group_id, full_name, phone, description, created_at FROM guest_visitors WHERE id = $1`,
     [id]
+  );
+}
+
+/** Grava (ou substitui) a miniatura de um visitante. O consentimento é registrado na hora. */
+export async function upsertGuestPhoto(
+  client: { query: (text: string, params?: unknown[]) => Promise<unknown> },
+  guestId: string,
+  photo: { mime_type: string; data: Buffer },
+  registeredBy: string | null
+): Promise<void> {
+  await client.query(
+    `INSERT INTO guest_visitor_photos (guest_id, mime_type, data, size_bytes, consent_at, registered_by)
+     VALUES ($1, $2, $3, $4, NOW(), $5)
+     ON CONFLICT (guest_id) DO UPDATE
+       SET mime_type = EXCLUDED.mime_type, data = EXCLUDED.data, size_bytes = EXCLUDED.size_bytes,
+           consent_at = NOW(), registered_by = EXCLUDED.registered_by, updated_at = NOW()`,
+    [guestId, photo.mime_type, photo.data, photo.data.length, registeredBy]
   );
 }
 
@@ -527,7 +548,15 @@ export async function saveAttendance(
   attendance: Array<{ member_id: string; is_present: boolean }>,
   options: {
     groupId: string;
-    guests?: Array<{ full_name: string; phone?: string | null; description?: string | null }>;
+    guests?: Array<{
+      full_name: string;
+      phone?: string | null;
+      description?: string | null;
+      /** Miniatura já validada (com consentimento). undefined = não mexe na foto existente. */
+      photo?: { mime_type: string; data: Buffer } | null;
+    }>;
+    /** Quem registrou a foto (líder), para auditoria do consentimento */
+    photoRegisteredBy?: string | null;
     /**
      * Se true, só grava linhas de membros que já estavam no grupo na data do encontro.
      * Se false (padrão), grava o que o líder marcar — necessário para retroativos e encontros antigos.
@@ -535,7 +564,7 @@ export async function saveAttendance(
     restrictToMembersBeforeMeetingDate?: boolean;
   } = { groupId: '' }
 ): Promise<{ recurringGuests: RecurringGuest[] }> {
-  const { groupId, guests, restrictToMembersBeforeMeetingDate = false } = options;
+  const { groupId, guests, restrictToMembersBeforeMeetingDate = false, photoRegisteredBy = null } = options;
 
   return transaction(async (client) => {
     const meetingRow = await client.query<{ meeting_date: string }>(
@@ -609,6 +638,10 @@ export async function saveAttendance(
             [groupId, name, phone, description]
           );
           guestId = insert.rows[0].id;
+        }
+        // Foto só é gravada quando enviada (já validada, com consentimento). Sem foto: não mexe.
+        if (g.photo) {
+          await upsertGuestPhoto(client, guestId, g.photo, photoRegisteredBy);
         }
         await client.query(
           `INSERT INTO attendance_guests (meeting_id, guest_id) VALUES ($1, $2) ON CONFLICT (meeting_id, guest_id) DO NOTHING`,

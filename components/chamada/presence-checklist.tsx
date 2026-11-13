@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Loader2, Save, WifiOff, UserPlus, UserCheck, Clock } from 'lucide-react';
+import { Loader2, Save, WifiOff, UserPlus, UserCheck, Clock, Camera, Trash2 } from 'lucide-react';
+import { createThumbnailDataUrl } from '@/lib/image-thumbnail';
 
 interface Member {
   id: string;
@@ -23,6 +24,10 @@ export interface GuestItem {
   full_name: string;
   phone?: string | null;
   description?: string | null;
+  /** Já existe miniatura salva no servidor */
+  has_photo?: boolean;
+  /** Miniatura escolhida agora (data URL), ainda não enviada */
+  photo_data_url?: string | null;
 }
 
 interface GuestSuggestion {
@@ -30,6 +35,7 @@ interface GuestSuggestion {
   full_name: string;
   phone: string | null;
   description?: string | null;
+  has_photo?: boolean;
   appearances: string;
   last_appearance: string;
 }
@@ -75,6 +81,12 @@ export function PresenceChecklist({
   const [guestPhone, setGuestPhone] = useState('');
   const [guestDescription, setGuestDescription] = useState('');
   const [recurring, setRecurring] = useState<RecurringGuest[]>([]);
+  // Foto do visitante que está sendo cadastrado agora (opcional)
+  const [guestPhoto, setGuestPhoto] = useState<string | null>(null);
+  const [photoConsent, setPhotoConsent] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const [photoVersion, setPhotoVersion] = useState(0);
   const [saving, setSaving] = useState(false);
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<GuestSuggestion[]>([]);
@@ -141,17 +153,77 @@ export function PresenceChecklist({
     setPresenceMap((prev) => ({ ...prev, [memberId]: !prev[memberId] }));
   };
 
+  const pickPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setPhotoError('');
+    setPhotoBusy(true);
+    try {
+      setGuestPhoto(await createThumbnailDataUrl(file));
+      setPhotoConsent(false);
+    } catch (e) {
+      setGuestPhoto(null);
+      setPhotoError(e instanceof Error ? e.message : 'Não foi possível usar essa foto');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const clearPendingPhoto = () => {
+    setGuestPhoto(null);
+    setPhotoConsent(false);
+    setPhotoError('');
+  };
+
+  /** Foto de visitante que já está registrado: envia na hora (com confirmação de consentimento). */
+  const replaceGuestPhoto = async (guestId: string, file: File | undefined) => {
+    if (!file) return;
+    setPhotoError('');
+    setPhotoBusy(true);
+    try {
+      const thumb = await createThumbnailDataUrl(file);
+      if (!window.confirm('O visitante autorizou o registro da foto?')) return;
+      const res = await fetch(`/api/guests/${guestId}/photo`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photo: thumb, consent: true }),
+      });
+      if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || 'Erro ao salvar a foto');
+      setGuests((prev) => prev.map((g) => (g.id === guestId ? { ...g, has_photo: true } : g)));
+      setPhotoVersion((v) => v + 1);
+    } catch (e) {
+      setPhotoError(e instanceof Error ? e.message : 'Erro ao salvar a foto');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const removeGuestPhoto = async (guestId: string) => {
+    if (!window.confirm('Remover a foto deste visitante?')) return;
+    setPhotoError('');
+    try {
+      const res = await fetch(`/api/guests/${guestId}/photo`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Erro ao remover a foto');
+      setGuests((prev) => prev.map((g) => (g.id === guestId ? { ...g, has_photo: false } : g)));
+    } catch (e) {
+      setPhotoError(e instanceof Error ? e.message : 'Erro ao remover a foto');
+    }
+  };
+
   const addGuest = () => {
     const name = guestName.trim();
     if (!name) return;
+    // Foto só entra com consentimento marcado
+    if (guestPhoto && !photoConsent) return;
     setGuests((prev) => [
       ...prev,
       {
         full_name: name,
         phone: guestPhone.trim() || null,
         description: guestDescription.trim() || null,
+        photo_data_url: guestPhoto,
       },
     ]);
+    clearPendingPhoto();
     setGuestName('');
     setGuestPhone('');
     setGuestDescription('');
@@ -200,6 +272,8 @@ export function PresenceChecklist({
         full_name: g.full_name,
         phone: g.phone ?? null,
         description: g.description ?? null,
+        // Foto só vai quando foi escolhida agora; sem isso o servidor mantém a foto existente
+        ...(g.photo_data_url ? { photo: g.photo_data_url, photo_consent: true } : {}),
       }));
 
       if (isOnline) {
@@ -303,9 +377,18 @@ export function PresenceChecklist({
                     <button
                       key={suggestion.id}
                       type="button"
-                      className="w-full px-3 py-2 text-left hover:bg-accent transition-colors border-b last:border-0"
+                      className="w-full px-3 py-2 text-left hover:bg-accent transition-colors border-b last:border-0 flex items-center gap-3"
                       onClick={() => selectSuggestion(suggestion)}
                     >
+                      {suggestion.has_photo && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`/api/guests/${suggestion.id}/photo`}
+                          alt=""
+                          className="h-9 w-9 rounded-md object-cover border shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0">
                       <p className="font-medium text-sm">{suggestion.full_name}</p>
                       <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
                         {suggestion.phone && <span>{suggestion.phone}</span>}
@@ -313,6 +396,7 @@ export function PresenceChecklist({
                           <Clock className="h-3 w-3" />
                           {parseInt(suggestion.appearances)} aparições
                         </span>
+                      </div>
                       </div>
                     </button>
                   ))}
@@ -326,10 +410,50 @@ export function PresenceChecklist({
               onKeyDown={(e) => e.key === 'Enter' && addGuest()}
               className="flex-1"
             />
-            <Button type="button" variant="secondary" onClick={addGuest} disabled={!guestName.trim()}>
+            <Button type="button" variant="secondary" onClick={addGuest} disabled={!guestName.trim() || (Boolean(guestPhoto) && !photoConsent)}>
               Adicionar
             </Button>
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            {guestPhoto ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={guestPhoto} alt="Foto do visitante" className="h-14 w-14 rounded-md object-cover border" />
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={photoConsent}
+                    onChange={(e) => setPhotoConsent(e.target.checked)}
+                    aria-label="Consentimento da foto"
+                  />
+                  O visitante autorizou o registro da foto
+                </label>
+                <Button type="button" variant="ghost" size="sm" onClick={clearPendingPhoto}>
+                  Remover foto
+                </Button>
+              </>
+            ) : (
+              <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                <Camera className="h-4 w-4" />
+                {photoBusy ? 'Preparando foto...' : 'Adicionar foto (opcional)'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  aria-label="Foto do visitante"
+                  disabled={photoBusy}
+                  onChange={(e) => {
+                    void pickPhoto(e.target.files?.[0]);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            )}
+            {guestPhoto && !photoConsent && (
+              <p className="text-xs text-amber-700 w-full">Marque a autorização para poder adicionar o visitante com foto.</p>
+            )}
+          </div>
+          {photoError && <p className="text-xs text-destructive mt-1">{photoError}</p>}
           <Input
             className="mt-2"
             placeholder="Descrição para reconhecer (opcional). Ex.: camisa azul, veio com a Maria"
@@ -353,7 +477,15 @@ export function PresenceChecklist({
                 key={g.id ?? `new-${i}`}
                 className="flex items-center justify-between gap-2 py-1 border-b border-border/50 last:border-0"
               >
-                <span className="text-sm">
+                {(g.photo_data_url || (g.has_photo && g.id)) && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={g.photo_data_url ?? `/api/guests/${g.id}/photo?v=${photoVersion}`}
+                    alt={`Foto de ${g.full_name}`}
+                    className="h-10 w-10 rounded-md object-cover border shrink-0"
+                  />
+                )}
+                <span className="text-sm flex-1">
                   {g.full_name}
                   {g.phone ? (
                     <span className="text-muted-foreground ml-1">— {g.phone}</span>
@@ -363,6 +495,37 @@ export function PresenceChecklist({
                   ) : null}
                 </span>
                 <div className="flex items-center gap-1">
+                  {g.id ? (
+                    <label
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent cursor-pointer"
+                      title={g.has_photo ? 'Trocar foto' : 'Adicionar foto'}
+                    >
+                      <Camera className="h-4 w-4" />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        aria-label={`Foto de ${g.full_name}`}
+                        disabled={photoBusy}
+                        onChange={(e) => {
+                          void replaceGuestPhoto(g.id!, e.target.files?.[0]);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                  {g.id && g.has_photo ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeGuestPhoto(g.id!)}
+                      title="Remover foto"
+                      aria-label={`Remover foto de ${g.full_name}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  ) : null}
                   {g.id ? (
                     <Button
                       type="button"

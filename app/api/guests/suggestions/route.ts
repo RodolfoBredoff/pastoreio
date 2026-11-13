@@ -8,6 +8,7 @@ interface GuestSuggestion {
   full_name: string;
   phone: string | null;
   description: string | null;
+  has_photo: boolean;
   appearances: string;
   last_appearance: string;
 }
@@ -42,6 +43,7 @@ export async function GET(request: Request) {
         gv.full_name,
         gv.phone,
         gv.description,
+        EXISTS (SELECT 1 FROM guest_visitor_photos p WHERE p.guest_id = gv.id) AS has_photo,
         COUNT(DISTINCT ag.meeting_id)::text as appearances,
         MAX(m.meeting_date)::text as last_appearance
        FROM guest_visitors gv

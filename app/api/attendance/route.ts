@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { saveAttendance, getAttendanceByMeeting, getAttendanceGuestsByMeeting } from '@/lib/db/queries';
 import { query, queryOne, queryMany } from '@/lib/db/postgres';
+import { parseGuestPhotoDataUrl } from '@/lib/guest-photo';
 import { syncEngagementToSheet } from '@/lib/integrations/google-sheets';
 
 /**
@@ -151,13 +152,45 @@ export async function POST(request: Request) {
     }
 
     // undefined = não mexer nos visitantes do encontro (ex.: sincronização offline só de membros)
-    const guestList = Array.isArray(guests)
-      ? guests.map((g: { full_name?: string; phone?: string | null; description?: string | null }) => ({
+    let guestList:
+      | Array<{
+          full_name: string;
+          phone: string | null;
+          description: string | null;
+          photo?: { mime_type: string; data: Buffer };
+        }>
+      | undefined;
+    if (Array.isArray(guests)) {
+      guestList = [];
+      for (const g of guests as Array<{
+        full_name?: string;
+        phone?: string | null;
+        description?: string | null;
+        photo?: unknown;
+        photo_consent?: unknown;
+      }>) {
+        const item: NonNullable<typeof guestList>[number] = {
           full_name: typeof g.full_name === 'string' ? g.full_name : '',
           phone: g.phone ?? null,
           description: typeof g.description === 'string' ? g.description : null,
-        }))
-      : undefined;
+        };
+        // Foto é opcional, mas só entra com consentimento explícito e arquivo válido
+        if (g.photo !== undefined && g.photo !== null) {
+          if (g.photo_consent !== true) {
+            return NextResponse.json(
+              { error: 'Confirme que o visitante autorizou o registro da foto' },
+              { status: 400 }
+            );
+          }
+          const parsed = parseGuestPhotoDataUrl(g.photo);
+          if (!parsed.ok) {
+            return NextResponse.json({ error: parsed.error }, { status: 400 });
+          }
+          item.photo = parsed.photo;
+        }
+        guestList.push(item);
+      }
+    }
 
     const payload = attendance as Array<{ member_id: string; is_present: boolean }>;
     const memberIds = payload.map((a) => a.member_id).filter(Boolean);
@@ -175,6 +208,7 @@ export async function POST(request: Request) {
     const { recurringGuests } = await saveAttendance(meeting_id, filteredAttendance, {
       groupId: meeting.group_id,
       guests: guestList,
+      photoRegisteredBy: leader.id,
     });
 
     // Atualizar estágio de integração dos visitantes após salvar presença

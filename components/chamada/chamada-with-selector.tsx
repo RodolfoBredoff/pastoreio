@@ -33,6 +33,7 @@ export interface GuestVisitor {
   full_name: string;
   phone: string | null;
   description?: string | null;
+  has_photo?: boolean;
   created_at?: string;
 }
 
