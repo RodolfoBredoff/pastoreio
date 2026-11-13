@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { queryMany, queryOne } from '@/lib/db/postgres';
 import { parseTagFiltersJson } from '@/lib/member-tags-filter';
+import { MEETING_ENGAGEMENT_VISIBILITY_SQL } from '@/lib/engagement-visibility';
 import { computeGrowthMetrics } from '@/lib/engagement-growth';
 
 /**
@@ -30,12 +31,6 @@ import { computeGrowthMetrics } from '@/lib/engagement-growth';
  *  - tags={"Chave":["valor", ...]}: filtro de tags (OR entre valores).
  *  - public_token / group_id: mesmas regras da rota /api/engagement.
  */
-
-const MEETING_VISIBILITY = `(
-  meeting_date <= CURRENT_DATE
-  OR EXISTS (SELECT 1 FROM attendance a WHERE a.meeting_id = meetings.id)
-  OR EXISTS (SELECT 1 FROM attendance_guests ag WHERE ag.meeting_id = meetings.id)
-)`;
 
 export async function GET(request: Request) {
   try {
@@ -126,7 +121,7 @@ export async function GET(request: Request) {
          FROM attendance a
          JOIN meetings ON meetings.id = a.meeting_id
          WHERE meetings.group_id = $1 AND meetings.is_cancelled = FALSE
-           AND ${MEETING_VISIBILITY}`,
+           AND ${MEETING_ENGAGEMENT_VISIBILITY_SQL}`,
         [groupId]
       ),
       queryMany<{ guest_id: string; meeting_id: string; meeting_date: string }>(
@@ -134,7 +129,7 @@ export async function GET(request: Request) {
          FROM attendance_guests ag
          JOIN meetings ON meetings.id = ag.meeting_id
          WHERE meetings.group_id = $1 AND meetings.is_cancelled = FALSE
-           AND ${MEETING_VISIBILITY}`,
+           AND ${MEETING_ENGAGEMENT_VISIBILITY_SQL}`,
         [groupId]
       ),
       queryMany<{ id: string; created_at: string; full_name: string }>(
@@ -154,7 +149,7 @@ export async function GET(request: Request) {
          WHERE group_id = $1 AND is_cancelled = FALSE
            AND meeting_date >= $2::date
            AND meeting_date <= $3::date
-           AND ${MEETING_VISIBILITY}
+           AND ${MEETING_ENGAGEMENT_VISIBILITY_SQL}
          ORDER BY meeting_date ASC`,
         [groupId, windowStartIso, windowEndIso]
       ),

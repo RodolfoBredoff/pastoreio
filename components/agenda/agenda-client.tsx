@@ -261,6 +261,12 @@ function EditMeetingDialog({
   const [extraFieldsLoaded, setExtraFieldsLoaded] = useState(false);
   const [presenceMap, setPresenceMap] = useState<Record<string, boolean>>({});
   const [loadingAttendance, setLoadingAttendance] = useState(false);
+  // A chamada só é regravada ao salvar se foi carregada com sucesso: evita sobrescrever
+  // a chamada real com "todos ausentes" quando a leitura falha.
+  const [attendanceLoaded, setAttendanceLoaded] = useState(false);
+  // Visitantes avulsos já registrados no encontro: o POST de chamada apaga e recria esse conjunto,
+  // então precisam ser reenviados para não serem perdidos ao editar o encontro.
+  const [existingGuests, setExistingGuests] = useState<Array<{ full_name: string; phone: string | null }>>([]);
   const [coverUrl, setCoverUrl] = useState<string>(meeting.invite_cover_image_url ?? '');
   const [coverUploading, setCoverUploading] = useState(false);
   const [coverError, setCoverError] = useState('');
@@ -287,6 +293,8 @@ function EditMeetingDialog({
     setHasConfirmations(false);
     setExtraFieldsDraft([]);
     setExtraFieldsLoaded(false);
+    setAttendanceLoaded(false);
+    setExistingGuests([]);
 
     // Se o encontro tem lista de presença (modo especial), buscar dados completos incluindo public_entries
     if (meeting.meeting_type === 'special_event' && meeting.attendance_list_slug) {
@@ -302,6 +310,7 @@ function EditMeetingDialog({
           const map: Record<string, boolean> = {};
 
           if (data) {
+            setAttendanceLoaded(true);
             setExtraFieldsDraft(draftsFromConfig(data.extra_fields ?? []));
             setExtraFieldsLoaded(true);
             setHasConfirmations(
@@ -337,18 +346,28 @@ function EditMeetingDialog({
     } else if (members.length > 0) {
       // Encontro regular: usar API antiga
       setLoadingAttendance(true);
-      fetch(`/api/attendance?meeting_id=${meeting.id}`)
-        .then((res) => res.ok ? res.json() : [])
-        .then((data: Array<{ member_id: string; is_present: boolean }>) => {
+      fetch(`/api/attendance?meeting_id=${meeting.id}`, { cache: 'no-store' })
+        .then((res) => {
+          if (!res.ok) throw new Error('falha ao carregar a chamada');
+          return res.json();
+        })
+        .then((data: {
+          attendance?: Array<{ member_id: string; is_present: boolean }>;
+          guests?: Array<{ full_name: string; phone: string | null }>;
+        }) => {
           const map: Record<string, boolean> = {};
           for (const member of members) map[member.id] = false;
-          for (const att of data) map[att.member_id] = att.is_present;
+          for (const att of data.attendance ?? []) map[att.member_id] = att.is_present;
           setPresenceMap(map);
+          setExistingGuests((data.guests ?? []).map((g) => ({ full_name: g.full_name, phone: g.phone ?? null })));
+          setAttendanceLoaded(true);
         })
         .catch(() => {
+          // Mantém a edição dos dados do encontro, mas NÃO regrava a chamada (attendanceLoaded = false)
           const map: Record<string, boolean> = {};
           for (const member of members) map[member.id] = false;
           setPresenceMap(map);
+          setAttendanceLoaded(false);
         })
         .finally(() => setLoadingAttendance(false));
     }
@@ -474,7 +493,11 @@ function EditMeetingDialog({
       });
       if (!meetingRes.ok) { const d = await meetingRes.json(); throw new Error(d.error || 'Erro ao salvar'); }
 
-      if (members.length > 0) {
+      // Só regrava a chamada se ela foi carregada com sucesso (nunca sobrescreve com "todos ausentes").
+      // Encontros especiais com lista pública carregam por outro caminho (attendance-list).
+      const isRegularWithAttendance = !(meeting.meeting_type === 'special_event' && meeting.attendance_list_slug);
+      const canSaveAttendance = members.length > 0 && attendanceLoaded;
+      if (canSaveAttendance) {
         // Salvar apenas membros regulares (não public_entries, pois já estão confirmados)
         const attendanceData = members.map((m) => ({
           member_id: m.id,
@@ -483,7 +506,12 @@ function EditMeetingDialog({
         const attRes = await fetch('/api/attendance', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ meeting_id: meeting.id, attendance: attendanceData }),
+          body: JSON.stringify({
+            meeting_id: meeting.id,
+            attendance: attendanceData,
+            // Reenvia os visitantes avulsos já registrados: o servidor recria esse conjunto
+            guests: isRegularWithAttendance ? existingGuests : undefined,
+          }),
         });
         if (!attRes.ok) { const d = await attRes.json(); throw new Error(d.error || 'Erro ao salvar presenças'); }
       }

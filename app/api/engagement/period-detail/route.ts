@@ -2,15 +2,10 @@ import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getCurrentLeader } from '@/lib/db/queries';
 import { queryMany, queryOne } from '@/lib/db/postgres';
+import { MEETING_ENGAGEMENT_VISIBILITY_SQL } from '@/lib/engagement-visibility';
 
 export type Period = 'weekly' | 'monthly' | 'quarterly' | 'semiannual' | 'yearly';
 export type MemberFilter = 'total' | 'participants' | 'visitors';
-
-const MEETING_ENGAGEMENT_VISIBILITY = `(
-  meeting_date <= CURRENT_DATE
-  OR EXISTS (SELECT 1 FROM attendance a WHERE a.meeting_id = meetings.id)
-  OR EXISTS (SELECT 1 FROM attendance_guests ag WHERE ag.meeting_id = meetings.id)
-)`;
 
 function getPeriodEndDate(periodStart: string, period: Period): string {
   const start = new Date(periodStart + 'T12:00:00Z');
@@ -129,7 +124,7 @@ export async function GET(request: Request) {
        FROM meetings
        WHERE group_id = $1
          AND is_cancelled = FALSE
-         AND ${MEETING_ENGAGEMENT_VISIBILITY.replace(/\n/g, ' ')}
+         AND ${MEETING_ENGAGEMENT_VISIBILITY_SQL}
          AND meeting_date >= $2::date
          AND meeting_date < $3::date
        ORDER BY meeting_date DESC`,
