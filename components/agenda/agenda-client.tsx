@@ -8,6 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  buildExternalPeople,
+  guestsPayloadFromPeople,
+  type ExternalPerson,
+} from '@/lib/special-event-attendance';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -270,7 +275,14 @@ function EditMeetingDialog({
   const [coverUrl, setCoverUrl] = useState<string>(meeting.invite_cover_image_url ?? '');
   const [coverUploading, setCoverUploading] = useState(false);
   const [coverError, setCoverError] = useState('');
-  const [publicEntries, setPublicEntries] = useState<Array<{ id: string; full_name: string }>>([]);
+  // Encontro especial com lista pública: confirmações são só sugestão. A presença real só é
+  // regravada se o líder mexer em alguma marcação (presenceTouched).
+  const [externalPeople, setExternalPeople] = useState<ExternalPerson[]>([]);
+  const [memberConfirmation, setMemberConfirmation] = useState<Record<string, 'present' | 'absent'>>({});
+  const [presenceTouched, setPresenceTouched] = useState(false);
+  const [newPersonName, setNewPersonName] = useState('');
+  const [newPersonPhone, setNewPersonPhone] = useState('');
+  const isSpecialWithList = meeting.meeting_type === 'special_event' && Boolean(meeting.attendance_list_slug);
 
   useEffect(() => {
     if (!open) return;
@@ -285,7 +297,11 @@ function EditMeetingDialog({
     setAttendanceLimit(meeting.attendance_list_limit != null ? String(meeting.attendance_list_limit) : '');
     setCoverUrl(meeting.invite_cover_image_url ?? '');
     setCoverError('');
-    setPublicEntries([]);
+    setExternalPeople([]);
+    setMemberConfirmation({});
+    setPresenceTouched(false);
+    setNewPersonName('');
+    setNewPersonPhone('');
     setGenerateList(false);
     setListMode(meeting.attendance_list_mode ?? 'prefilled');
     setIsPaidEvent(meeting.is_paid_event ?? false);
@@ -299,18 +315,24 @@ function EditMeetingDialog({
     // Se o encontro tem lista de presença (modo especial), buscar dados completos incluindo public_entries
     if (meeting.meeting_type === 'special_event' && meeting.attendance_list_slug) {
       setLoadingAttendance(true);
-      fetch(`/api/meetings/${meeting.id}/attendance-list`)
-        .then((res) => res.ok ? res.json() : null)
-        .then((data: { 
-          members: Array<{ id: string; full_name: string; response: { status: string } | null }>;
-          public_entries?: Array<{ id: string; full_name: string }>;
-          guests?: Array<{ id: string }>;
-          extra_fields?: Array<{ id: string; label: string; options: string[] | null; allow_custom: boolean }>;
-        } | null) => {
-          const map: Record<string, boolean> = {};
-
+      type ListData = {
+        members: Array<{ id: string; full_name: string; response: { status: string } | null }>;
+        public_entries?: Array<{ id: string; full_name: string; phone?: string | null }>;
+        guests?: Array<{ id: string; full_name: string }>;
+        extra_fields?: Array<{ id: string; label: string; options: string[] | null; allow_custom: boolean }>;
+      };
+      type RecordedData = {
+        attendance?: Array<{ member_id: string; is_present: boolean }>;
+        guests?: Array<{ full_name: string; phone: string | null; description?: string | null }>;
+      };
+      Promise.all([
+        fetch(`/api/meetings/${meeting.id}/attendance-list`).then((res) => (res.ok ? (res.json() as Promise<ListData>) : null)),
+        fetch(`/api/attendance?meeting_id=${meeting.id}`, { cache: 'no-store' }).then((res) =>
+          res.ok ? (res.json() as Promise<RecordedData>) : null
+        ),
+      ])
+        .then(([data, recorded]) => {
           if (data) {
-            setAttendanceLoaded(true);
             setExtraFieldsDraft(draftsFromConfig(data.extra_fields ?? []));
             setExtraFieldsLoaded(true);
             setHasConfirmations(
@@ -319,28 +341,43 @@ function EditMeetingDialog({
                 (data.members ?? []).some((m) => m.response != null)
             );
           }
-          
-          // Membros regulares
-          for (const member of members) map[member.id] = false;
-          if (data?.members) {
-            for (const m of data.members) {
-              if (m.response?.status === 'present') map[m.id] = true;
+
+          // A presença real só é regravada se a chamada gravada também carregou
+          setAttendanceLoaded(Boolean(data && recorded));
+
+          const confirmation: Record<string, 'present' | 'absent'> = {};
+          for (const m of data?.members ?? []) {
+            if (m.response?.status === 'present' || m.response?.status === 'absent') {
+              confirmation[m.id] = m.response.status;
             }
           }
+          setMemberConfirmation(confirmation);
 
-          // Public entries (lista vazia): adicionar ao mapa
-          const entries = data?.public_entries ?? [];
-          for (const entry of entries) {
-            map[`public_${entry.id}`] = true; // começa marcado por padrão
+          // Presença: o que já foi gravado vale; sem registro, a confirmação é só sugestão
+          const recordedByMember = new Map((recorded?.attendance ?? []).map((a) => [a.member_id, a.is_present]));
+          const map: Record<string, boolean> = {};
+          for (const member of members) {
+            map[member.id] = recordedByMember.has(member.id)
+              ? Boolean(recordedByMember.get(member.id))
+              : confirmation[member.id] === 'present';
           }
-          setPublicEntries(entries);
           setPresenceMap(map);
+
+          setExternalPeople(
+            buildExternalPeople({
+              recordedGuests: recorded?.guests ?? [],
+              publicEntries: (data?.public_entries ?? []).map((e) => ({ id: e.id, full_name: e.full_name, phone: e.phone ?? null })),
+              listGuests: (data?.guests ?? []).map((g) => ({ id: g.id, full_name: g.full_name })),
+              hasRecordedAttendance: (recorded?.attendance?.length ?? 0) > 0,
+            })
+          );
         })
         .catch(() => {
           const map: Record<string, boolean> = {};
           for (const member of members) map[member.id] = false;
           setPresenceMap(map);
-          setPublicEntries([]);
+          setExternalPeople([]);
+          setAttendanceLoaded(false);
         })
         .finally(() => setLoadingAttendance(false));
     } else if (members.length > 0) {
@@ -435,13 +472,40 @@ function EditMeetingDialog({
   };
 
   const togglePresence = (memberId: string) => {
+    setPresenceTouched(true);
     setPresenceMap((prev) => ({ ...prev, [memberId]: !prev[memberId] }));
+  };
+
+  const toggleExternal = (key: string) => {
+    setPresenceTouched(true);
+    setExternalPeople((prev) => prev.map((p) => (p.key === key ? { ...p, present: !p.present } : p)));
+  };
+
+  const addExternal = () => {
+    const name = newPersonName.trim();
+    if (!name) return;
+    setPresenceTouched(true);
+    setExternalPeople((prev) => [
+      ...prev,
+      {
+        key: `added_${Date.now()}_${prev.length}`,
+        full_name: name,
+        phone: newPersonPhone.trim() || null,
+        description: null,
+        present: true,
+        confirmed: false,
+        origin: 'added',
+      },
+    ]);
+    setNewPersonName('');
+    setNewPersonPhone('');
   };
 
   // A lista está ativa se o encontro já tem lista ou se o líder marcou para gerá-la agora
   const listActive = meetingType === 'special_event' && (Boolean(meeting.attendance_list_token) || generateList);
-  const presentCount = Object.values(presenceMap).filter(Boolean).length;
-  const totalPeople = members.length + publicEntries.length;
+  const presentCount =
+    Object.values(presenceMap).filter(Boolean).length + externalPeople.filter((p) => p.present).length;
+  const totalPeople = members.length + externalPeople.length;
 
   const handleSave = async () => {
     if (!date) { setError('A data é obrigatória'); return; }
@@ -495,10 +559,11 @@ function EditMeetingDialog({
 
       // Só regrava a chamada se ela foi carregada com sucesso (nunca sobrescreve com "todos ausentes").
       // Encontros especiais com lista pública carregam por outro caminho (attendance-list).
-      const isRegularWithAttendance = !(meeting.meeting_type === 'special_event' && meeting.attendance_list_slug);
-      const canSaveAttendance = members.length > 0 && attendanceLoaded;
+      const isRegularWithAttendance = !isSpecialWithList;
+      // Em evento especial com lista, confirmações são só sugestão: só grava presença se o líder alterou algo
+      const canSaveAttendance = members.length > 0 && attendanceLoaded && (!isSpecialWithList || presenceTouched);
       if (canSaveAttendance) {
-        // Salvar apenas membros regulares (não public_entries, pois já estão confirmados)
+        // Membros (presença real). Pessoas externas vão como visitantes avulsos do encontro.
         const attendanceData = members.map((m) => ({
           member_id: m.id,
           is_present: presenceMap[m.id] ?? false,
@@ -509,8 +574,8 @@ function EditMeetingDialog({
           body: JSON.stringify({
             meeting_id: meeting.id,
             attendance: attendanceData,
-            // Reenvia os visitantes avulsos já registrados: o servidor recria esse conjunto
-            guests: isRegularWithAttendance ? existingGuests : undefined,
+            // O servidor recria o conjunto de visitantes: sempre reenviamos a lista completa
+            guests: isSpecialWithList ? guestsPayloadFromPeople(externalPeople) : existingGuests,
           }),
         });
         if (!attRes.ok) { const d = await attRes.json(); throw new Error(d.error || 'Erro ao salvar presenças'); }
@@ -744,7 +809,7 @@ function EditMeetingDialog({
             </div>
           )}
 
-          {(members.length > 0 || publicEntries.length > 0) && (
+          {(members.length > 0 || isSpecialWithList) && (
             <div className="space-y-3 pt-2 border-t">
               <div className="flex items-center justify-between">
                 <Label className="flex items-center gap-2">
@@ -757,10 +822,15 @@ function EditMeetingDialog({
                   </span>
                 )}
               </div>
+              {isSpecialWithList && !loadingAttendance && (
+                <p className="text-xs text-muted-foreground">
+                  Quem confirmou pela lista vem marcado como sugestão. A presença só é gravada se você alterar alguma marcação e salvar.
+                </p>
+              )}
               {loadingAttendance ? (
                 <p className="text-sm text-muted-foreground">Carregando presenças...</p>
               ) : (
-                <div className="space-y-2 max-h-52 overflow-y-auto rounded-md border p-2">
+                <div className="space-y-2 max-h-64 overflow-y-auto rounded-md border p-2">
                   {members.map((member) => (
                     <div
                       key={member.id}
@@ -773,27 +843,53 @@ function EditMeetingDialog({
                         onClick={(e) => e.stopPropagation()}
                       />
                       <span className="text-sm">{member.full_name}</span>
+                      {isSpecialWithList && memberConfirmation[member.id] === 'present' && (
+                        <span className="text-xs text-green-700">confirmou</span>
+                      )}
+                      {isSpecialWithList && memberConfirmation[member.id] === 'absent' && (
+                        <span className="text-xs text-muted-foreground">avisou que não vai</span>
+                      )}
                     </div>
                   ))}
-                  {publicEntries.length > 0 && members.length > 0 && (
-                    <div className="border-t my-2 pt-2">
-                      <p className="text-xs text-muted-foreground mb-2 px-2">Lista vazia (autocadastro):</p>
+                  {isSpecialWithList && (
+                    <div className="border-t my-2 pt-2 space-y-2">
+                      <p className="text-xs text-muted-foreground px-2">Convidados e outras pessoas:</p>
+                      {externalPeople.map((person) => (
+                        <div
+                          key={person.key}
+                          className="flex items-center gap-3 p-2 rounded-md hover:bg-accent cursor-pointer"
+                          onClick={() => toggleExternal(person.key)}
+                        >
+                          <Checkbox
+                            checked={person.present}
+                            onCheckedChange={() => toggleExternal(person.key)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span className="text-sm">{person.full_name}</span>
+                          {person.confirmed && <span className="text-xs text-green-700">confirmou</span>}
+                        </div>
+                      ))}
+                      <div className="flex gap-2 px-2" onClick={(e) => e.stopPropagation()}>
+                        <Input
+                          placeholder="Nome de quem não está na lista"
+                          value={newPersonName}
+                          onChange={(e) => setNewPersonName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExternal(); } }}
+                          aria-label="Nome da pessoa"
+                        />
+                        <Input
+                          placeholder="Telefone (opcional)"
+                          value={newPersonPhone}
+                          onChange={(e) => setNewPersonPhone(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExternal(); } }}
+                          aria-label="Telefone da pessoa"
+                        />
+                        <Button type="button" variant="secondary" onClick={addExternal} disabled={!newPersonName.trim()}>
+                          Adicionar
+                        </Button>
+                      </div>
                     </div>
                   )}
-                  {publicEntries.map((entry) => (
-                    <div
-                      key={`public_${entry.id}`}
-                      className="flex items-center gap-3 p-2 rounded-md hover:bg-accent cursor-pointer"
-                      onClick={() => togglePresence(`public_${entry.id}`)}
-                    >
-                      <Checkbox
-                        checked={presenceMap[`public_${entry.id}`] ?? false}
-                        onCheckedChange={() => togglePresence(`public_${entry.id}`)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                      <span className="text-sm">{entry.full_name}</span>
-                    </div>
-                  ))}
                 </div>
               )}
             </div>

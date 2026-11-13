@@ -1,8 +1,12 @@
 /**
  * Quais encontros entram nos relatórios de engajamento.
  *
- * Regra: o encontro já aconteceu (data <= hoje) OU, sendo de data futura, tem alguma
- * PRESENÇA de verdade registrada (membro presente ou visitante avulso).
+ * Regra: o encontro já aconteceu (data <= hoje) OU, sendo de data futura, é um encontro
+ * REGULAR com alguma PRESENÇA de verdade registrada (membro presente ou visitante avulso).
+ *
+ * Encontros ESPECIAIS (meeting_type = 'special_event') só entram a partir da data de
+ * realização, mesmo que já tenham presenças gravadas: antes do evento só existem
+ * confirmações, e a contagem real só vale depois que ele acontece.
  *
  * Por que "presença" e não "qualquer registro":
  * a Agenda grava a chamada de todos os membros como ausentes sempre que o líder edita
@@ -19,8 +23,13 @@
  */
 export const MEETING_ENGAGEMENT_VISIBILITY = `(
   meeting_date <= CURRENT_DATE
-  OR EXISTS (SELECT 1 FROM attendance a WHERE a.meeting_id = meetings.id AND a.is_present = TRUE)
-  OR EXISTS (SELECT 1 FROM attendance_guests ag WHERE ag.meeting_id = meetings.id)
+  OR (
+    COALESCE(meetings.meeting_type, 'regular') <> 'special_event'
+    AND (
+      EXISTS (SELECT 1 FROM attendance a WHERE a.meeting_id = meetings.id AND a.is_present = TRUE)
+      OR EXISTS (SELECT 1 FROM attendance_guests ag WHERE ag.meeting_id = meetings.id)
+    )
+  )
 )`;
 
 /** Versão em uma linha, pronta para interpolar em SQL. */
